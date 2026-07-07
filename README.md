@@ -1,43 +1,35 @@
-# IndoorIPS
+# IndoorIPS (Indoor Positioning System via PDR)
 
-Sistema de Posicionamento Indoor (IPS) baseado em Pedestrian Dead Reckoning
-(PDR), utilizando apenas sensores de smartphone (acelerômetro, giroscópio,
-magnetômetro, barômetro) — sem Wi-Fi, BLE, RFID, UWB, GPS ou visão
-computacional.
+Sistema de Posicionamento Indoor (IPS) baseado em **Pedestrian Dead Reckoning (PDR)**. Este projeto rastreia a trajetória de um usuário em ambientes fechados utilizando exclusivamente dados de sensores inerciais e ambientais de smartphones (Acelerômetro, Giroscópio, Magnetômetro e Barômetro), sem qualquer dependência de infraestruturas externas como Wi-Fi, BLE, RFID, UWB, GPS ou visão computacional.
 
-## Status do desenvolvimento
+## 🧠 Core Features (Pipeline PDR)
+* **Sincronização de Sensores:** Leitura paralela e validação de timestamps.
+* **Filtro Butterworth:** Atenuação de ruídos de alta frequência para destacar o padrão de caminhada humano.
+* **Estimativa de Orientação (Madgwick):** Fusão sensorial (MARG) para rastreamento preciso do Yaw em 3D, minimizando deriva.
+* **Modelo de Weinberg:** Estimativa dinâmica do comprimento do passo (Step Length) baseada na amplitude da aceleração.
+* **Integração Trigonométrica:** Projeção de deslocamento iterativo em um mapa 2D.
+* **Estimativa de Altitude:** Uso da fórmula barométrica para detecção de mudança de andares.
 
-Construído em etapas incrementais. Progresso atual:
+## 📂 Estrutura da Arquitetura (Padrão SOLID)
 
-- [x] Etapa 0 — Estrutura do projeto
-- [x] Etapa 1 — Leitura dos sensores
-- [ ] Etapa 2 — Magnitude da aceleração
-- [ ] Etapa 3 — Filtragem
-- [ ] Etapa 4 — Detecção de passos
-- [ ] Etapa 5 — Cadência
-- [ ] Etapa 6 — Comprimento do passo
-- [ ] Etapa 7 — Fusão sensorial (Madgwick)
-- [ ] Etapa 8 — Orientação (quaternion → Euler)
-- [ ] Etapa 9 — Atualização da posição
-- [ ] Etapa 10 — Barômetro (altitude / detecção de andar)
-- [ ] Etapa 11 — Fingerprint magnético
-- [ ] Etapa 12 — Map Matching
-- [ ] Etapa 13 — Particle Filter (interfaces)
-- [ ] Etapa 14 — Navegação (Dijkstra/A*/Theta*/JPS)
-- [ ] Etapa 15 — Integração final (main.py)
-
-## Estrutura
-
-```
+```text
 IndoorIPS/
-├── sensors/     # Leitura dos sensores (Etapa 1) ✅
-├── filters/     # Filtragem de sinal (Etapa 3)
-├── pdr/         # Núcleo do PDR: magnitude, passos, cadência, fusão, posição
-├── map/         # Map matching e grafo de navegação
-├── datasets/    # Datasets de exemplo/teste
-├── tests/       # Testes unitários por módulo
-├── examples/    # Scripts de demonstração de cada módulo
-└── main.py      # Ponto de entrada (integração final)
+├── datasets/    # Conjuntos de dados (CSV) para testes e simulação
+├── filters/     # Processamento de sinais contínuos
+│   ├── butterworth.py       # Passa-baixa
+│   ├── madgwick.py          # Fusão Sensorial MARG
+│   └── quaternion.py        # Matemática espacial livre de Gimbal Lock
+├── pdr/         # Núcleo da Lógica de Negócio Discreta
+│   ├── altitude.py          # Cálculo barométrico
+│   ├── steps.py             # Detecção de picos e Modelo de Weinberg
+│   └── tracker.py           # Integração trigonométrica (Posição X, Y)
+├── sensors/     # Camada de Infraestrutura e Domínio de Dados
+│   ├── sensor_sample.py     # Entidade rica sincronizada
+│   ├── repository.py        # Padrão Repository (Abstração de fonte de dados)
+│   └── (leitores individuais por componente)
+├── map/         # Map matching e grafo de navegação (Próximos passos)
+├── tests/       # Testes unitários focados em TDD
+└── main.py      # Entrypoint (Pipeline e Visualização Gráfica)
 ```
 
 ## Instalação
