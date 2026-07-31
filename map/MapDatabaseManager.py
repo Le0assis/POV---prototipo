@@ -15,24 +15,33 @@ class MapDatabaseManager:
         
         if succsses:
             print(f"Checkpoint {name} adicionado com sucesso")
+            return True
         else:
             print(f"Erro ao adicionar checkpoint {name}")
-
+            return False
+        
     def save_edge(self, source: str, target: str, distance: float, heading_rad: float):
         """Executa os INSERTS na tabela de arestas para salvar a ida e a volta."""
         sql = """INSERT INTO edges (source_node, target_node, distance_m, heading_rad) 
                  VALUES (%s, %s, %s, %s)"""
         
         # 1. Salva o caminho de IDA (Source -> Target)
-        self.db.executar_comando(sql, (source, target, distance, heading_rad))
+        succes = self.db.executar_comando(sql, (source, target, distance, heading_rad))
         
         # 2. Calcula o ângulo inverso de VOLTA em radianos (Target -> Source)
         # Adiciona 180 graus (pi radianos) e usa o mod (2*pi) para manter entre 0 e 2*pi
         inverse_heading = (heading_rad + np.pi) % (2 * np.pi)
         
         # 3. Salva o caminho de VOLTA (Target -> Source)
-        self.db.executar_comando(sql, (target, source, distance, inverse_heading))
+        succes_back = self.db.executar_comando(sql, (target, source, distance, inverse_heading))
         
+        if succes and succes_back:
+            print("Edge com {target, source} de ida e volta foi adicionado com suceso ")
+            return True
+        else:
+            print(f"Erro ao adicionar edge com {target, source}")
+            return False
+                
     def load_map_into_system(self, topo_map) -> None:
         """Carrega todos os dados persistidos no MySQL e reconstrói o grafo na memória."""
         

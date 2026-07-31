@@ -2,6 +2,10 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, status, Query
 from pydantic import BaseModel
 from typing import List
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 from datasets.ManagerDatabase import ConexaoBD
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
@@ -20,8 +24,15 @@ class StepEvent:
 # --- INICIALIZAÇÃO DA INFRAESTRUTURA DA API ---
 app = FastAPI(
     title="Indoor IPS API Server",
-    description="Backend HTTP para mapeamento e localização indoor em tempo real via sensores mobile.",
-    version="1.0.0"
+    description="Backend HTTP para mapeamento e localização indoor em tempo real via sensores mobile."
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],      # Libera acesso para qualquer origem (Swagger, Celular, Web)
+    allow_credentials=True,
+    allow_methods=["*"],      # Libera todos os métodos HTTP (POST, GET, OPTIONS, etc)
+    allow_headers=["*"],      # Libera todos os cabeçalhos
 )
 
 db = ConexaoBD(host="localhost", database="POV", user="root", password="")
@@ -162,9 +173,25 @@ def get_route(
         "total_nodes_to_cross": len(calculated_path)
     }
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# --- ENDPOINT DA LOCALIZAÇÃO ATUAL ---
+@app.get("/api/current_location")
+def get_current_location():
+    """Retorna o nó atual e a distância acumulada onde o usuário está no momento."""
+    return {
+        "current_node": getattr(matcher, 'current_node', getattr(matcher, 'current_state', 'Desconhecido')),
+        "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0)
+    }
+    
+#EndPoint raiz do projeto
+@app.get("/")
+def read_index():
+    return FileResponse("static/index.html")
 
 # --- FINALIZAÇÃO LIMPA DO SERVIDOR ---
 @app.on_event("shutdown")
 def shutdown_event():
     """Fecha os seletores de conexão de rede de forma limpa ao derrubar o servidor Uvicorn."""
     db.desconectar()
+    

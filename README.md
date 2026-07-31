@@ -1,3 +1,6 @@
+uvicorn api.app:app --reload 
+
+
 # IndoorIPS (Indoor Positioning System via PDR)
 
 Sistema de Posicionamento Indoor (IPS) baseado em **Pedestrian Dead Reckoning (PDR)**. Este projeto rastreia a trajetória de um usuário em ambientes fechados utilizando exclusivamente dados de sensores inerciais e ambientais de smartphones (Acelerômetro, Giroscópio, Magnetômetro e Barômetro), sem qualquer dependência de infraestruturas externas como Wi-Fi, BLE, RFID, UWB, GPS ou visão computacional.

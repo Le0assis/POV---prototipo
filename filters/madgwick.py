@@ -28,6 +28,7 @@ que a expõe atrás da interface `AttitudeEstimator` do projeto — assim,
 """
 
 from __future__ import annotations
+import numpy as np
 
 from ahrs.filters import Madgwick as _AhrsMadgwick  #type: ignore
 
@@ -74,3 +75,30 @@ class MadgwickAttitudeEstimator(AttitudeEstimator):
         )
         self._orientation = Quaternion.from_array(q_updated).normalized()
         return self._orientation
+
+    def update_series(self, samples: list) -> list[Quaternion]:
+        """Processa uma série de amostras temporalmente e atualiza a orientação passo a passo."""
+        quaternions: list[Quaternion] = []
+        
+        for i in range(len(samples)):
+            s = samples[i]
+            
+            # 1. Calcula o delta de tempo (dt) entre a amostra atual e a anterior
+            if i == 0:
+                dt = 0.02  # Valor padrão inicial (ex: 50 Hz = 1/50 = 0.02s)
+            else:
+                dt = s.timestamp - samples[i - 1].timestamp
+                # Proteção caso haja timestamps iguais ou com erro no CSV
+                if dt <= 0:
+                    dt = 0.02
+
+            q_current = self.update(
+                gx=s.gx, gy=s.gy, gz=s.gz,
+                ax=s.ax,   ay=s.ay,   az=s.az,
+                mx=s.mx,   my=s.my,   mz=s.mz,
+                dt=dt
+            )
+            
+            quaternions.append(q_current)
+            
+        return quaternions

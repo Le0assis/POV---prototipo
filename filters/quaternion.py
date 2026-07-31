@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
+import math
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,3 +138,10 @@ class Quaternion:
         yaw = np.arctan2(siny_cosp, cosy_cosp)
 
         return float(roll), float(pitch), float(yaw)
+    
+    @property
+    def yaw(self) -> float:
+        """Calcula e retorna o ângulo Yaw (orientação 2D em radianos)."""
+        siny_cosp = 2.0 * (self.w * self.z + self.x * self.y)
+        cosy_cosp = 1.0 - 2.0 * (self.y * self.y + self.z * self.z)
+        return math.atan2(siny_cosp, cosy_cosp)

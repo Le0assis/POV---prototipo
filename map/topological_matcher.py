@@ -61,3 +61,8 @@ class TopologicalMatcher:
 
         # 6. Retorna sempre onde o utilizador está agora (seja o mesmo nó ou o novo)
         return self.current_node_name
+    
+    @property
+    def current_node(self) -> str:
+        """Expose o nó atual de forma limpa para a API."""
+        return self.current_node_name

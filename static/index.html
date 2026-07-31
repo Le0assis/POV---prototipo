@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV - Localização Indoor</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .card { background: #1e293b; border-radius: 20px; padding: 30px; width: 100%; max-width: 450px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); text-align: center; border: 1px solid #334155; }
+        .badge { display: inline-block; padding: 6px 16px; border-radius: 50px; background: #0284c7; color: white; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+        .location-box { background: #0f172a; border-radius: 16px; padding: 25px; margin: 20px 0; border: 2px solid #38bdf8; }
+        .location-title { font-size: 0.9rem; color: #94a3b8; text-transform: uppercase; }
+        .location-name { font-size: 2.2rem; font-weight: bold; color: #38bdf8; margin-top: 5px; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+        .stat-item { background: #334155; padding: 15px; border-radius: 12px; }
+        .stat-label { font-size: 0.8rem; color: #cbd5e1; }
+        .stat-value { font-size: 1.3rem; font-weight: bold; color: #f1f5f9; margin-top: 4px; }
+        .status-dot { display: inline-block; width: 10px; height: 10px; background-color: #22c55e; border-radius: 50%; margin-right: 6px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <span class="badge"><span class="status-dot"></span> Sistema Ativo</span>
+        <h2>Localização em Tempo Real</h2>
+        
+        <div class="location-box">
+            <div class="location-title">Cômodo / Nó Atual</div>
+            <div class="location-name" id="current-node">Aguardando...</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-item">
+                <div class="stat-label">Distância Trecho</div>
+                <div class="stat-value" id="accumulated-dist">0.00 m</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Última Atualização</div>
+                <div class="stat-value" id="last-update">--:--:--</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Consulta o estado do backend a cada 500ms
+        async function fetchLocation() {
+            try {
+                const response = await fetch('/api/current_location');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    document.getElementById('current-node').innerText = data.current_node || "Desconhecido";
+                    document.getElementById('accumulated-dist').innerText = (data.accumulated_distance_m || 0).toFixed(2) + " m";
+                    
+                    const now = new Date();
+                    document.getElementById('last-update').innerText = now.toLocaleTimeString();
+                }
+            } catch (err) {
+                console.error("Erro ao buscar localização:", err);
+            }
+        }
+
+        // Atualiza a tela automaticamente a cada meio segundo
+        setInterval(fetchLocation, 500);
+    </script>
+</body>
+</html>
