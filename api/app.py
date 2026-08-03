@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+
 from datasets.ManagerDatabase import ConexaoBD
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
@@ -58,7 +59,7 @@ except Exception as e:
 # Caso a 'Recepcao' não exista inicialmente no banco, o matcher tratará o estado assim que definido.
 starting_node = "Recepcao"
 matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
-
+visited_path = [starting_node]
 
 # --- CONFIGURAÇÃO DOS SCHEMAS DE VALIDAÇÃO (PYDANTIC) ---
 class CheckpointSchema(BaseModel):
@@ -134,6 +135,9 @@ def localize_user(sensor_data: StepSensorSchema):
         # Invoca o algoritmo de correspondência topológica (Máquina de Estados)
         current_node = matcher.process_step(step=step_event, current_yaw_rad=sensor_data.yaw_rad) #type: ignore
         
+        if visited_path and visited_path[-1] != current_node:
+            visited_path.append(current_node)
+        
         return {
             "status": "success",
             "current_node": current_node,
@@ -181,9 +185,26 @@ def get_current_location():
     """Retorna o nó atual e a distância acumulada onde o usuário está no momento."""
     return {
         "current_node": getattr(matcher, 'current_node', getattr(matcher, 'current_state', 'Desconhecido')),
-        "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0)
+        "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0),
+        "visited_path": visited_path
     }
     
+    
+# --- ENDPOINT 5: RETORNAR O MAPA COMPLETO COM COORDENADAS 2D ---
+@app.get("/api/map", status_code=status.HTTP_200_OK)
+def get_map_layout():
+    """Endpoint limpo: delega o cálculo geométrico para a classe TopologicalMap."""
+    layout = topo_map.get_map_layout()
+    return {
+        "status": "success",
+        "nodes": layout["nodes"],
+        "edges": layout["edges"]
+    }
+
+@app.get("/recorder")
+def read_recorder():
+    return FileResponse("static/recorder.html")
+
 #EndPoint raiz do projeto
 @app.get("/")
 def read_index():

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV - Navegação Indoor 2D</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        
+        .container { width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 20px; }
+        
+        /* Painel Superior de Controle */
+        .header-card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 15px; }
+        .location-info h3 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; }
+        .location-info h1 { font-size: 1.8rem; color: #38bdf8; margin-top: 4px; }
+        
+        .route-picker { display: flex; align-items: center; gap: 10px; }
+        select { background: #0f172a; color: #f8fafc; border: 1px solid #0284c7; padding: 10px 14px; border-radius: 8px; font-size: 0.95rem; outline: none; }
+        
+        /* Canvas do Mapa 2D */
+        .map-card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; display: flex; justify-content: center; align-items: center; position: relative; }
+        canvas { background: #090d16; border-radius: 12px; width: 100%; height: 480px; }
+
+        /* Legenda */
+        .legend { display: flex; gap: 20px; justify-content: center; font-size: 0.85rem; color: #cbd5e1; margin-top: 10px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- PAINEL DE INFORMAÇÕES E SELEÇÃO DE ROTA -->
+    <div class="header-card">
+        <div class="location-info">
+            <h3>Sua Posição Atual</h3>
+            <h1 id="current-node">Carregando...</h1>
+            <span id="accumulated-dist" style="font-size: 0.85rem; color: #94a3b8;">Distância trecho: 0.00m</span>
+        </div>
+
+        <div class="route-picker">
+            <label for="dest-select" style="font-size: 0.9rem; color: #cbd5e1;">Navegar para:</label>
+            <select id="dest-select" onchange="onRequestRoute()">
+                <option value="">-- Selecione o Destino --</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- CANVAS ONDE O MAPA É DESENHADO -->
+    <div class="map-card">
+        <canvas id="mapCanvas" width="800" height="480"></canvas>
+    </div>
+
+    <!-- LEGENDA DO MAPA -->
+    <div class="legend">
+        <div class="legend-item"><div class="dot" style="background: #38bdf8;"></div> Cômodos (Nós)</div>
+        <div class="legend-item"><div class="dot" style="background: #ef4444;"></div> Você Aqui</div>
+        <div class="legend-item"><div class="dot" style="background: #22c55e;"></div> Rota Gerada (Dijkstra)</div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let mapData = { nodes: [], edges: [] };
+    let currentNode = null;
+    let currentRoute = [];
+
+    // 1. Carrega a estrutura de Nós e Arestas do Backend
+    async function loadMapLayout() {
+        try {
+            const res = await fetch('/api/map');
+            const data = await res.json();
+            if (data.status === 'success') {
+                mapData = data;
+                populateDestinations(data.nodes);
+                drawMap();
+            }
+        } catch (err) {
+            console.error("Erro ao carregar o mapa:", err);
+        }
+    }
+
+    // Popula o dropdown de navegação com os cômodos disponíveis
+    function populateDestinations(nodes) {
+        const select = document.getElementById('dest-select');
+        select.innerHTML = '<option value="">-- Selecione o Destino --</option>';
+        nodes.forEach(n => {
+            const option = document.createElement('option');
+            option.value = n.id;
+            option.textContent = n.label;
+            select.appendChild(option);
+        });
+    }
+
+    // 2. Atualiza a Posição do Usuário via Polling
+    async function fetchUserLocation() {
+        try {
+            const res = await fetch('/api/current_location');
+            const data = await res.json();
+            
+            currentNode = data.current_node;
+            document.getElementById('current-node').innerText = currentNode || 'Aguardando...';
+            document.getElementById('accumulated-dist').innerText = `Distância trecho: ${(data.accumulated_distance_m || 0).toFixed(2)}m`;
+            
+            drawMap();
+        } catch (err) {
+            console.error("Erro ao buscar posição:", err);
+        }
+    }
+
+    // 3. Solicita Rota para o Endpoint do Dijkstra
+    async function onRequestRoute() {
+        const dest = document.getElementById('dest-select').value;
+        if (!dest || !currentNode) {
+            currentRoute = [];
+            drawMap();
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/route?start=${encodeURIComponent(currentNode)}&end=${encodeURIComponent(dest)}`);
+            if (res.ok) {
+                const data = await res.json();
+                currentRoute = data.path_sequence || [];
+            } else {
+                currentRoute = [];
+            }
+        } catch (err) {
+            currentRoute = [];
+        }
+        drawMap();
+    }
+
+    // 4. MOTOR DE RENDERIZAÇÃO DO CANVAS 2D
+    function drawMap() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (!mapData.nodes.length) return;
+
+        // Auto-Scale: Ajusta as coordenadas físicas para servirem dentro do Canvas
+        const margin = 60;
+        const xs = mapData.nodes.map(n => n.x);
+        const ys = mapData.nodes.map(n => n.y);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+
+        const rangeX = (maxX - minX) || 1;
+        const rangeY = (maxY - minY) || 1;
+
+        function toScreenX(x) { return margin + ((x - minX) / rangeX) * (canvas.width - 2 * margin); }
+        function toScreenY(y) { return margin + ((y - minY) / rangeY) * (canvas.height - 2 * margin); }
+
+        // Mapeia posições em pixels
+        const posMap = {};
+        mapData.nodes.forEach(n => {
+            posMap[n.id] = { x: toScreenX(n.x), y: toScreenY(n.y) };
+        });
+
+        // A) Desenha as Arestas (Corredores)
+        mapData.edges.forEach(e => {
+            const p1 = posMap[e.source];
+            const p2 = posMap[e.target];
+            if (!p1 || !p2) return;
+
+            // Verifica se esta aresta faz parte do caminho calculado pelo Dijkstra
+            const isRouteEdge = isEdgeInRoute(e.source, e.target);
+
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineWidth = isRouteEdge ? 6 : 2;
+            ctx.strokeStyle = isRouteEdge ? '#22c55e' : '#334155'; // Verde para rota, Cinza para normal
+            ctx.stroke();
+        });
+
+        // B) Desenha os Nós (Cômodos)
+        mapData.nodes.forEach(n => {
+            const p = posMap[n.id];
+            const isUserHere = (n.id === currentNode);
+
+            // Círculo do Nó
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, isUserHere ? 14 : 10, 0, 2 * Math.PI);
+            ctx.fillStyle = isUserHere ? '#ef4444' : '#38bdf8'; // Vermelho se for a posição atual, azul normal
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+
+            // Nome do Cômodo
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = isUserHere ? 'bold 13px Segoe UI' : '11px Segoe UI';
+            ctx.textAlign = 'center';
+            ctx.fillText(n.label, p.x, p.y - 18);
+        });
+    }
+
+    function isEdgeInRoute(u, v) {
+        if (currentRoute.length < 2) return false;
+        for (let i = 0; i < currentRoute.length - 1; i++) {
+            if ((currentRoute[i] === u && currentRoute[i+1] === v) ||
+                (currentRoute[i] === v && currentRoute[i+1] === u)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Inicialização
+    loadMapLayout();
+    setInterval(fetchUserLocation, 500); // Atualiza posição 2x por segundo
+</script>
+</body>
+</html>

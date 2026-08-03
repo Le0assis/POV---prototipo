@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV - Gravador de Sensores Indoor</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 20px; }
+        .card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; }
+        h2 { color: #38bdf8; margin-bottom: 10px; font-size: 1.4rem; }
+        .form-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
+        label { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; }
+        select, input { background: #0f172a; color: #f8fafc; border: 1px solid #0284c7; padding: 12px; border-radius: 8px; font-size: 1rem; outline: none; }
+        
+        .btn-record { background: #22c55e; color: white; border: none; padding: 16px; border-radius: 12px; font-size: 1.2rem; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s; }
+        .btn-record.recording { background: #ef4444; }
+        
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+        .stat-card { background: #0f172a; padding: 15px; border-radius: 10px; text-align: center; }
+        .stat-value { font-size: 1.8rem; font-weight: bold; color: #38bdf8; }
+        .stat-label { font-size: 0.75rem; color: #cbd5e1; }
+        
+        .alert { background: #0284c7; color: white; padding: 12px; border-radius: 8px; font-size: 0.85rem; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card">
+        <h2>📱 Gravação de Trajeto com Sensores</h2>
+        <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 15px;">
+            Selecione o trecho, clique em Iniciar, caminhe até o destino e finalize para salvar a conexão no banco.
+        </p>
+
+        <div class="form-group">
+            <label for="src-select">Origem (Onde você está):</label>
+            <select id="src-select"><option value="">Carregando nó...</option></select>
+        </div>
+
+        <div class="form-group">
+            <label for="tgt-select">Destino (Para onde vai):</label>
+            <select id="tgt-select"><option value="">Carregando nó...</option></select>
+        </div>
+
+        <button id="record-btn" class="btn-record" onclick="toggleRecording()">▶️ Iniciar Captura</button>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Passos Detectados</div>
+                <div class="stat-value" id="step-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Distância Est.</div>
+                <div class="stat-value" id="dist-m">0.00m</div>
+            </div>
+            <div class="stat-card" style="grid-column: span 2;">
+                <div class="stat-label">Orientação Média (Yaw)</div>
+                <div class="stat-value" id="yaw-rad">0.00 rad</div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert" style="display: none;"></div>
+</div>
+
+<script>
+    let isRecording = false;
+    let stepCount = 0;
+    let yawAccumulator = [];
+    let lastAccelMag = 0;
+    let lastStepTime = 0;
+    const STEP_LENGTH_ESTIMATE = 0.75; // Tamanho médio do passo em metros
+
+    // 1. Carrega Nós existentes para os seletores
+    async function loadNodes() {
+        try {
+            const res = await fetch('/api/map');
+            const data = await res.json();
+            if (data.status === 'success') {
+                const src = document.getElementById('src-select');
+                const tgt = document.getElementById('tgt-select');
+                src.innerHTML = '<option value="">Selecione Origem</option>';
+                tgt.innerHTML = '<option value="">Selecione Destino</option>';
+                
+                data.nodes.forEach(n => {
+                    src.innerHTML += `<option value="${n.id}">${n.label}</option>`;
+                    tgt.innerHTML += `<option value="${n.id}">${n.label}</option>`;
+                });
+            }
+        } catch(e) { console.error("Erro ao carregar nós:", e); }
+    }
+
+    // 2. Controla o Estado da Gravação
+    async function toggleRecording() {
+        const btn = document.getElementById('record-btn');
+        const src = document.getElementById('src-select').value;
+        const tgt = document.getElementById('tgt-select').value;
+
+        if (!isRecording) {
+            if (!src || !tgt || src === tgt) {
+                alert("Por favor, selecione uma Origem e um Destino válidos (e diferentes).");
+                return;
+            }
+
+            // Solicita permissão de sensores em dispositivos iOS/Safari modernos
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                const permission = await DeviceMotionEvent.requestPermission();
+                if (permission !== 'granted') return alert("Permissão para usar sensores negada!");
+            }
+
+            // Inicia os escutadores dos sensores físicos do celular
+            window.addEventListener('devicemotion', handleMotion);
+            window.addEventListener('deviceorientation', handleOrientation);
+
+            isRecording = true;
+            stepCount = 0;
+            yawAccumulator = [];
+            btn.innerText = "⏹️ Parar e Salvar no Banco";
+            btn.classList.add('recording');
+            showStatus("Sensores ativos! Caminhe em direção ao destino...");
+        } else {
+            // Para a captura
+            window.removeEventListener('devicemotion', handleMotion);
+            window.removeEventListener('deviceorientation', handleOrientation);
+
+            isRecording = false;
+            btn.innerText = "▶️ Iniciar Captura";
+            btn.classList.remove('recording');
+
+            // Calcula valores finais
+            const finalDist = stepCount * STEP_LENGTH_ESTIMATE;
+            const avgYaw = yawAccumulator.length > 0 
+                ? yawAccumulator.reduce((a, b) => a + b, 0) / yawAccumulator.length 
+                : 0.0;
+
+            await saveRecordedEdge(src, tgt, finalDist, avgYaw);
+        }
+    }
+
+    // 3. Processamento de Aceleração em Tempo Real (PDR no Navegador Mobile)
+    function handleMotion(event) {
+        if (!isRecording) return;
+
+        const acc = event.accelerationIncludingGravity || event.acceleration;
+        if (!acc || acc.x === null) return;
+
+        // Calcula a Magnitude |a| = sqrt(x^2 + y^2 + z^2)
+        const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+        const now = Date.now();
+
+        // Algoritmo simples de Detecção de Picos para contagem de passos local
+        // (Detecta pico de aceleração da pisada > 12.0 m/s² com intervalo mínimo de 350ms)
+        if (mag > 12.0 && (now - lastStepTime) > 350) {
+            stepCount++;
+            lastStepTime = now;
+
+            document.getElementById('step-count').innerText = stepCount;
+            document.getElementById('dist-m').innerText = (stepCount * STEP_LENGTH_ESTIMATE).toFixed(2) + "m";
+        }
+        lastAccelMag = mag;
+    }
+
+    // 4. Captura de Orientação (Giroscópio / Bússola Mobile)
+    function handleOrientation(event) {
+        if (!isRecording) return;
+        
+        // Alpha representa a rotação em torno do eixo Z (0 a 360 graus)
+        let alpha = event.alpha || 0;
+        let yawRad = alpha * (Math.PI / 180.0); // Converte para radianos
+        
+        yawAccumulator.push(yawRad);
+        document.getElementById('yaw-rad').innerText = yawRad.toFixed(2) + " rad";
+    }
+
+    // 5. Envia a Aresta Mapeada direto para o MySQL via API
+    async function saveRecordedEdge(source, target, distance, heading) {
+        showStatus("Enviando medição dos sensores para o banco...");
+
+        try {
+            const res = await fetch('/api/edges', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source: source,
+                    target: target,
+                    distance_m: distance,
+                    heading_rad: heading
+                })
+            });
+
+            if (res.ok) {
+                alert(`✅ Trecho de '${source}' para '${target}' mapeado com sucesso!\nDistância: ${distance.toFixed(2)}m`);
+                showStatus("Gravado com sucesso no MySQL!");
+            } else {
+                alert("Erro ao salvar trecho no banco de dados.");
+            }
+        } catch (err) {
+            console.error("Erro na requisição:", err);
+            alert("Falha de conexão com a API.");
+        }
+    }
+
+    function showStatus(msg) {
+        const el = document.getElementById('status-msg');
+        el.innerText = msg;
+        el.style.display = 'block';
+    }
+
+    loadNodes();
+</script>
+</body>
+</html>
