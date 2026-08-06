@@ -1,0 +1,36 @@
+# Python (Cache e Ambientes Virtuais)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Frontend (Node / Vue.js)
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+.npm/
+npm-debug.log*
+
+# Credenciais e Seguranca (Cloudflare / Envs)
+cloudflared-credentials.json
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Banco de Dados Local e Logs
+*.db
+*.sqlite3
+*.log
+
+# IDEs e Sistema Operacional
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
