@@ -1,0 +1,7 @@
+tunnel: 5fcab4d8-67b9-495e-b2d9-548f69246fc6
+credentials-file: cloudflared-credentials.json
+
+ingress:
+  - hostname: api.pov-unimar.com
+    service: http://localhost:8000
+  - service: http_status:404

@@ -28,12 +28,19 @@ app = FastAPI(
     description="Backend HTTP para mapeamento e localização indoor em tempo real via sensores mobile."
 )
 
+origins = [
+    "https://pov-unimar.com",
+    "https://www.pov-unimar.com",
+    "http://localhost",
+    "http://127.0.0.1:8000"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # Libera acesso para qualquer origem (Swagger, Celular, Web)
+    allow_origins=["*"],  
     allow_credentials=True,
-    allow_methods=["*"],      # Libera todos os métodos HTTP (POST, GET, OPTIONS, etc)
-    allow_headers=["*"],      # Libera todos os cabeçalhos
+    allow_methods=["*"], 
+    allow_headers=["*"],  
 )
 
 db = ConexaoBD(host="localhost", database="POV", user="root", password="")

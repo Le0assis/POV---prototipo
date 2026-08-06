@@ -1,0 +1,296 @@
+<html>frontend/index.html</html><!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV - Mapeamento e Localização Indoor 2D</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { width: 100%; max-width: 950px; display: flex; flex-direction: column; gap: 20px; }
+        
+        /* Modos / Abas */
+        .mode-selector { display: flex; gap: 10px; }
+        .mode-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .mode-btn.active { background: #0284c7; color: white; border-color: #38bdf8; }
+
+        /* Painel Superior */
+        .card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; }
+        .header-card { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 15px; }
+        
+        /* Formulários de Mapeamento */
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px; }
+        .form-group { display: flex; flex-direction: column; gap: 8px; background: #0f172a; padding: 15px; border-radius: 10px; }
+        input, select, button { background: #1e293b; color: #f8fafc; border: 1px solid #0284c7; padding: 10px; border-radius: 6px; outline: none; }
+        button.submit-btn { background: #0284c7; color: white; font-weight: bold; cursor: pointer; border: none; margin-top: 5px; }
+        button.submit-btn:hover { background: #0369a1; }
+
+        /* Canvas do Mapa 2D */
+        canvas { background: #090d16; border-radius: 12px; width: 100%; height: 480px; }
+
+        /* Legenda */
+        .legend { display: flex; gap: 20px; justify-content: center; font-size: 0.85rem; color: #cbd5e1; margin-top: 10px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- SELEÇÃO DE MODO DE USO -->
+    <div class="mode-selector">
+        <button id="btn-mode-nav" class="mode-btn active" onclick="switchMode('nav')">📍 Modo Navegação</button>
+        <button id="btn-mode-map" class="mode-btn" onclick="switchMode('map')">🗺️ Modo Mapeador (Gravar Mapa)</button>
+        <a href="/recorder"> <button id="btn-mode-map" class="mode-btn">Modo de Gravacao</button></a>
+    </div>
+
+    <!-- PAINEL DE NAVEGAÇÃO -->
+    <div id="panel-nav" class="card header-card">
+        <div>
+            <h3 style="font-size: 0.85rem; color: #94a3b8; text-transform: uppercase;">Posição Atual</h3>
+            <h1 id="current-node" style="color: #38bdf8;">Carregando...</h1>
+            <span id="accumulated-dist" style="font-size: 0.85rem; color: #94a3b8;">Distância trecho: 0.00m</span>
+        </div>
+        <div>
+            <label for="dest-select" style="font-size: 0.9rem; color: #cbd5e1;">Navegar para (Dijkstra):</label><br>
+            <select id="dest-select" onchange="onRequestRoute()" style="margin-top: 5px; min-width: 200px;">
+                <option value="">-- Selecione o Destino --</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- PAINEL MAPEADOR (GRAVAR MAPA NO MYSQL) -->
+    <div id="panel-map" class="card" style="display: none;">
+        <h3>Cadastrar Elementos no Banco de Dados</h3>
+        <div class="form-grid">
+            <!-- Form 1: Cadastrar Checkpoint -->
+            <div class="form-group">
+                <h4>1. Novo Checkpoint (Cômodo)</h4>
+                <input type="text" id="chk-name" placeholder="Ex: Sala 102">
+                <button class="submit-btn" onclick="saveCheckpoint()">Salvar Cômodo</button>
+            </div>
+            <!-- Form 2: Cadastrar Conexão -->
+            <div class="form-group">
+                <h4>2. Nova Conexão (Corredor)</h4>
+                <select id="edge-source"><option value="">Origem</option></select>
+                <select id="edge-target"><option value="">Destino</option></select>
+                <input type="number" step="0.1" id="edge-dist" placeholder="Distância (metros)">
+                <input type="number" step="0.01" id="edge-heading" placeholder="Ângulo/Orientação (radianos)">
+                <button class="submit-btn" onclick="saveEdge()">Salvar Conexão</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CANVAS DO MAPA 2D -->
+    <div class="card">
+        <canvas id="mapCanvas" width="900" height="480"></canvas>
+    </div>
+
+    <!-- LEGENDA -->
+    <div class="legend">
+        <div class="legend-item"><div class="dot" style="background: #38bdf8;"></div> Cômodos</div>
+        <div class="legend-item"><div class="dot" style="background: #ef4444;"></div> Você Aqui</div>
+        <div class="legend-item"><div class="dot" style="background: #38bdf8; border: 2px solid #06b6d4;"></div> Caminho Real Percorrido</div>
+        <div class="legend-item"><div class="dot" style="background: #22c55e;"></div> Rota Planejada (Dijkstra)</div>
+    </div>
+</div>
+
+
+<script>
+    
+    const API_BASE_URL = "https://api.pov-unimar.com";
+
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let mapData = { nodes: [], edges: [] };
+    let currentNode = null;
+    let currentRoute = [];
+    let visitedPath = [];
+
+    function switchMode(mode) {
+        document.getElementById('panel-nav').style.display = (mode === 'nav') ? 'flex' : 'none';
+        document.getElementById('panel-map').style.display = (mode === 'map') ? 'block' : 'none';
+        document.getElementById('btn-mode-nav').classList.toggle('active', mode === 'nav');
+        document.getElementById('btn-mode-map').classList.toggle('active', mode === 'map');
+    }
+
+    // 1. CARREGA O MAPA DO BACKEND (LAYOUT 2D)
+    async function loadMapLayout() {
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/map`);
+            const data = await res.json();
+            if (data.status === 'success') {
+                mapData = data;
+                populateSelects(data.nodes);
+                drawMap();
+            }
+        } catch (err) { console.error("Erro ao carregar mapa:", err); }
+    }
+
+    function populateSelects(nodes) {
+        const destSelect = document.getElementById('dest-select');
+        const srcSelect = document.getElementById('edge-source');
+        const tgtSelect = document.getElementById('edge-target');
+
+        destSelect.innerHTML = '<option value="">-- Selecione o Destino --</option>';
+        srcSelect.innerHTML = '<option value="">Origem</option>';
+        tgtSelect.innerHTML = '<option value="">Destino</option>';
+
+        nodes.forEach(n => {
+            destSelect.innerHTML += `<option value="${n.id}">${n.label}</option>`;
+            srcSelect.innerHTML += `<option value="${n.id}">${n.label}</option>`;
+            tgtSelect.innerHTML += `<option value="${n.id}">${n.label}</option>`;
+        });
+    }
+
+    // 2. GRAVAR CHECKPOINT NO BANCO VIA API
+    async function saveCheckpoint() {
+        const name = document.getElementById('chk-name').value.trim();
+        if (!name) return alert("Digite o nome do cômodo.");
+
+        const res = await fetch(`${API_BASE_URL}/api/checkpoints`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: name })
+        });
+        if (res.ok) {
+            alert(`Cômodo '${name}' salvo no banco!`);
+            document.getElementById('chk-name').value = '';
+            loadMapLayout();
+        } else { alert("Erro ao salvar checkpoint."); }
+    }
+
+    // 3. GRAVAR ARESTA/CORREDOR NO BANCO VIA API
+    async function saveEdge() {
+        const source = document.getElementById('edge-source').value;
+        const target = document.getElementById('edge-target').value;
+        const dist = parseFloat(document.getElementById('edge-dist').value);
+        const heading = parseFloat(document.getElementById('edge-heading').value) || 0.0;
+
+        if (!source || !target || isNaN(dist)) return alert("Preencha origem, destino e distância.");
+
+        const res = await fetch(`${API_BASE_URL}/api/edges`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ source, target, distance_m: dist, heading_rad: heading })
+        });
+        if (res.ok) {
+            alert("Conexão salva no banco!");
+            loadMapLayout();
+        } else { alert("Erro ao salvar conexão."); }
+    }
+
+    // 4. CONSULTAR POSIÇÃO E CAMINHO REAL EM TEMPO REAL
+    async function fetchUserLocation() {
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/current_location`);
+            const data = await res.json();
+            
+            currentNode = data.current_node;
+            visitedPath = data.visited_path || [];
+            
+            document.getElementById('current-node').innerText = currentNode || 'Aguardando...';
+            document.getElementById('accumulated-dist').innerText = `Distância trecho: ${(data.accumulated_distance_m || 0).toFixed(2)}m`;
+            
+            drawMap();
+        } catch (err) { console.error("Erro na localização:", err); }
+    }
+
+    async function onRequestRoute() {
+        const dest = document.getElementById('dest-select').value;
+        if (!dest || !currentNode) { currentRoute = []; drawMap(); return; }
+
+        const res = await fetch(`${API_BASE_URL}/api/route?start=${encodeURIComponent(currentNode)}&end=${encodeURIComponent(dest)}`);
+        if (res.ok) {
+            const data = await res.json();
+            currentRoute = data.path_sequence || [];
+        } else { currentRoute = []; }
+        drawMap();
+    }
+
+    // 5. RENDERIZAÇÃO NO CANVAS (NÓS, CORREDORES, ROTA E CAMINHO REAL)
+    function drawMap() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!mapData.nodes.length) return;
+
+        const margin = 60;
+        const xs = mapData.nodes.map(n => n.x), ys = mapData.nodes.map(n => n.y);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+
+        const rangeX = (maxX - minX) || 1, rangeY = (maxY - minY) || 1;
+        function toX(x) { return margin + ((x - minX) / rangeX) * (canvas.width - 2 * margin); }
+        function toY(y) { return margin + ((y - minY) / rangeY) * (canvas.height - 2 * margin); }
+
+        const posMap = {};
+        mapData.nodes.forEach(n => { posMap[n.id] = { x: toX(n.x), y: toY(n.y) }; });
+
+        // A) Arestas Normais (Cinza)
+        mapData.edges.forEach(e => {
+            const p1 = posMap[e.source], p2 = posMap[e.target];
+            if (!p1 || !p2) return;
+
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#334155';
+            ctx.stroke();
+        });
+
+        // B) Rota Planejada do Dijkstra (Linha Verde)
+        if (currentRoute.length > 1) {
+            ctx.beginPath();
+            for (let i = 0; i < currentRoute.length - 1; i++) {
+                const p1 = posMap[currentRoute[i]], p2 = posMap[currentRoute[i+1]];
+                if (p1 && p2) {
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                }
+            }
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = '#22c55e';
+            ctx.stroke();
+        }
+
+        // C) CAMINHO REAL PERCORRIDO (Trilha Azul Ciano Brilhante)
+        if (visitedPath.length > 1) {
+            ctx.beginPath();
+            for (let i = 0; i < visitedPath.length - 1; i++) {
+                const p1 = posMap[visitedPath[i]], p2 = posMap[visitedPath[i+1]];
+                if (p1 && p2) {
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                }
+            }
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#06b6d4';
+            ctx.setLineDash([8, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // D) Nós (Cômodos)
+        mapData.nodes.forEach(n => {
+            const p = posMap[n.id];
+            const isUserHere = (n.id === currentNode);
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, isUserHere ? 14 : 10, 0, 2 * Math.PI);
+            ctx.fillStyle = isUserHere ? '#ef4444' : '#38bdf8';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = isUserHere ? 'bold 13px Segoe UI' : '11px Segoe UI';
+            ctx.textAlign = 'center';
+            ctx.fillText(n.label, p.x, p.y - 18);
+        });
+    }
+
+    loadMapLayout();
+    setInterval(fetchUserLocation, 500);
+</script>
