@@ -79,33 +79,63 @@
     
     <div id="status-msg" class="alert" style="display: none;"></div>
 </div>
-
 <script>
-    const API_BASE_URL = ""; 
+    // Detecta se a página foi aberta via HTTP ou arquivo local (file://)
+    const API_BASE_URL = window.location.protocol.startsWith('http') 
+        ? "" 
+        : "http://127.0.0.1:8000"; 
 
     let isRecording = false;
     let rawSamples = [];
     let currentMag = { alpha: 0, beta: 0, gamma: 0 };
     let gyroHasData = false;
 
+    // Função universal para carregar os nós com tratamento de erros reforçado
     async function loadNodes() {
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/map`);
-            if (res.ok) {
-                const data = await res.json();
-                const srcSel = document.getElementById('src-select');
-                const tgtSel = document.getElementById('tgt-select');
-                
-                srcSel.innerHTML = '<option value="">Selecione a Origem</option>';
-                tgtSel.innerHTML = '<option value="">Selecione o Destino</option>';
+        const srcSel = document.getElementById('src-select');
+        const tgtSel = document.getElementById('tgt-select');
 
-                for (const nodeName in data.nodes) {
-                    srcSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
-                    tgtSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
-                }
+        try {
+            console.log("[SISTEMA] Solicitando mapa em:", `${API_BASE_URL}/api/map`);
+            const res = await fetch(`${API_BASE_URL}/api/map`);
+
+            if (!res.ok) {
+                throw new Error(`Servidor respondeu com status ${res.status}`);
             }
+
+            const data = await res.json();
+            console.log("[SISTEMA] Resposta recebida do /api/map:", data);
+
+            srcSel.innerHTML = '<option value="">Selecione a Origem</option>';
+            tgtSel.innerHTML = '<option value="">Selecione o Destino</option>';
+
+            // Converte os nós recebidos para lista, seja Array ou Dicionário
+            let nodesList = [];
+            if (Array.isArray(data.nodes)) {
+                nodesList = data.nodes;
+            } else if (data.nodes && typeof data.nodes === 'object') {
+                nodesList = Object.keys(data.nodes);
+            }
+
+            if (nodesList.length === 0) {
+                showStatus("⚠️ Banco conectado, mas nenhum checkpoint foi encontrado. Cadastre checkpoints primeiro.");
+                return;
+            }
+
+            // Popula os seletores com os nomes dos nós
+            nodesList.forEach(node => {
+                const nodeName = typeof node === 'object' ? (node.name || node.id) : node;
+                srcSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+                tgtSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+            });
+
+            showStatus("✅ Nós do mapa carregados com sucesso!");
+
         } catch (err) {
-            showStatus("Erro ao conectar na API para carregar o mapa.");
+            console.error("[ERRO CRÍTICO] Falha ao carregar nós:", err);
+            srcSel.innerHTML = '<option value="">Erro ao carregar</option>';
+            tgtSel.innerHTML = '<option value="">Erro ao carregar</option>';
+            showStatus("❌ Erro de conexão com a API. Verifique o console (F12) e acesse via http://localhost:8000");
         }
     }
 
@@ -120,7 +150,6 @@
                 return;
             }
 
-            // Solcita permissão em navegadores iOS Safari
             if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
                 try { await DeviceMotionEvent.requestPermission(); } catch (e) {}
             }
@@ -156,7 +185,6 @@
 
         if (!acc || acc.x === null) return;
 
-        // Extrai giroscópio cobrindo variações de nomes entre Android/iOS
         let gxDeg = 0.0, gyDeg = 0.0, gzDeg = 0.0;
         if (rot) {
             gxDeg = rot.alpha ?? rot.x ?? 0.0;
@@ -171,7 +199,6 @@
         const accMag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
         const gyroMag = Math.sqrt(gxRad**2 + gyRad**2 + gzRad**2);
 
-        // Atualiza status do giroscópio na tela
         const gyroBadge = document.getElementById('gyro-badge');
         if (gyroMag > 0.05) {
             gyroHasData = true;
@@ -182,7 +209,6 @@
             gyroBadge.innerText = "Giroscópio: ZERADO (Aguardando movimento/permissão)";
         }
 
-        // Exibe leituras em tempo real na interface
         document.getElementById('acc-val').innerHTML = 
             `X: ${acc.x.toFixed(2)} | Y: ${acc.y.toFixed(2)} | Z: ${acc.z.toFixed(2)}<br><b>Mag: ${accMag.toFixed(2)} m/s²</b>`;
         
@@ -256,10 +282,12 @@
         el.style.display = 'block';
     }
 
-    // Ativa sensores para escuta ao abrir
-    window.addEventListener('devicemotion', handleMotion);
-    window.addEventListener('deviceorientation', handleOrientation);
-    loadNodes();
-</script>
+    // Garante a execução da busca assim que a estrutura da página carrega
+    document.addEventListener("DOMContentLoaded", () => {
+        window.addEventListener('devicemotion', handleMotion);
+        window.addEventListener('deviceorientation', handleOrientation);
+        loadNodes();
+    });
+</script> 
 </body>
 </html>
