@@ -3,25 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POV - Gravador de Sensores Indoor</title>
+    <title>POV - Gravador & Telemetria de Sensores</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 20px; }
-        .card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; }
-        h2 { color: #38bdf8; margin-bottom: 10px; font-size: 1.4rem; }
-        .form-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
-        label { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; }
-        select, input { background: #0f172a; color: #f8fafc; border: 1px solid #0284c7; padding: 12px; border-radius: 8px; font-size: 1rem; outline: none; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 15px; }
+        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; }
+        .card { background: #1e293b; border-radius: 16px; padding: 18px; border: 1px solid #334155; }
+        h2 { color: #38bdf8; margin-bottom: 10px; font-size: 1.3rem; }
+        .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+        label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; font-weight: bold; }
+        select { background: #0f172a; color: #f8fafc; border: 1px solid #0284c7; padding: 10px; border-radius: 8px; font-size: 0.95rem; outline: none; }
         
-        .btn-record { background: #22c55e; color: white; border: none; padding: 16px; border-radius: 12px; font-size: 1.2rem; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s; }
+        .btn-record { background: #22c55e; color: white; border: none; padding: 14px; border-radius: 12px; font-size: 1.1rem; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s; }
         .btn-record.recording { background: #ef4444; }
         
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
-        .stat-card { background: #0f172a; padding: 15px; border-radius: 10px; text-align: center; }
-        .stat-value { font-size: 1.8rem; font-weight: bold; color: #38bdf8; }
-        .stat-label { font-size: 0.75rem; color: #cbd5e1; }
-        
+        /* Painel de Telemetria */
+        .sensor-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .sensor-box { background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #1e293b; }
+        .sensor-title { font-size: 0.75rem; color: #38bdf8; font-weight: bold; margin-bottom: 4px; text-transform: uppercase; }
+        .sensor-value { font-family: monospace; font-size: 0.82rem; color: #f1f5f9; line-height: 1.3; }
+        .gyro-status { grid-column: span 2; padding: 8px; border-radius: 6px; text-align: center; font-size: 0.8rem; font-weight: bold; }
+        .gyro-active { background: #065f46; color: #34d399; }
+        .gyro-inactive { background: #854d0e; color: #fde047; }
+
         .alert { background: #0284c7; color: white; padding: 12px; border-radius: 8px; font-size: 0.85rem; text-align: center; }
     </style>
 </head>
@@ -29,76 +33,82 @@
 
 <div class="container">
     <div class="card">
-        <h2>📱 Gravação de Trajeto com Sensores</h2>
-        <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 15px;">
-            Selecione o trecho, clique em Iniciar, caminhe até o destino e finalize para salvar a conexão no banco.
-        </p>
-
+        <h2>📱 Captura & Telemetria Indoor</h2>
+        
         <div class="form-group">
-            <label for="src-select">Origem (Onde você está):</label>
-            <select id="src-select"><option value="">Carregando nó...</option></select>
+            <label for="src-select">Origem:</label>
+            <select id="src-select"><option value="">Carregando nós...</option></select>
         </div>
 
         <div class="form-group">
-            <label for="tgt-select">Destino (Para onde vai):</label>
-            <select id="tgt-select"><option value="">Carregando nó...</option></select>
+            <label for="tgt-select">Destino:</label>
+            <select id="tgt-select"><option value="">Carregando nós...</option></select>
         </div>
 
         <button id="record-btn" class="btn-record" onclick="toggleRecording()">▶️ Iniciar Captura</button>
+    </div>
 
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Passos Detectados</div>
-                <div class="stat-value" id="step-count">0</div>
+    <!-- PAINEL DE MONITORAMENTO EM TEMPO REAL -->
+    <div class="card">
+        <h2>📊 Monitor de Sensores em Tempo Real</h2>
+        
+        <div class="sensor-panel">
+            <div id="gyro-badge" class="gyro-status gyro-inactive">Giroscópio: Aguardando Movimento...</div>
+
+            <div class="sensor-box">
+                <div class="sensor-title">Aceleração (m/s²)</div>
+                <div class="sensor-value" id="acc-val">X: 0.00<br>Y: 0.00<br>Z: 0.00<br><b>Mag: 0.00</b></div>
             </div>
-            <div class="stat-card">
-                <div class="stat-label">Distância Est.</div>
-                <div class="stat-value" id="dist-m">0.00m</div>
+
+            <div class="sensor-box">
+                <div class="sensor-title">Giroscópio (rad/s)</div>
+                <div class="sensor-value" id="gyro-val">X: 0.00<br>Y: 0.00<br>Z: 0.00<br><b>Mag: 0.00</b></div>
             </div>
-            <div class="stat-card" style="grid-column: span 2;">
-                <div class="stat-label">Orientação Média (Yaw)</div>
-                <div class="stat-value" id="yaw-rad">0.00 rad</div>
+
+            <div class="sensor-box" style="grid-column: span 2;">
+                <div class="sensor-title">Orientação / Bússola (Graus)</div>
+                <div class="sensor-value" id="mag-val">Alpha (Yaw): 0° | Beta: 0° | Gamma: 0°</div>
+            </div>
+
+            <div class="sensor-box" style="grid-column: span 2;">
+                <div class="sensor-title">Amostras Coletadas</div>
+                <div class="sensor-value" id="sample-count" style="font-size: 1.2rem; color: #38bdf8;">0</div>
             </div>
         </div>
     </div>
     
     <div id="status-msg" class="alert" style="display: none;"></div>
 </div>
+
 <script>
-    // 0. CONFIGURAÇÃO DA API
-    const API_BASE_URL = "https://api.pov-unimar.com";
+    const API_BASE_URL = ""; 
 
     let isRecording = false;
-    let stepCount = 0;
-    
-    // Acumuladores para Média Circular de Ângulo
-    let sinSum = 0;
-    let cosSum = 0;
-    let yawSamples = 0;
+    let rawSamples = [];
+    let currentMag = { alpha: 0, beta: 0, gamma: 0 };
+    let gyroHasData = false;
 
-    let lastStepTime = 0;
-    const STEP_LENGTH_ESTIMATE = 0.75; // Tamanho médio do passo em metros
-
-    // 1. Carrega Nós existentes para os seletores
     async function loadNodes() {
         try {
             const res = await fetch(`${API_BASE_URL}/api/map`);
-            const data = await res.json();
-            if (data.status === 'success') {
-                const src = document.getElementById('src-select');
-                const tgt = document.getElementById('tgt-select');
-                src.innerHTML = '<option value="">Selecione Origem</option>';
-                tgt.innerHTML = '<option value="">Selecione Destino</option>';
+            if (res.ok) {
+                const data = await res.json();
+                const srcSel = document.getElementById('src-select');
+                const tgtSel = document.getElementById('tgt-select');
                 
-                data.nodes.forEach(n => {
-                    src.innerHTML += `<option value="${n.id}">${n.label}</option>`;
-                    tgt.innerHTML += `<option value="${n.id}">${n.label}</option>`;
-                });
+                srcSel.innerHTML = '<option value="">Selecione a Origem</option>';
+                tgtSel.innerHTML = '<option value="">Selecione o Destino</option>';
+
+                for (const nodeName in data.nodes) {
+                    srcSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+                    tgtSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+                }
             }
-        } catch(e) { console.error("Erro ao carregar nós:", e); }
+        } catch (err) {
+            showStatus("Erro ao conectar na API para carregar o mapa.");
+        }
     }
 
-    // 2. Controla o Estado da Gravação
     async function toggleRecording() {
         const btn = document.getElementById('record-btn');
         const src = document.getElementById('src-select').value;
@@ -106,34 +116,29 @@
 
         if (!isRecording) {
             if (!src || !tgt || src === tgt) {
-                alert("Por favor, selecione uma Origem e um Destino válidos (e diferentes).");
+                alert("Selecione Origem e Destino válidos.");
                 return;
             }
 
-            // Solicita permissão de sensores em dispositivos iOS
+            // Solcita permissão em navegadores iOS Safari
             if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-                const permission = await DeviceMotionEvent.requestPermission();
-                if (permission !== 'granted') return alert("Permissão para usar sensores negada!");
+                try { await DeviceMotionEvent.requestPermission(); } catch (e) {}
             }
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                await DeviceOrientationEvent.requestPermission();
+                try { await DeviceOrientationEvent.requestPermission(); } catch (e) {}
             }
 
-            // Inicia os escutadores dos sensores
+            await fetch(`${API_BASE_URL}/api/reset`, { method: 'POST' });
+            rawSamples = [];
+            isRecording = true;
+
             window.addEventListener('devicemotion', handleMotion);
             window.addEventListener('deviceorientation', handleOrientation);
 
-            isRecording = true;
-            stepCount = 0;
-            sinSum = 0;
-            cosSum = 0;
-            yawSamples = 0;
-
-            btn.innerText = "⏹️ Parar e Salvar no Banco";
+            btn.innerText = "⏹️ Parar e Enviar para Processamento";
             btn.classList.add('recording');
-            showStatus("Sensores ativos! Caminhe em direção ao destino...");
+            showStatus("Gravando e exibindo sensores...");
         } else {
-            // Para a captura
             window.removeEventListener('devicemotion', handleMotion);
             window.removeEventListener('deviceorientation', handleOrientation);
 
@@ -141,90 +146,107 @@
             btn.innerText = "▶️ Iniciar Captura";
             btn.classList.remove('recording');
 
-            // Calcula distância final
-            const finalDist = stepCount * STEP_LENGTH_ESTIMATE;
-            
-            // Média Circular dos Ângulos: atan2(sum(sin), sum(cos))
-            let avgYawRad = 0.0;
-            if (yawSamples > 0) {
-                avgYawRad = Math.atan2(sinSum / yawSamples, cosSum / yawSamples);
-                if (avgYawRad < 0) avgYawRad += 2 * Math.PI; // Ajusta intervalo de 0 a 2PI
-            }
-
-            await saveRecordedEdge(src, tgt, finalDist, avgYawRad);
+            await sendRawSamplesToBackend(src, tgt, rawSamples);
         }
     }
 
-    // 3. Processamento de Aceleração (Detecção de Picos para Passos)
     function handleMotion(event) {
-        if (!isRecording) return;
-
         const acc = event.accelerationIncludingGravity || event.acceleration;
+        const rot = event.rotationRate;
+
         if (!acc || acc.x === null) return;
 
-        // Magnitude da aceleração
-        const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-        const now = Date.now();
-
-        // Pico de aceleração (ajustado para ~11.8 m/s² com filtro de tempo de 350ms)
-        if (mag > 11.8 && (now - lastStepTime) > 350) {
-            stepCount++;
-            lastStepTime = now;
-
-            document.getElementById('step-count').innerText = stepCount;
-            document.getElementById('dist-m').innerText = (stepCount * STEP_LENGTH_ESTIMATE).toFixed(2) + "m";
+        // Extrai giroscópio cobrindo variações de nomes entre Android/iOS
+        let gxDeg = 0.0, gyDeg = 0.0, gzDeg = 0.0;
+        if (rot) {
+            gxDeg = rot.alpha ?? rot.x ?? 0.0;
+            gyDeg = rot.beta ?? rot.y ?? 0.0;
+            gzDeg = rot.gamma ?? rot.z ?? 0.0;
         }
-    }
 
-    // 4. Captura de Orientação (Tratamento para iOS e Android)
-    function handleOrientation(event) {
-        if (!isRecording) return;
+        const gxRad = gxDeg * (Math.PI / 180.0);
+        const gyRad = gyDeg * (Math.PI / 180.0);
+        const gzRad = gzDeg * (Math.PI / 180.0);
+
+        const accMag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+        const gyroMag = Math.sqrt(gxRad**2 + gyRad**2 + gzRad**2);
+
+        // Atualiza status do giroscópio na tela
+        const gyroBadge = document.getElementById('gyro-badge');
+        if (gyroMag > 0.05) {
+            gyroHasData = true;
+            gyroBadge.className = "gyro-status gyro-active";
+            gyroBadge.innerText = "Giroscópio: ATIVO (Capturando rotação)";
+        } else if (!gyroHasData) {
+            gyroBadge.className = "gyro-status gyro-inactive";
+            gyroBadge.innerText = "Giroscópio: ZERADO (Aguardando movimento/permissão)";
+        }
+
+        // Exibe leituras em tempo real na interface
+        document.getElementById('acc-val').innerHTML = 
+            `X: ${acc.x.toFixed(2)} | Y: ${acc.y.toFixed(2)} | Z: ${acc.z.toFixed(2)}<br><b>Mag: ${accMag.toFixed(2)} m/s²</b>`;
         
-        let headingDeg = 0;
+        document.getElementById('gyro-val').innerHTML = 
+            `X: ${gxRad.toFixed(2)} | Y: ${gyRad.toFixed(2)} | Z: ${gzRad.toFixed(2)}<br><b>Mag: ${gyroMag.toFixed(2)} rad/s</b>`;
 
-        if (event.webkitCompassHeading) {
-            // iOS: Retorna o Norte Magnético real (0° a 360°)
-            headingDeg = event.webkitCompassHeading;
-        } else if (event.alpha !== null) {
-            // Android: Inverte o Alpha para alinhar com a bússola
-            headingDeg = (360 - event.alpha) % 360;
-        }
-
-        const yawRad = headingDeg * (Math.PI / 180.0);
-
-        // Acumula Componentes Trigo/Vetoriais para Média Circular
-        sinSum += Math.sin(yawRad);
-        cosSum += Math.cos(yawRad);
-        yawSamples++;
-
-        document.getElementById('yaw-rad').innerText = yawRad.toFixed(2) + " rad";
-    }
-
-    // 5. Envia a Aresta Mapeada direto para o MySQL
-    async function saveRecordedEdge(source, target, distance, heading) {
-        showStatus("Enviando medição dos sensores para o banco...");
-
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/edges`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    source: source,
-                    target: target,
-                    distance_m: distance,
-                    heading_rad: heading
-                })
+        if (isRecording) {
+            const timestamp = Date.now() / 1000.0;
+            rawSamples.push({
+                timestamp: timestamp,
+                accel_x: acc.x || 0.0,
+                accel_y: acc.y || 0.0,
+                accel_z: acc.z || 0.0,
+                gyro_x: gxRad,
+                gyro_y: gyRad,
+                gyro_z: gzRad,
+                mag_x: currentMag.alpha,
+                mag_y: currentMag.beta,
+                mag_z: currentMag.gamma
             });
 
+            document.getElementById('sample-count').innerText = `${rawSamples.length}`;
+        }
+    }
+
+    function handleOrientation(event) {
+        currentMag.alpha = event.alpha || 0.0;
+        currentMag.beta = event.beta || 0.0;
+        currentMag.gamma = event.gamma || 0.0;
+
+        document.getElementById('mag-val').innerText = 
+            `Alpha (Yaw): ${currentMag.alpha.toFixed(1)}° | Beta: ${currentMag.beta.toFixed(1)}° | Gamma: ${currentMag.gamma.toFixed(1)}°`;
+    }
+
+    async function sendRawSamplesToBackend(source, target, samples) {
+        if (samples.length < 20) {
+            alert("Gravação muito curta.");
+            return;
+        }
+
+        showStatus("Processando no backend Python...");
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/edges/process-raw`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source, target, samples })
+            });
+
+            const data = await res.json();
+
             if (res.ok) {
-                alert(`✅ Trecho de '${source}' para '${target}' mapeado com sucesso!\nDistância: ${distance.toFixed(2)}m\nÂngulo Médio: ${heading.toFixed(2)} rad`);
-                showStatus("Gravado com sucesso no MySQL!");
+                if (data.status === "warning" || data.steps_count === 0) {
+                    alert("⚠️ Trecho Descartado!\nChacoalhado ou movimento não humano detectado.");
+                    showStatus("Descartado: Apenas chacoalhado detectado.");
+                } else {
+                    alert(`✅ Trecho Processado!\nPassos: ${data.steps_count}\nDistância: ${data.distance_m}m`);
+                    showStatus("Salvo com sucesso!");
+                }
             } else {
-                alert("Erro ao salvar trecho no banco de dados.");
+                alert(`Erro: ${data.detail}`);
             }
         } catch (err) {
-            console.error("Erro na requisição:", err);
-            alert("Falha de conexão com a API.");
+            alert("Erro ao conectar à API.");
         }
     }
 
@@ -234,6 +256,9 @@
         el.style.display = 'block';
     }
 
+    // Ativa sensores para escuta ao abrir
+    window.addEventListener('devicemotion', handleMotion);
+    window.addEventListener('deviceorientation', handleOrientation);
     loadNodes();
 </script>
 </body>
