@@ -6,18 +6,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-
 from datasets.ManagerDatabase import ConexaoBD
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 
+# --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
+from filters.butterworth import ButterworthLowPassFilter
+from filters.madgwick import MadgwickAttitudeEstimator
+from pdr.steps import PeakStepDetector
+
+
 # --- CLASSE AUXILIAR DE COMPATIBILIDADE ---
-class StepEvent:
-    """Garante que os dados vindos da Web via JSON se adaptem à interface 
-    esperada pelo seu process_step do Módulo 2 (PDR).
-    """
+class StepEventAdapter:
     def __init__(self, step_length_m: float):
         self.step_length_m = step_length_m
 
@@ -50,25 +52,21 @@ if not db.connection:
     print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
 
 map_db_manager = MapDatabaseManager(db)
-
 topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
-# Carrega o mapa salvo do banco de dados para a memória imediatamente ao iniciar o servidor
 try:
-    # Nota: Certifique-se de que sua classe MapDatabaseManager implementa o carregamento populando o topo_map
     map_db_manager.load_map_into_system(topo_map)
     print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
 except Exception as e:
-    print(f"[AVISO] Falha ao carregar o mapa inicial ou banco vazio. Iniciando grafo limpo. Erro: {e}")
+    print(f"[AVISO] Falha ao carregar o mapa inicial ou banco vazio. Erro: {e}")
 
-# 4. Inicializa o Matcher de localização (Ponto padrão de inicialização: 'Recepcao')
-# Caso a 'Recepcao' não exista inicialmente no banco, o matcher tratará o estado assim que definido.
 starting_node = "Recepcao"
 matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
 visited_path = [starting_node]
 
-# --- CONFIGURAÇÃO DOS SCHEMAS DE VALIDAÇÃO (PYDANTIC) ---
+
+# --- CONFIGURAÇÃO DOS SCHEMAS (PYDANTIC) ---
 class CheckpointSchema(BaseModel):
     name: str
 
@@ -82,22 +80,131 @@ class StepSensorSchema(BaseModel):
     step_length_m: float
     yaw_rad: float
 
+# SCHEMAS PARA O ENVIOS DAS AMOSTRAS BRUTAS (GRAVAÇÃO DO CELULAR)
+class RawSampleSchema(BaseModel):
+    timestamp: float
+    accel_x: float
+    accel_y: float
+    accel_z: float
+    gyro_x: float
+    gyro_y: float
+    gyro_z: float
+    mag_x: float = 0.0
+    mag_y: float = 0.0
+    mag_z: float = 0.0
 
-# --- ROTAS / ENDPOINTS DA API ---
+    # Propriedades de compatibilidade com os seus adaptadores
+    @property
+    def gx(self) -> float: return self.gyro_x
+    @property
+    def gy(self) -> float: return self.gyro_y
+    @property
+    def gz(self) -> float: return self.gyro_z
+    @property
+    def ax(self) -> float: return self.accel_x
+    @property
+    def ay(self) -> float: return self.accel_y
+    @property
+    def az(self) -> float: return self.accel_z
+    @property
+    def mx(self) -> float: return self.mag_x
+    @property
+    def my(self) -> float: return self.mag_y
+    @property
+    def mz(self) -> float: return self.mag_z
 
-# --- ENDPOINT 1: SALVAR NOVO CHECKPOINT (FASE DE MAPEAMENTO) ---
+class ProcessRawEdgeSchema(BaseModel):
+    source: str
+    target: str
+    samples: List[RawSampleSchema]
+
+
+# --- ROTAS DA API ---
+
+# NOVO ENDPOINT: ZERAR O ESTADO DO MATCHER E SENSORES
+@app.post("/api/reset")
+def reset_session():
+    """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
+    global matcher, visited_path
+    matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
+    visited_path = [starting_node]
+    return {"status": "success", "message": "Estado do PDR e sensores resetados."}
+
+
+# NOVO ENDPOINT: PROCESSA O CHACOALHADO E A GRAVAÇÃO COM GIROSCÓPIO
+@app.post("/api/edges/process-raw", status_code=status.HTTP_201_CREATED)
+def process_raw_edge(payload: ProcessRawEdgeSchema):
+    """Recebe amostras brutas dos sensores, aplica o giroscópio para barrar chacoalhados
+    e salva a aresta no banco de dados.
+    """
+    samples = payload.samples
+    if not samples or len(samples) < 20:
+        raise HTTPException(status_code=400, detail="Amostras insuficientes (mínimo 20).")
+
+    # 1. Converte e extrai vetores NumPy
+    timestamps = np.array([s.timestamp for s in samples], dtype=np.float64)
+    ax = np.array([s.accel_x for s in samples])
+    ay = np.array([s.accel_y for s in samples])
+    az = np.array([s.accel_z for s in samples])
+    
+    gx = np.array([s.gyro_x for s in samples])
+    gy = np.array([s.gyro_y for s in samples])
+    gz = np.array([s.gyro_z for s in samples])
+
+    # 2. CALCULA A MAGNITUDE DO GIROSCÓPIO (RAD/S) PARA TRAVAR O CHACOALHADO
+    gyro_magnitude = np.sqrt(gx**2 + gy**2 + gz**2)
+
+    # 3. FILTRO BUTTERWORTH NA MAGNITUDE DA ACELERAÇÃO
+    raw_acc_magnitude = np.sqrt(ax**2 + ay**2 + az**2)
+    bw_filter = ButterworthLowPassFilter(cutoff=3.0, fs=50.0, order=4)
+    filtered_magnitude = bw_filter.apply(raw_acc_magnitude)
+
+    # 4. DETECÇÃO DE PASSOS COM A TRAVA DE GIROSCÓPIO ATIVADA
+    detector = PeakStepDetector(sample_rate_hz=50.0, weinberg_k=0.48)
+    step_events = detector.detect(
+        timestamps=timestamps,
+        filtered_magnitude=filtered_magnitude,
+        gyro_magnitude=gyro_magnitude  # <--- Giroscópio bloqueia sacudidas de mão aqui
+    )
+
+    if not step_events:
+        return {
+            "status": "warning",
+            "message": "Nenhum passo humano detectado no trecho (movimento descartado como chacoalhado/repouso).",
+            "steps_count": 0,
+            "distance_m": 0.0
+        }
+
+    # 5. CÁLCULO DA DISTÂNCIA TOTAL (WEINBERG) E YAW MÉDIO (MADGWICK)
+    total_distance_m = sum(s.step_length_m for s in step_events)
+    
+    estimator = MadgwickAttitudeEstimator(gain=0.033)
+    quaternions = estimator.update_series(samples)
+    mean_yaw_rad = float(np.mean([q.yaw for q in quaternions]))
+
+    # 6. PERSISTÊNCIA NO BANCO MYSQL E MEMÓRIA DO GRAFO
+    map_db_manager.save_edge(payload.source, payload.target, total_distance_m, mean_yaw_rad)
+    angle_deg = float(np.degrees(mean_yaw_rad))
+    topo_map.connect_checkpoints(payload.source, payload.target, distance=total_distance_m, angle_deg=angle_deg)
+
+    return {
+        "status": "success",
+        "source": payload.source,
+        "target": payload.target,
+        "steps_count": len(step_events),
+        "distance_m": round(total_distance_m, 2),
+        "mean_yaw_rad": round(mean_yaw_rad, 4)
+    }
+
+
 @app.post("/api/checkpoints", status_code=status.HTTP_201_CREATED)
 def create_checkpoint(checkpoint: CheckpointSchema):
-    """Recebe um novo nó semântico enviado pelo celular e persiste no banco e na memória."""
     node_name = checkpoint.name.strip()
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     
-    # Salva na persistência do MySQL
     success = map_db_manager.save_checkpoint(node_name)
-    
     if success:
-        # Sincroniza a memória do servidor imediatamente para o Dijkstra/Matcher usarem sem reiniciar
         if node_name not in topo_map.nodes:
             topo_map.add_checkpoint(node_name)
         return {"status": "success", "message": f"Checkpoint '{node_name}' integrado com sucesso."}
@@ -105,41 +212,13 @@ def create_checkpoint(checkpoint: CheckpointSchema):
         raise HTTPException(status_code=500, detail="Falha interna ao persistir checkpoint no banco.")
 
 
-# --- ENDPOINT 2: SALVAR CONEXÃO/CORREDOR (FASE DE MAPEAMENTO) ---
-@app.post("/api/edges", status_code=status.HTTP_201_CREATED)
-def create_edge(edge: EdgeSchema):
-    """Recebe as métricas de distância e orientação de um corredor recém-caminhado e salva."""
-    # Valida a existência dos nós locais na memória antes de processar
-    if edge.source not in topo_map.nodes or edge.target not in topo_map.nodes:
-        raise HTTPException(
-            status_code=400, 
-            detail="Origem ou Destino informados não existem na malha de checkpoints cadastrados."
-        )
-        
-    # Grava no banco de dados MySQL via Manager
-    success = map_db_manager.save_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
-    
-    if success:
-        # Atualiza o grafo em memória dinamicamente convertendo para graus se sua classe base exigir
-        angle_deg = float(np.degrees(edge.heading_rad))
-        topo_map.connect_checkpoints(edge.source, edge.target, distance=edge.distance_m, angle_deg=angle_deg)
-        return {"status": "success", "message": f"Conexão criada entre '{edge.source}' e '{edge.target}'."}
-    else:
-        raise HTTPException(status_code=500, detail="Erro de persistência ao inserir aresta no MySQL.")
-
-
-# --- ENDPOINT 3: LOCALIZAÇÃO ONLINE EM TEMPO REAL (PROCESSAMENTO DOS SENSORES) ---
 @app.post("/api/localize", status_code=status.HTTP_200_OK)
 def localize_user(sensor_data: StepSensorSchema):
-    """Recebe o passo calculado transmitido pelo celular pela Web e retorna o ponto exato atual no mapa."""
     if not topo_map.nodes:
-        raise HTTPException(status_code=400, detail="O mapa do sistema está vazio. Cadastre checkpoints primeiro.")
+        raise HTTPException(status_code=400, detail="O mapa do sistema está vazio.")
         
     try:
-        # Adaptador para envelopar a requisição HTTP no formato que seu PDR process_step exige
-        step_event = StepEvent(step_length_m=sensor_data.step_length_m)
-        
-        # Invoca o algoritmo de correspondência topológica (Máquina de Estados)
+        step_event = StepEventAdapter(step_length_m=sensor_data.step_length_m)
         current_node = matcher.process_step(step=step_event, current_yaw_rad=sensor_data.yaw_rad) #type: ignore
         
         if visited_path and visited_path[-1] != current_node:
@@ -151,30 +230,17 @@ def localize_user(sensor_data: StepSensorSchema):
             "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro interno ao processar localização do PDR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno no PDR: {str(e)}")
 
 
-# --- ENDPOINT 4: NAVEGAÇÃO E PLANEJAMENTO DE ROTA (DIJKSTRA) ---
 @app.get("/api/route", status_code=status.HTTP_200_OK)
-def get_route(
-    start: str = Query(..., description="Nó de partida do usuário"), 
-    end: str = Query(..., description="Nó de destino final")
-):
-    """Calcula matematicamente a rota mais curta entre dois pontos usando o algoritmo de Dijkstra."""
+def get_route(start: str = Query(...), end: str = Query(...)):
     if start not in topo_map.nodes or end not in topo_map.nodes:
-        raise HTTPException(
-            status_code=404, 
-            detail="Nó de partida ou destino não foram encontrados na base cartográfica."
-        )
+        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
         
-    # Executa o cálculo puro do algoritmo do Roteador (Módulo 3)
     calculated_path = router.calculate_route(start, end)
-    
     if not calculated_path:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Não existe caminho conectivo viável entre '{start}' e '{end}'."
-        )
+        raise HTTPException(status_code=404, detail=f"Sem caminho viável entre '{start}' e '{end}'.")
         
     return {
         "status": "success",
@@ -186,21 +252,16 @@ def get_route(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# --- ENDPOINT DA LOCALIZAÇÃO ATUAL ---
 @app.get("/api/current_location")
 def get_current_location():
-    """Retorna o nó atual e a distância acumulada onde o usuário está no momento."""
     return {
         "current_node": getattr(matcher, 'current_node', getattr(matcher, 'current_state', 'Desconhecido')),
         "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0),
         "visited_path": visited_path
     }
-    
-    
-# --- ENDPOINT 5: RETORNAR O MAPA COMPLETO COM COORDENADAS 2D ---
+
 @app.get("/api/map", status_code=status.HTTP_200_OK)
 def get_map_layout():
-    """Endpoint limpo: delega o cálculo geométrico para a classe TopologicalMap."""
     layout = topo_map.get_map_layout()
     return {
         "status": "success",
@@ -208,18 +269,10 @@ def get_map_layout():
         "edges": layout["edges"]
     }
 
-@app.get("/recorder")
-def read_recorder():
-    return FileResponse("recorder.html")
-
-#EndPoint raiz do projeto
 @app.get("/")
 def read_index():
     return FileResponse("recorder.html")
 
-# --- FINALIZAÇÃO LIMPA DO SERVIDOR ---
 @app.on_event("shutdown")
 def shutdown_event():
-    """Fecha os seletores de conexão de rede de forma limpa ao derrubar o servidor Uvicorn."""
     db.desconectar()
-    
