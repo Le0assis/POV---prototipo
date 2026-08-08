@@ -210,12 +210,12 @@ def get_map_layout():
 
 @app.get("/recorder")
 def read_recorder():
-    return FileResponse("static/recorder.html")
+    return FileResponse("recorder.html")
 
 #EndPoint raiz do projeto
 @app.get("/")
 def read_index():
-    return FileResponse("static/index.html")
+    return FileResponse("recorder.html")
 
 # --- FINALIZAÇÃO LIMPA DO SERVIDOR ---
 @app.on_event("shutdown")
