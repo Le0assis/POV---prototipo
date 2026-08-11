@@ -81,11 +81,7 @@
 </div>
 <script>
     
-    const CLOUDFLARE_TUNNEL_URL = "https://api.pov-unimar.com"; 
-
-    const API_BASE_URL = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-        ? window.location.origin
-        : CLOUDFLARE_TUNNEL_URL;
+    const API_BASE_URL = "https://api.pov-unimar.com"; 
     
     let isRecording = false;
     let rawSamples = [];
