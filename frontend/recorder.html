@@ -80,64 +80,47 @@
     <div id="status-msg" class="alert" style="display: none;"></div>
 </div>
 <script>
-    // Detecta se a página foi aberta via HTTP ou arquivo local (file://)
-    const API_BASE_URL = window.location.protocol.startsWith('http') 
-        ? "https://api.pov-unimar.com" 
-        : "http://127.0.0.1:8000"; 
-
+    
+    const API_BASE_URL = window.location.origin;
+    
     let isRecording = false;
     let rawSamples = [];
     let currentMag = { alpha: 0, beta: 0, gamma: 0 };
     let gyroHasData = false;
+async function loadNodes() {
+    const srcSel = document.getElementById('src-select');
+    const tgtSel = document.getElementById('tgt-select');
 
-    // Função universal para carregar os nós com tratamento de erros reforçado
-    async function loadNodes() {
-        const srcSel = document.getElementById('src-select');
-        const tgtSel = document.getElementById('tgt-select');
+    try {
+        // Garantimos que a requisição vai para a raiz "/api/map"
+        const targetUrl = `${API_BASE_URL}/api/map`;
+        console.log("[SISTEMA] Solicitando mapa em:", targetUrl);
+        
+        const res = await fetch(targetUrl);
 
-        try {
-            console.log("[SISTEMA] Solicitando mapa em:", `${API_BASE_URL}/api/map`);
-            const res = await fetch(`${API_BASE_URL}/api/map`);
-
-            if (!res.ok) {
-                throw new Error(`Servidor respondeu com status ${res.status}`);
-            }
-
-            const data = await res.json();
-            console.log("[SISTEMA] Resposta recebida do /api/map:", data);
-
-            srcSel.innerHTML = '<option value="">Selecione a Origem</option>';
-            tgtSel.innerHTML = '<option value="">Selecione o Destino</option>';
-
-            // Converte os nós recebidos para lista, seja Array ou Dicionário
-            let nodesList = [];
-            if (Array.isArray(data.nodes)) {
-                nodesList = data.nodes;
-            } else if (data.nodes && typeof data.nodes === 'object') {
-                nodesList = Object.keys(data.nodes);
-            }
-
-            if (nodesList.length === 0) {
-                showStatus("⚠️ Banco conectado, mas nenhum checkpoint foi encontrado. Cadastre checkpoints primeiro.");
-                return;
-            }
-
-            // Popula os seletores com os nomes dos nós
-            nodesList.forEach(node => {
-                const nodeName = typeof node === 'object' ? (node.name || node.id) : node;
-                srcSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
-                tgtSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
-            });
-
-            showStatus("✅ Nós do mapa carregados com sucesso!");
-
-        } catch (err) {
-            console.error("[ERRO CRÍTICO] Falha ao carregar nós:", err);
-            srcSel.innerHTML = '<option value="">Erro ao carregar</option>';
-            tgtSel.innerHTML = '<option value="">Erro ao carregar</option>';
-            showStatus("❌ Erro de conexão com a API. Verifique o console (F12) e acesse via http://localhost:8000");
+        if (!res.ok) {
+            throw new Error(`Servidor respondeu com status ${res.status}`);
         }
+
+        const data = await res.json();
+        
+        srcSel.innerHTML = '<option value="">Selecione a Origem</option>';
+        tgtSel.innerHTML = '<option value="">Selecione o Destino</option>';
+
+        let nodesList = Array.isArray(data.nodes) ? data.nodes : Object.keys(data.nodes || {});
+
+        nodesList.forEach(node => {
+            const nodeName = typeof node === 'object' ? (node.name || node.id) : node;
+            srcSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+            tgtSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+        });
+
+    } catch (err) {
+        console.error("[ERRO CRÍTICO] Falha ao carregar nós:", err);
+        srcSel.innerHTML = '<option value="">Erro ao carregar</option>';
+        tgtSel.innerHTML = '<option value="">Erro ao carregar</option>';
     }
+}
 
     async function toggleRecording() {
         const btn = document.getElementById('record-btn');

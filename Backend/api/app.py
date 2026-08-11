@@ -5,6 +5,7 @@ from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pathlib import Path
 
 from datasets.ManagerDatabase import ConexaoBD
 from map.MapDatabaseManager import MapDatabaseManager
@@ -64,7 +65,6 @@ except Exception as e:
 starting_node = "Recepcao"
 matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
 visited_path = [starting_node]
-
 
 # --- CONFIGURAÇÃO DOS SCHEMAS (PYDANTIC) ---
 class CheckpointSchema(BaseModel):
@@ -268,10 +268,24 @@ def get_map_layout():
         "nodes": layout["nodes"],
         "edges": layout["edges"]
     }
+    
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR / "../../frontend"
 
+    
 @app.get("/")
 def read_index():
-    return FileResponse("recorder.html")
+    index_path = FRONTEND_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return {"error": f"Arquivo index.html nao encontrado no caminho {index_path}"}
+
+@app.get("/recorder")
+def read_recorder():
+    recorder_path = FRONTEND_DIR / "recorder.html"
+    if recorder_path.exists():
+        return FileResponse(recorder_path)
+    return {"error": "Arquivo recorder.html nao encontrado em frontend/"}
 
 @app.on_event("shutdown")
 def shutdown_event():

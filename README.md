@@ -431,3 +431,43 @@ python -m others.run_csv_client
 - Para uma execução completa, mantenha os terminais da API e do Cloudflare Tunnel abertos durante toda a simulação.
 - Certifique-se de que o arquivo `cloudflared-config.yml` está corretamente configurado antes de iniciar o túnel.
 - Certifique-se de que o banco de dados `POV` corresponde às configurações utilizadas pelo backend.
+
+Estrutura do Git e CI/CD
+1. Arquitetura de Branches
+main (Produção): Mantém exclusivamente o código estável. Alterações nesta branch disparam a atualização automática do servidor final.
+
+dev (Desenvolvimento): Ambiente seguro para programar, testar sensores e corrigir falhas sem impactar a aplicação em uso.
+
+2. Fluxo de Comandos e Utilidade
+Criação da Branch de Desenvolvimento:
+
+```
+git checkout -b dev — Cria e alterna para a nova branch.
+
+git push -u origin dev — Publica a branch dev no GitHub e conecta o rastreamento.
+
+```
+Trabalho Diário (dev):
+
+```
+git checkout dev — Garante que as alterações fiquem isoladas do ambiente final.
+
+git add . e git commit -m "descrição" — Prepara e registra o histórico das edições locais.
+
+git push origin dev — Salva as alterações na branch de desenvolvimento no GitHub.
+```
+
+Integração com Produção (Merge):
+```
+git checkout main — Alterna para a branch principal.
+
+git merge dev — Copia todas as melhorias testadas da dev para a main.
+
+git push origin main — Envia a versão final para o GitHub e inicia o deploy.
+
+git checkout dev — Retorna para a branch de testes para continuar o desenvolvimento.
+```
+3. Automação com GitHub Actions (CI/CD)
+Em dev (Validação): Cada envio roda um processo automatizado no GitHub para checar a sintaxe do código e garantir que não há erros de compilação antes de prosseguir.
+
+Em main (Deploy): Após a validação do código, o pipeline autoriza e executa a atualização direta no servidor de produção.
