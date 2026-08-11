@@ -80,47 +80,63 @@
     <div id="status-msg" class="alert" style="display: none;"></div>
 </div>
 <script>
-    
-    const API_BASE_URL = "https://api.pov-unimar.com"; 
-    
+    // Usa localhost se estiver testando localmente, ou a API oficial se estiver hospedado
+    const API_BASE_URL = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+        ? "http://localhost:8000"
+        : "https://api.pov-unimar.com"; 
+
     let isRecording = false;
     let rawSamples = [];
     let currentMag = { alpha: 0, beta: 0, gamma: 0 };
     let gyroHasData = false;
-async function loadNodes() {
-    const srcSel = document.getElementById('src-select');
-    const tgtSel = document.getElementById('tgt-select');
 
-    try {
-        // Garantimos que a requisição vai para a raiz "/api/map"
-        const targetUrl = `${API_BASE_URL}/api/map`;
-        console.log("[SISTEMA] Solicitando mapa em:", targetUrl);
-        
-        const res = await fetch(targetUrl);
+    async function loadNodes() {
+        const srcSel = document.getElementById('src-select');
+        const tgtSel = document.getElementById('tgt-select');
 
-        if (!res.ok) {
-            throw new Error(`Servidor respondeu com status ${res.status}`);
+        try {
+            const targetUrl = `${API_BASE_URL}/api/map`;
+            console.log("[SISTEMA] Solicitando mapa em:", targetUrl);
+            
+            const res = await fetch(targetUrl);
+
+            if (!res.ok) {
+                throw new Error(`Status ${res.status}: Não foi possível carregar o mapa.`);
+            }
+
+            const data = await res.json();
+            
+            srcSel.innerHTML = '<option value="">Selecione a Origem</option>';
+            tgtSel.innerHTML = '<option value="">Selecione o Destino</option>';
+
+            // Trata data.nodes seja Array ou Dicionário retornado do banco
+            let nodesList = [];
+            if (Array.isArray(data.nodes)) {
+                nodesList = data.nodes;
+            } else if (data.nodes && typeof data.nodes === 'object') {
+                nodesList = Object.keys(data.nodes);
+            }
+
+            if (nodesList.length === 0) {
+                showStatus("⚠️ Banco conectado, mas nenhum nó foi encontrado.");
+                return;
+            }
+
+            nodesList.forEach(node => {
+                const nodeName = typeof node === 'object' ? (node.name || node.id) : node;
+                srcSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+                tgtSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
+            });
+
+            showStatus("✅ Nós carregados com sucesso!");
+
+        } catch (err) {
+            console.error("[ERRO CRÍTICO] Falha ao carregar nós:", err);
+            srcSel.innerHTML = '<option value="">Erro ao carregar</option>';
+            tgtSel.innerHTML = '<option value="">Erro ao carregar</option>';
+            showStatus(`❌ Erro no banco: ${err.message}`);
         }
-
-        const data = await res.json();
-        
-        srcSel.innerHTML = '<option value="">Selecione a Origem</option>';
-        tgtSel.innerHTML = '<option value="">Selecione o Destino</option>';
-
-        let nodesList = Array.isArray(data.nodes) ? data.nodes : Object.keys(data.nodes || {});
-
-        nodesList.forEach(node => {
-            const nodeName = typeof node === 'object' ? (node.name || node.id) : node;
-            srcSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
-            tgtSel.innerHTML += `<option value="${nodeName}">${nodeName}</option>`;
-        });
-
-    } catch (err) {
-        console.error("[ERRO CRÍTICO] Falha ao carregar nós:", err);
-        srcSel.innerHTML = '<option value="">Erro ao carregar</option>';
-        tgtSel.innerHTML = '<option value="">Erro ao carregar</option>';
     }
-}
 
     async function toggleRecording() {
         const btn = document.getElementById('record-btn');
@@ -129,7 +145,7 @@ async function loadNodes() {
 
         if (!isRecording) {
             if (!src || !tgt || src === tgt) {
-                alert("Selecione Origem e Destino válidos.");
+                alert("Selecione Origem e Destino válidos e diferentes.");
                 return;
             }
 
@@ -140,7 +156,12 @@ async function loadNodes() {
                 try { await DeviceOrientationEvent.requestPermission(); } catch (e) {}
             }
 
-            await fetch(`${API_BASE_URL}/api/reset`, { method: 'POST' });
+            try {
+                await fetch(`${API_BASE_URL}/api/reset`, { method: 'POST' });
+            } catch (e) {
+                console.warn("Aviso ao resetar buffer no backend:", e);
+            }
+
             rawSamples = [];
             isRecording = true;
 
@@ -166,7 +187,7 @@ async function loadNodes() {
         const acc = event.accelerationIncludingGravity || event.acceleration;
         const rot = event.rotationRate;
 
-        if (!acc || acc.x === null) return;
+        if (!acc || acc.x === null || acc.x === undefined) return;
 
         let gxDeg = 0.0, gyDeg = 0.0, gzDeg = 0.0;
         if (rot) {
@@ -179,7 +200,11 @@ async function loadNodes() {
         const gyRad = gyDeg * (Math.PI / 180.0);
         const gzRad = gzDeg * (Math.PI / 180.0);
 
-        const accMag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+        const accX = Number.isNaN(acc.x) ? 0.0 : acc.x;
+        const accY = Number.isNaN(acc.y) ? 0.0 : acc.y;
+        const accZ = Number.isNaN(acc.z) ? 0.0 : acc.z;
+
+        const accMag = Math.sqrt(accX**2 + accY**2 + accZ**2);
         const gyroMag = Math.sqrt(gxRad**2 + gyRad**2 + gzRad**2);
 
         const gyroBadge = document.getElementById('gyro-badge');
@@ -193,7 +218,7 @@ async function loadNodes() {
         }
 
         document.getElementById('acc-val').innerHTML = 
-            `X: ${acc.x.toFixed(2)} | Y: ${acc.y.toFixed(2)} | Z: ${acc.z.toFixed(2)}<br><b>Mag: ${accMag.toFixed(2)} m/s²</b>`;
+            `X: ${accX.toFixed(2)} | Y: ${accY.toFixed(2)} | Z: ${accZ.toFixed(2)}<br><b>Mag: ${accMag.toFixed(2)} m/s²</b>`;
         
         document.getElementById('gyro-val').innerHTML = 
             `X: ${gxRad.toFixed(2)} | Y: ${gyRad.toFixed(2)} | Z: ${gzRad.toFixed(2)}<br><b>Mag: ${gyroMag.toFixed(2)} rad/s</b>`;
@@ -202,15 +227,15 @@ async function loadNodes() {
             const timestamp = Date.now() / 1000.0;
             rawSamples.push({
                 timestamp: timestamp,
-                accel_x: acc.x || 0.0,
-                accel_y: acc.y || 0.0,
-                accel_z: acc.z || 0.0,
-                gyro_x: gxRad,
-                gyro_y: gyRad,
-                gyro_z: gzRad,
-                mag_x: currentMag.alpha,
-                mag_y: currentMag.beta,
-                mag_z: currentMag.gamma
+                accel_x: accX,
+                accel_y: accY,
+                accel_z: accZ,
+                gyro_x: Number.isNaN(gxRad) ? 0.0 : gxRad,
+                gyro_y: Number.isNaN(gyRad) ? 0.0 : gyRad,
+                gyro_z: Number.isNaN(gzRad) ? 0.0 : gzRad,
+                mag_x: Number.isNaN(currentMag.alpha) ? 0.0 : currentMag.alpha,
+                mag_y: Number.isNaN(currentMag.beta) ? 0.0 : currentMag.beta,
+                mag_z: Number.isNaN(currentMag.gamma) ? 0.0 : currentMag.gamma
             });
 
             document.getElementById('sample-count').innerText = `${rawSamples.length}`;
@@ -228,11 +253,11 @@ async function loadNodes() {
 
     async function sendRawSamplesToBackend(source, target, samples) {
         if (samples.length < 20) {
-            alert("Gravação muito curta.");
+            alert("Gravação muito curta. Caminhe por mais alguns segundos.");
             return;
         }
 
-        showStatus("Processando no backend Python...");
+        showStatus("Processando dados e gravando no banco MySQL...");
 
         try {
             const res = await fetch(`${API_BASE_URL}/api/edges/process-raw`, {
@@ -241,21 +266,35 @@ async function loadNodes() {
                 body: JSON.stringify({ source, target, samples })
             });
 
-            const data = await res.json();
+            // Captura respostas em texto para tratar erros 500/422 do servidor sem quebrar a execução
+            const responseText = await res.text();
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch (e) {
+                console.error("Resposta do servidor não é um JSON válido:", responseText);
+                alert(`Erro no Servidor/Banco (${res.status}). Verifique o log do Python.`);
+                showStatus(`Erro interno HTTP ${res.status}`);
+                return;
+            }
 
             if (res.ok) {
                 if (data.status === "warning" || data.steps_count === 0) {
                     alert("⚠️ Trecho Descartado!\nChacoalhado ou movimento não humano detectado.");
-                    showStatus("Descartado: Apenas chacoalhado detectado.");
+                    showStatus("Descartado: Padrão não humano.");
                 } else {
-                    alert(`✅ Trecho Processado!\nPassos: ${data.steps_count}\nDistância: ${data.distance_m}m`);
-                    showStatus("Salvo com sucesso!");
+                    alert(`✅ Trecho Processado e Salvo!\nPassos: ${data.steps_count}\nDistância: ${data.distance_m}m`);
+                    showStatus("Aresta atualizada com sucesso no banco!");
                 }
             } else {
-                alert(`Erro: ${data.detail}`);
+                const detailMsg = typeof data.detail === 'object' ? JSON.stringify(data.detail) : data.detail;
+                alert(`Erro ao salvar no banco (${res.status}):\n${detailMsg || 'Falha na requisição.'}`);
+                showStatus(`Erro ${res.status}: ${detailMsg}`);
             }
         } catch (err) {
-            alert("Erro ao conectar à API.");
+            console.error("Erro na comunicação com a API:", err);
+            alert("Erro de conexão ao tentar salvar os dados no backend.");
+            showStatus("Erro de conexão com o servidor.");
         }
     }
 
@@ -265,12 +304,11 @@ async function loadNodes() {
         el.style.display = 'block';
     }
 
-    // Garante a execução da busca assim que a estrutura da página carrega
     document.addEventListener("DOMContentLoaded", () => {
         window.addEventListener('devicemotion', handleMotion);
         window.addEventListener('deviceorientation', handleOrientation);
         loadNodes();
     });
-</script> 
+</script>
 </body>
 </html>
