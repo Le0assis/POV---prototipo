@@ -12,6 +12,8 @@ from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
+from pdr.processor import RawEdgeProcessor
+from .schema import ProcessRawEdgeSchema, CheckpointSchema, StepSensorSchema
 
 # --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
 from filters.butterworth import ButterworthLowPassFilter
@@ -66,59 +68,6 @@ starting_node = "Recepcao"
 matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
 visited_path = [starting_node]
 
-# --- CONFIGURAÇÃO DOS SCHEMAS (PYDANTIC) ---
-class CheckpointSchema(BaseModel):
-    name: str
-
-class EdgeSchema(BaseModel):
-    source: str
-    target: str
-    distance_m: float
-    heading_rad: float
-
-class StepSensorSchema(BaseModel):
-    step_length_m: float
-    yaw_rad: float
-
-# SCHEMAS PARA O ENVIOS DAS AMOSTRAS BRUTAS (GRAVAÇÃO DO CELULAR)
-class RawSampleSchema(BaseModel):
-    timestamp: float
-    accel_x: float
-    accel_y: float
-    accel_z: float
-    gyro_x: float
-    gyro_y: float
-    gyro_z: float
-    mag_x: float = 0.0
-    mag_y: float = 0.0
-    mag_z: float = 0.0
-
-    # Propriedades de compatibilidade com os seus adaptadores
-    @property
-    def gx(self) -> float: return self.gyro_x
-    @property
-    def gy(self) -> float: return self.gyro_y
-    @property
-    def gz(self) -> float: return self.gyro_z
-    @property
-    def ax(self) -> float: return self.accel_x
-    @property
-    def ay(self) -> float: return self.accel_y
-    @property
-    def az(self) -> float: return self.accel_z
-    @property
-    def mx(self) -> float: return self.mag_x
-    @property
-    def my(self) -> float: return self.mag_y
-    @property
-    def mz(self) -> float: return self.mag_z
-
-class ProcessRawEdgeSchema(BaseModel):
-    source: str
-    target: str
-    samples: List[RawSampleSchema]
-
-
 # --- ROTAS DA API ---
 
 # NOVO ENDPOINT: ZERAR O ESTADO DO MATCHER E SENSORES
@@ -130,72 +79,12 @@ def reset_session():
     visited_path = [starting_node]
     return {"status": "success", "message": "Estado do PDR e sensores resetados."}
 
+edge_processor = RawEdgeProcessor(map_db_manager, topo_map)
 
-# NOVO ENDPOINT: PROCESSA O CHACOALHADO E A GRAVAÇÃO COM GIROSCÓPIO
 @app.post("/api/edges/process-raw", status_code=status.HTTP_201_CREATED)
 def process_raw_edge(payload: ProcessRawEdgeSchema):
-    """Recebe amostras brutas dos sensores, aplica o giroscópio para barrar chacoalhados
-    e salva a aresta no banco de dados.
-    """
-    samples = payload.samples
-    if not samples or len(samples) < 20:
-        raise HTTPException(status_code=400, detail="Amostras insuficientes (mínimo 20).")
-
-    # 1. Converte e extrai vetores NumPy
-    timestamps = np.array([s.timestamp for s in samples], dtype=np.float64)
-    ax = np.array([s.accel_x for s in samples])
-    ay = np.array([s.accel_y for s in samples])
-    az = np.array([s.accel_z for s in samples])
-    
-    gx = np.array([s.gyro_x for s in samples])
-    gy = np.array([s.gyro_y for s in samples])
-    gz = np.array([s.gyro_z for s in samples])
-
-    # 2. CALCULA A MAGNITUDE DO GIROSCÓPIO (RAD/S) PARA TRAVAR O CHACOALHADO
-    gyro_magnitude = np.sqrt(gx**2 + gy**2 + gz**2)
-
-    # 3. FILTRO BUTTERWORTH NA MAGNITUDE DA ACELERAÇÃO
-    raw_acc_magnitude = np.sqrt(ax**2 + ay**2 + az**2)
-    bw_filter = ButterworthLowPassFilter(cutoff=3.0, fs=50.0, order=4)
-    filtered_magnitude = bw_filter.apply(raw_acc_magnitude)
-
-    # 4. DETECÇÃO DE PASSOS COM A TRAVA DE GIROSCÓPIO ATIVADA
-    detector = PeakStepDetector(sample_rate_hz=50.0, weinberg_k=0.48)
-    step_events = detector.detect(
-        timestamps=timestamps,
-        filtered_magnitude=filtered_magnitude,
-        gyro_magnitude=gyro_magnitude  # <--- Giroscópio bloqueia sacudidas de mão aqui
-    )
-
-    if not step_events:
-        return {
-            "status": "warning",
-            "message": "Nenhum passo humano detectado no trecho (movimento descartado como chacoalhado/repouso).",
-            "steps_count": 0,
-            "distance_m": 0.0
-        }
-
-    # 5. CÁLCULO DA DISTÂNCIA TOTAL (WEINBERG) E YAW MÉDIO (MADGWICK)
-    total_distance_m = sum(s.step_length_m for s in step_events)
-    
-    estimator = MadgwickAttitudeEstimator(gain=0.033)
-    quaternions = estimator.update_series(samples)
-    mean_yaw_rad = float(np.mean([q.yaw for q in quaternions]))
-
-    # 6. PERSISTÊNCIA NO BANCO MYSQL E MEMÓRIA DO GRAFO
-    map_db_manager.save_edge(payload.source, payload.target, total_distance_m, mean_yaw_rad)
-    angle_deg = float(np.degrees(mean_yaw_rad))
-    topo_map.connect_checkpoints(payload.source, payload.target, distance=total_distance_m, angle_deg=angle_deg)
-
-    return {
-        "status": "success",
-        "source": payload.source,
-        "target": payload.target,
-        "steps_count": len(step_events),
-        "distance_m": round(total_distance_m, 2),
-        "mean_yaw_rad": round(mean_yaw_rad, 4)
-    }
-
+    """Recebe amostras brutas e repassa o processamento para a classe RawEdgeProcessor."""
+    return edge_processor.process_samples(payload.source, payload.target, payload.samples)
 
 @app.post("/api/checkpoints", status_code=status.HTTP_201_CREATED)
 def create_checkpoint(checkpoint: CheckpointSchema):
