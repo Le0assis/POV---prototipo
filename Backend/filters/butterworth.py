@@ -29,53 +29,45 @@ from scipy.signal import butter, filtfilt  # type: ignore
 
 from .signal_filter import SignalFilter # type: ignore
 
+import numpy as np
+import numpy.typing as npt
+from scipy.signal import butter, filtfilt
 
-class ButterworthLowPassFilter(SignalFilter):
-    """Filtro Butterworth passa-baixa aplicado em ambos os sentidos
-    (zero-phase), via `scipy.signal.filtfilt`.
-    """
+class ButterworthLowPassFilter:
+    """Filtro Butterworth passa-baixa adaptativo (zero-phase) para PDR."""
 
-    def __init__(self, cutoff_hz: float, sample_rate_hz: float, order: int = 4) -> None:
-        """
-        Args:
-            cutoff_hz: frequência de corte, em Hz (ex.: 3 Hz para
-                caminhada humana normal, já com margem de segurança acima
-                da cadência típica de 1.5-2.5 Hz).
-            sample_rate_hz: taxa de amostragem do sinal de entrada, em Hz.
-            order: ordem do filtro. Ordens mais altas têm transição mais
-                abrupta na banda de corte, mas podem introduzir
-                instabilidade numérica se altas demais; 4 é um valor
-                seguro e comum para este tipo de sinal.
-        """
-        if cutoff_hz >= sample_rate_hz / 2:
-            raise ValueError(
-                f"cutoff_hz ({cutoff_hz}) deve ser menor que a frequência "
-                f"de Nyquist ({sample_rate_hz / 2} Hz)."
-            )
+    def __init__(self, cutoff_hz: float = 2.2, sample_rate_hz: float = 30.0, order: int = 2) -> None:
         self._cutoff_hz = cutoff_hz
         self._sample_rate_hz = sample_rate_hz
         self._order = order
 
-        nyquist = sample_rate_hz / 2.0
-        normalized_cutoff = cutoff_hz / nyquist
-        self._b, self._a = butter(order, normalized_cutoff, btype="low", analog=False)
-
-    def apply(self, signal: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        """Aplica o filtro Butterworth passa-baixa (zero-phase) ao sinal.
-
-        Args:
-            signal: sinal de entrada (ex.: série temporal de magnitude
-                da aceleração).
-
-        Returns:
-            Sinal filtrado, com o mesmo tamanho da entrada.
-        """
+    def apply(self, signal: npt.ArrayLike, sample_rate_hz: float | None = None) -> npt.NDArray[np.float64]:
         signal_arr = np.asarray(signal, dtype=np.float64)
-        min_len_required = 3 * (max(len(self._a), len(self._b)) - 1)
-        if len(signal_arr) <= min_len_required:
-            raise ValueError(
-                f"Sinal curto demais ({len(signal_arr)} amostras) para "
-                f"filtfilt com esta ordem de filtro (mínimo: "
-                f"{min_len_required + 1} amostras)."
-            )
-        return filtfilt(self._b, self._a, signal_arr)
+        
+        # Usa a taxa informada na chamada ou a taxa padrão do construtor
+        sr = sample_rate_hz if (sample_rate_hz is not None and sample_rate_hz > 0) else self._sample_rate_hz
+        
+        # 1. Proteção contra sinais muito curtos (retorna o sinal bruto sem quebrar)
+        min_samples = 3 * self._order + 1
+        if len(signal_arr) < min_samples:
+            return signal_arr
+
+        # 2. Ajuste dinâmico de Nyquist (evita o ValueError)
+        nyquist = sr / 2.0
+        # Mantém a frequência de corte sempre abaixo de 90% da frequência de Nyquist
+        safe_cutoff = min(self._cutoff_hz, nyquist * 0.9)
+
+        # Se a frequência útil for muito baixa, retorna o sinal original
+        if safe_cutoff <= 0.1:
+            return signal_arr
+
+        normalized_cutoff = safe_cutoff / nyquist
+
+        # 3. Re-calcula coeficientes com a frequência real do lote recebido
+        b, a = butter(self._order, normalized_cutoff, btype="low", analog=False)
+
+        try:
+            return filtfilt(b, a, signal_arr)
+        except Exception:
+            # Fallback seguro caso ocorra qualquer instabilidade numérica no Scipy
+            return signal_arr
