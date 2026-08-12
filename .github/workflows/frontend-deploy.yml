@@ -7,7 +7,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  # JOB 1: Testes e validações de código Python
+  # JOB 1: Testes e validações do código Python (dev e main)
   test-and-validate:
     runs-on: ubuntu-latest
     steps:
@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m compileall .
 
-  # JOB 2: Publica a pasta frontend no GitHub Pages (SÓ RODA NA MAIN)
+  # JOB 2: Publica a pasta frontend na branch 'gh-pages' (Apenas no push da 'main')
   deploy-github-pages:
     needs: test-and-validate
     if: github.ref == 'refs/heads/main'
@@ -39,8 +39,10 @@ jobs:
       - name: Baixar o código
         uses: actions/checkout@v4
 
-      - name: Publicar pasta frontend no GitHub Pages
+      - name: Publicar pasta frontend na branch gh-pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./frontend
+          publish_branch: gh-pages
+          force_orphan: true
