@@ -33,24 +33,24 @@
         padding: 12px;
         margin-bottom: 10px;
         background-color: #f9f9f9;
-    }
-    .history-card.valid {
-        border-left: 6px solid #28a745;
-        background-color: #f0fff4;
-    }
-    .history-card.invalid {
-        border-left: 6px solid #dc3545;
-        background-color: #fff5f5;
-    }
-    .badge {
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 0.85em;
-        font-weight: bold;
-        color: #fff;
-    }
-    .badge-success { background-color: #28a745; }
-    .badge-warning { background-color: #dc3545; }
+        }
+        .history-card.valid {
+            border-left: 6px solid #28a745;
+            background-color: #f0fff4;
+        }
+        .history-card.invalid {
+            border-left: 6px solid #dc3545;
+            background-color: #fff5f5;
+        }
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            color: #fff;
+        }
+        .badge-success { background-color: #28a745; }
+        .badge-warning { background-color: #dc3545; }
     </style>
 </head>
 <body>
@@ -117,195 +117,259 @@
     
     <div id="status-msg" class="alert" style="display: none;"></div>
 </div>
-<script>const API_BASE_URL = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-    ? "http://localhost:8000"
-    : "https://api.pov-unimar.com";
 
-let isRecording = false;
-let rawSamples = [];
-let currentMag = { alpha: 0, beta: 0, gamma: 0 };
-let gyroHasData = false;
+<script>
+    const API_BASE_URL = "https://api.pov-unimar.com";
 
-// Controle de passos ao vivo
-let liveStepCount = 0;
-let lastAccMag = 0;
-let lastStepTimestamp = 0;
+    let isRecording = false;
+    let rawSamples = [];
+    let currentMag = { alpha: 0, beta: 0, gamma: 0 };
+    let gyroHasData = false;
 
-// Array do histórico
-let walkHistory = [];
+    // Controle de passos ao vivo
+    let liveStepCount = 0;
+    let lastAccMag = 0;
+    let lastStepTimestamp = 0;
 
-async function toggleRecording() {
-    const btn = document.getElementById('record-btn');
-    const src = document.getElementById('src-select').value;
-    const tgt = document.getElementById('tgt-select').value;
+    // Array do histórico
+    let walkHistory = [];
 
-    if (!isRecording) {
-        if (!src || !tgt || src === tgt) {
-            alert("Selecione Origem e Destino válidos.");
+    // 1. CARREGA OS NÓS DO BANCO DE DADOS (BASEADO NO INDEX.HTML)
+    async function loadNodes() {
+        const srcSel = document.getElementById('src-select');
+        const tgtSel = document.getElementById('tgt-select');
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/map`);
+            const data = await res.json();
+
+            if (data.status === 'success' && Array.isArray(data.nodes)) {
+                srcSel.innerHTML = '<option value="">-- Selecione a Origem --</option>';
+                tgtSel.innerHTML = '<option value="">-- Selecione o Destino --</option>';
+
+                data.nodes.forEach(n => {
+                    srcSel.innerHTML += `<option value="${n.id}">${n.label}</option>`;
+                    tgtSel.innerHTML += `<option value="${n.id}">${n.label}</option>`;
+                });
+            } else {
+                srcSel.innerHTML = '<option value="">Erro ao carregar nós</option>';
+                tgtSel.innerHTML = '<option value="">Erro ao carregar nós</option>';
+            }
+        } catch (err) {
+            console.error("Erro ao carregar nós:", err);
+            srcSel.innerHTML = '<option value="">Erro de conexão</option>';
+            tgtSel.innerHTML = '<option value="">Erro de conexão</option>';
+        }
+    }
+
+    async function toggleRecording() {
+        const btn = document.getElementById('record-btn');
+        const src = document.getElementById('src-select').value;
+        const tgt = document.getElementById('tgt-select').value;
+
+        if (!isRecording) {
+            if (!src || !tgt || src === tgt) {
+                alert("Selecione Origem e Destino válidos e diferentes.");
+                return;
+            }
+
+            // Reseta variáveis da gravação atual
+            rawSamples = [];
+            liveStepCount = 0;
+            lastAccMag = 0;
+            lastStepTimestamp = 0;
+            document.getElementById('live-step-count').innerText = "0";
+
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                try { await DeviceMotionEvent.requestPermission(); } catch (e) {}
+            }
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try { await DeviceOrientationEvent.requestPermission(); } catch (e) {}
+            }
+
+            try { await fetch(`${API_BASE_URL}/api/reset`, { method: 'POST' }); } catch (e) {}
+
+            isRecording = true;
+
+            window.addEventListener('devicemotion', handleMotion);
+            window.addEventListener('deviceorientation', handleOrientation);
+
+            btn.innerText = "⏹️ Parar e Enviar para Processamento";
+            btn.classList.add('recording');
+            showStatus("Gravando caminhada...");
+        } else {
+            window.removeEventListener('devicemotion', handleMotion);
+            window.removeEventListener('deviceorientation', handleOrientation);
+
+            isRecording = false;
+            btn.innerText = "▶️ Iniciar Captura";
+            btn.classList.remove('recording');
+
+            await sendRawSamplesToBackend(src, tgt, rawSamples);
+        }
+    }
+
+    function handleMotion(event) {
+        const acc = event.accelerationIncludingGravity || event.acceleration;
+        const rot = event.rotationRate;
+
+        if (!acc || acc.x === null || acc.x === undefined) return;
+
+        let gxDeg = 0.0, gyDeg = 0.0, gzDeg = 0.0;
+        if (rot) {
+            gxDeg = rot.alpha ?? rot.x ?? 0.0;
+            gyDeg = rot.beta ?? rot.y ?? 0.0;
+            gzDeg = rot.gamma ?? rot.z ?? 0.0;
+        }
+
+        const gxRad = gxDeg * (Math.PI / 180.0);
+        const gyRad = gyDeg * (Math.PI / 180.0);
+        const gzRad = gzDeg * (Math.PI / 180.0);
+
+        const accX = Number.isNaN(acc.x) ? 0.0 : acc.x;
+        const accY = Number.isNaN(acc.y) ? 0.0 : acc.y;
+        const accZ = Number.isNaN(acc.z) ? 0.0 : acc.z;
+
+        const accMag = Math.sqrt(accX**2 + accY**2 + accZ**2);
+        const gyroMag = Math.sqrt(gxRad**2 + gyRad**2 + gzRad**2);
+
+        // Atualização da telemetria visual
+        document.getElementById('acc-val').innerHTML = 
+            `X: ${accX.toFixed(2)}<br>Y: ${accY.toFixed(2)}<br>Z: ${accZ.toFixed(2)}<br><b>Mag: ${accMag.toFixed(2)}</b>`;
+        
+        document.getElementById('gyro-val').innerHTML = 
+            `X: ${gxRad.toFixed(2)}<br>Y: ${gyRad.toFixed(2)}<br>Z: ${gzRad.toFixed(2)}<br><b>Mag: ${gyroMag.toFixed(2)}</b>`;
+
+        const gyroBadge = document.getElementById('gyro-badge');
+        if (gyroMag > 0.05) {
+            gyroBadge.className = "gyro-status gyro-active";
+            gyroBadge.innerText = "Giroscópio: ATIVO";
+        }
+
+        // Detecção simplificada de passo ao vivo
+        const now = Date.now();
+        if (accMag > 11.8 && lastAccMag <= 11.8 && (now - lastStepTimestamp) > 330) {
+            liveStepCount++;
+            lastStepTimestamp = now;
+            document.getElementById('live-step-count').innerText = `${liveStepCount}`;
+        }
+        lastAccMag = accMag;
+
+        if (isRecording) {
+            const timestamp = now / 1000.0;
+            rawSamples.push({
+                timestamp: timestamp,
+                accel_x: accX,
+                accel_y: accY,
+                accel_z: accZ,
+                gyro_x: Number.isNaN(gxRad) ? 0.0 : gxRad,
+                gyro_y: Number.isNaN(gyRad) ? 0.0 : gyRad,
+                gyro_z: Number.isNaN(gzRad) ? 0.0 : gzRad,
+                mag_x: Number.isNaN(currentMag.alpha) ? 0.0 : currentMag.alpha,
+                mag_y: Number.isNaN(currentMag.beta) ? 0.0 : currentMag.beta,
+                mag_z: Number.isNaN(currentMag.gamma) ? 0.0 : currentMag.gamma
+            });
+
+            document.querySelectorAll('#sample-count').forEach(el => el.innerText = `${rawSamples.length}`);
+        }
+    }
+
+    function handleOrientation(event) {
+        currentMag.alpha = event.alpha || 0.0;
+        currentMag.beta = event.beta || 0.0;
+        currentMag.gamma = event.gamma || 0.0;
+
+        document.getElementById('mag-val').innerText = 
+            `Alpha: ${currentMag.alpha.toFixed(0)}° | Beta: ${currentMag.beta.toFixed(0)}° | Gamma: ${currentMag.gamma.toFixed(0)}°`;
+    }
+
+    async function sendRawSamplesToBackend(source, target, samples) {
+        if (samples.length < 20) {
+            alert("Gravação muito curta.");
             return;
         }
 
-        // Reseta variáveis da gravação atual
-        rawSamples = [];
-        liveStepCount = 0;
-        lastAccMag = 0;
-        lastStepTimestamp = 0;
-        document.getElementById('live-step-count').innerText = "0";
+        showStatus("Processando no backend...");
 
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            try { await DeviceMotionEvent.requestPermission(); } catch (e) {}
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/edges/process-raw`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source, target, samples })
+            });
+
+            const data = await res.json();
+            const timestampStr = new Date().toLocaleTimeString();
+
+            const historyItem = {
+                time: timestampStr,
+                source: source,
+                target: target,
+                liveSteps: liveStepCount,
+                processedSteps: data.steps_count || 0,
+                distance: data.distance_m || 0.0,
+                valid: data.valid ?? (data.status === "success"),
+                message: data.message || (data.status === "warning" ? "Chacoalhado descartado" : "Gravado com sucesso")
+            };
+
+            walkHistory.unshift(historyItem);
+            renderHistory();
+
+            if (res.ok && historyItem.valid) {
+                alert(`✅ Trecho Contabilizado!\nPassos: ${data.steps_count}\nDistância: ${data.distance_m}m`);
+                showStatus("Salvo no banco com sucesso!");
+            } else {
+                alert(`⚠️ Trecho não contabilizado!\nMotivo: ${historyItem.message}`);
+                showStatus("Caminhada descartada e registrada no histórico.");
+            }
+        } catch (err) {
+            console.error("Erro na comunicação:", err);
+            alert("Erro de conexão ao enviar caminhada.");
+            showStatus("Erro de conexão.");
         }
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            try { await DeviceOrientationEvent.requestPermission(); } catch (e) {}
+    }
+
+    function renderHistory() {
+        const container = document.getElementById('history-list');
+        if (walkHistory.length === 0) {
+            container.innerHTML = '<p class="text-muted" style="color: #6c757d;">Nenhuma caminhada realizada nesta sessão.</p>';
+            return;
         }
 
-        try { await fetch(`${API_BASE_URL}/api/reset`, { method: 'POST' }); } catch (e) {}
+        container.innerHTML = walkHistory.map(item => `
+            <div class="history-card ${item.valid ? 'valid' : 'invalid'}">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong>${item.source} ➔ ${item.target}</strong>
+                    <span class="badge ${item.valid ? 'badge-success' : 'badge-warning'}">
+                        ${item.valid ? '✅ Contabilizado' : '⚠️ Descartado'}
+                    </span>
+                </div>
+                <div style="font-size: 0.9em; margin-top: 6px; color: #444;">
+                    <span><b>Passos Processados:</b> ${item.processedSteps} (Ao Vivo: ${item.liveSteps})</span> | 
+                    <span><b>Distância:</b> ${item.distance}m</span> | 
+                    <span><b>Horário:</b> ${item.time}</span>
+                </div>
+                <div style="font-size: 0.85em; color: #666; margin-top: 4px;">
+                    <i>${item.message}</i>
+                </div>
+            </div>
+        `).join('');
+    }
 
-        isRecording = true;
+    function showStatus(msg) {
+        const el = document.getElementById('status-msg');
+        if (el) {
+            el.innerText = msg;
+            el.style.display = 'block';
+        }
+    }
 
+    // Inicializa a escuta dos sensores e carrega os nós do banco ao abrir a página
+    document.addEventListener("DOMContentLoaded", () => {
         window.addEventListener('devicemotion', handleMotion);
         window.addEventListener('deviceorientation', handleOrientation);
-
-        btn.innerText = "⏹️ Parar e Enviar para Processamento";
-        btn.classList.add('recording');
-        showStatus("Gravando caminhada...");
-    } else {
-        window.removeEventListener('devicemotion', handleMotion);
-        window.removeEventListener('deviceorientation', handleOrientation);
-
-        isRecording = false;
-        btn.innerText = "▶️ Iniciar Captura";
-        btn.classList.remove('recording');
-
-        await sendRawSamplesToBackend(src, tgt, rawSamples);
-    }
-}
-
-function handleMotion(event) {
-    const acc = event.accelerationIncludingGravity || event.acceleration;
-    const rot = event.rotationRate;
-
-    if (!acc || acc.x === null || acc.x === undefined) return;
-
-    let gxDeg = 0.0, gyDeg = 0.0, gzDeg = 0.0;
-    if (rot) {
-        gxDeg = rot.alpha ?? rot.x ?? 0.0;
-        gyDeg = rot.beta ?? rot.y ?? 0.0;
-        gzDeg = rot.gamma ?? rot.z ?? 0.0;
-    }
-
-    const gxRad = gxDeg * (Math.PI / 180.0);
-    const gyRad = gyDeg * (Math.PI / 180.0);
-    const gzRad = gzDeg * (Math.PI / 180.0);
-
-    const accX = Number.isNaN(acc.x) ? 0.0 : acc.x;
-    const accY = Number.isNaN(acc.y) ? 0.0 : acc.y;
-    const accZ = Number.isNaN(acc.z) ? 0.0 : acc.z;
-
-    const accMag = Math.sqrt(accX**2 + accY**2 + accZ**2);
-    const gyroMag = Math.sqrt(gxRad**2 + gyRad**2 + gzRad**2);
-
-    // Detecção simplificada de passo ao vivo no JS (Magnitude > 11.8 m/s² com intervalo mínimo de 330ms)
-    const now = Date.now();
-    if (accMag > 11.8 && lastAccMag <= 11.8 && (now - lastStepTimestamp) > 330) {
-        liveStepCount++;
-        lastStepTimestamp = now;
-        document.getElementById('live-step-count').innerText = `${liveStepCount}`;
-    }
-    lastAccMag = accMag;
-
-    if (isRecording) {
-        const timestamp = now / 1000.0;
-        rawSamples.push({
-            timestamp: timestamp,
-            accel_x: accX,
-            accel_y: accY,
-            accel_z: accZ,
-            gyro_x: Number.isNaN(gxRad) ? 0.0 : gxRad,
-            gyro_y: Number.isNaN(gyRad) ? 0.0 : gyRad,
-            gyro_z: Number.isNaN(gzRad) ? 0.0 : gzRad,
-            mag_x: Number.isNaN(currentMag.alpha) ? 0.0 : currentMag.alpha,
-            mag_y: Number.isNaN(currentMag.beta) ? 0.0 : currentMag.beta,
-            mag_z: Number.isNaN(currentMag.gamma) ? 0.0 : currentMag.gamma
-        });
-
-        document.getElementById('sample-count').innerText = `${rawSamples.length}`;
-    }
-}
-
-async function sendRawSamplesToBackend(source, target, samples) {
-    if (samples.length < 20) {
-        alert("Gravação muito curta.");
-        return;
-    }
-
-    showStatus("Processando no backend...");
-
-    try {
-        const res = await fetch(`${API_BASE_URL}/api/edges/process-raw`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source, target, samples })
-        });
-
-        const data = await res.json();
-        const timestampStr = new Date().toLocaleTimeString();
-
-        // Cria o registro da caminhada para o histórico
-        const historyItem = {
-            time: timestampStr,
-            source: source,
-            target: target,
-            liveSteps: liveStepCount,
-            processedSteps: data.steps_count || 0,
-            distance: data.distance_m || 0.0,
-            valid: data.valid ?? (data.status === "success"),
-            message: data.message || (data.status === "warning" ? "Chacoalhado descartado" : "Gravado com sucesso")
-        };
-
-        // Adiciona ao início da lista
-        walkHistory.unshift(historyItem);
-        renderHistory();
-
-        if (res.ok && historyItem.valid) {
-            alert(`✅ Trecho Contabilizado!\nPassos (Python): ${data.steps_count}\nDistância: ${data.distance_m}m`);
-            showStatus("Salvo no banco com sucesso!");
-        } else {
-            alert(`⚠️ Trecho não contabilizado!\nMotivo: ${historyItem.message}`);
-            showStatus("Caminhada descartada e registrada no histórico.");
-        }
-    } catch (err) {
-        console.error("Erro na comunicação:", err);
-        alert("Erro de conexão ao enviar caminhada.");
-    }
-}
-
-function renderHistory() {
-    const container = document.getElementById('history-list');
-    if (walkHistory.length === 0) {
-        container.innerHTML = '<p class="text-muted" style="color: #6c757d;">Nenhuma caminhada realizada nesta sessão.</p>';
-        return;
-    }
-
-    container.innerHTML = walkHistory.map(item => `
-        <div class="history-card ${item.valid ? 'valid' : 'invalid'}">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <strong>${item.source} ➔ ${item.target}</strong>
-                <span class="badge ${item.valid ? 'badge-success' : 'badge-warning'}">
-                    ${item.valid ? '✅ Contabilizado' : '⚠️ Descartado'}
-                </span>
-            </div>
-            <div style="font-size: 0.9em; margin-top: 6px; color: #444;">
-                <span><b>Passos Processados:</b> ${item.processedSteps} (Ao Vivo: ${item.liveSteps})</span> | 
-                <span><b>Distância:</b> ${item.distance}m</span> | 
-                <span><b>Horário:</b> ${item.time}</span>
-            </div>
-            <div style="font-size: 0.85em; color: #666; margin-top: 4px;">
-                <i>${item.message}</i>
-            </div>
-        </div>
-    `).join('');
-}
+        loadNodes();
+    });
 </script>
 </body>
 </html>
