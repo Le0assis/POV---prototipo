@@ -11,7 +11,7 @@ class MapDatabaseManager:
         """Salva um novo nó semântico no banco de dados."""
         sql = """INSERT INTO checkpoints (name) VALUES (%s)"""
         # IMPORTANTE: Notar a vírgula (name,) para o Python entender que é uma tupla de 1 elemento
-        succsses = self.db.executar_comando(sql, (name,))
+        succsses = self.db.execute_query(sql, (name,))
         
         if succsses:
             print(f"Checkpoint {name} adicionado com sucesso")
@@ -26,14 +26,14 @@ class MapDatabaseManager:
                  VALUES (%s, %s, %s, %s)"""
         
         # 1. Salva o caminho de IDA (Source -> Target)
-        succes = self.db.executar_comando(sql, (source, target, distance, heading_rad))
+        succes = self.db.execute_query(sql, (source, target, distance, heading_rad))
         
         # 2. Calcula o ângulo inverso de VOLTA em radianos (Target -> Source)
         # Adiciona 180 graus (pi radianos) e usa o mod (2*pi) para manter entre 0 e 2*pi
         inverse_heading = (heading_rad + np.pi) % (2 * np.pi)
         
         # 3. Salva o caminho de VOLTA (Target -> Source)
-        succes_back = self.db.executar_comando(sql, (target, source, distance, inverse_heading))
+        succes_back = self.db.execute_query(sql, (target, source, distance, inverse_heading))
         
         if succes and succes_back:
             print("Edge com {target, source} de ida e volta foi adicionado com suceso ")
@@ -49,7 +49,7 @@ class MapDatabaseManager:
         sql_nodes = "SELECT name FROM checkpoints"
         # O executar_consulta vai te retornar uma lista de dicionários se você usou dictionary=True
         # Ex: [{'name': 'Recepcao'}, {'name': 'Corredor Central'}]
-        rows_nodes = self.db.executar_consulta(sql_nodes)
+        rows_nodes = self.db.execute_search(sql_nodes)
         
         if rows_nodes:
             for row in rows_nodes:
@@ -60,7 +60,7 @@ class MapDatabaseManager:
 
         # --- PASSO 2: CARREGAR AS ARESTAS ---
         sql_edges = "SELECT source_node, target_node, distance_m, heading_rad FROM edges"
-        rows_edges = self.db.executar_consulta(sql_edges)
+        rows_edges = self.db.execute_search(sql_edges)
         
         if rows_edges:
             for row in rows_edges:
@@ -77,3 +77,27 @@ class MapDatabaseManager:
                 # Chame o método do seu mapa para criar a conexão na memória
                 topo_map.connect_checkpoints(source, target, distance, heading_deg)
                 print(f"[BD -> Sistema] Conexão carregada: {source} -> {target} ({distance}m)")
+                
+    def save_sensor_log(self, source: str, target: str, csv_data: str):
+        query = """
+            INSERT INTO sensors_log (source, target, raw_csv)
+            VALUES (%s, %s, %s)
+        """
+        succsses = self.db.execute_query(query, (source, target, csv_data))
+
+        if succsses:
+            print(f"Log salvo com sucesso")
+            return True
+        else:
+            print(f"Erro ao processar log")
+            return False
+        
+    def get_sensor_log_csv(self, log_id: int) -> str | None:
+        """Busca o conteúdo CSV de um log específico pelo ID."""
+        query = "SELECT raw_csv FROM sensors_log WHERE id = %s"
+        result = self.db.execute_search(query, (log_id,))
+        
+        # Ajuste a extração conforme o retorno do seu DB (tuple ou dict)
+        if result and len(result) > 0:
+            return result[0]['raw_csv'] if isinstance(result[0], dict) else result[0][0]
+        return None

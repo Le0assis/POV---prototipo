@@ -48,8 +48,11 @@ app.add_middleware(
     allow_headers=["*"],  
 )
 
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR / "../../frontend"
+
 db = ConexaoBD(host="localhost", database="POV", user="root", password="")
-db.conectar()
+db.connect()
 
 if not db.connection:
     print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
@@ -158,10 +161,6 @@ def get_map_layout():
         "edges": layout["edges"]
     }
     
-BASE_DIR = Path(__file__).resolve().parent
-FRONTEND_DIR = BASE_DIR / "../../frontend"
-
-    
 @app.get("/")
 def read_index():
     index_path = FRONTEND_DIR / "index.html"
@@ -176,6 +175,24 @@ def read_recorder():
         return FileResponse(recorder_path)
     return {"error": "Arquivo recorder.html nao encontrado em frontend/"}
 
+from fastapi import Response, HTTPException
+
+@app.get("/api/sensors_log/{log_id}/csv")
+def download_sensor_log_csv(log_id: int):
+    """Retorna o CSV gravado no banco como um arquivo para download."""
+    csv_data = map_db_manager.get_sensor_log_csv(log_id)
+    
+    if not csv_data:
+        raise HTTPException(status_code=404, detail="Log de sensores não encontrado.")
+    
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=sensor_log_{log_id}.csv"
+        }
+    )
+
 @app.on_event("shutdown")
 def shutdown_event():
-    db.desconectar()
+    db.disconnect()

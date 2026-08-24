@@ -12,7 +12,7 @@ db = ConexaoBD(
     password=""
 )
 
-db.conectar()
+db.connect()
 
 if not db.connection:
     raise Exception("Erro ao conectar ao banco.")
@@ -72,4 +72,4 @@ for source, target, distance, heading in edges:
 
 print("Mapa criado com sucesso!")
 
-db.desconectar()
+db.disconnect()

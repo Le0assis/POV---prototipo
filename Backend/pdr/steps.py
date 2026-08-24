@@ -61,57 +61,54 @@ class PeakStepDetector(StepDetector):
 
         # Trava para manter sr dentro de limites aceitáveis de celulares
         sr = float(np.clip(sr, 10.0, 100.0))
+        
+        
+        # TRAVA 1: DESVIO PADRÃO MÁXIMO (BARRAGEM DIRETA DE CHACOALHO)
+        # ------------------------------------------------------------------
+        std_amplitude = float(np.std(filtered_magnitude))
+        if std_amplitude < 0.35:   # Telefone parado
+            return []
+        if std_amplitude > 3.8:    # Chacoalho manual violento/médio
+            return []
 
         # ------------------------------------------------------------------
-        # TRAVA 1: ANÁLISE FREQUENCIAL (FFT)
+        # TRAVA 2: ANÁLISE FREQUENCIAL (FFT COM FAIXA DE SHAKE REAJUSTADA)
         # ------------------------------------------------------------------
         fft_vals = np.abs(np.fft.rfft(filtered_magnitude - np.mean(filtered_magnitude)))
         fft_freqs = np.fft.rfftfreq(n_samples, d=1.0 / sr)
 
-        # Energia na faixa da caminhada humana (0.8 Hz - 3.0 Hz)
-        walk_band_mask = (fft_freqs >= 0.8) & (fft_freqs <= 3.0)
+        walk_band_mask = (fft_freqs >= 0.8) & (fft_freqs <= 2.8)
         walk_energy = np.sum(fft_vals[walk_band_mask])
 
-        # Energia na faixa do chacoalhado (> 4.0 Hz)
-        shake_band_mask = (fft_freqs > 4.0) & (fft_freqs <= 15.0)
+        # Pega a faixa de 3.2 Hz a 15.0 Hz onde o chacoalho humano se concentra
+        shake_band_mask = (fft_freqs > 3.2) & (fft_freqs <= 15.0)
         shake_energy = np.sum(fft_vals[shake_band_mask])
 
-        if shake_energy > (2.5 * walk_energy) and shake_energy > 30.0:
+        if shake_energy > (1.5 * walk_energy) and shake_energy > 18.0:
             return []
 
         # ------------------------------------------------------------------
-        # TRAVA 2: FILTRO DE JERK (Taxa de variação com dt real)
+        # TRAVA 3: JERK GLOBAL E GIROSCÓPIO GLOBAL
         # ------------------------------------------------------------------
         dt = 1.0 / sr
         jerk = np.abs(np.diff(filtered_magnitude)) / dt
         mean_jerk = float(np.mean(jerk))
 
-        # Limite de Jerk ajustado para taxa real
-        if mean_jerk > 90.0:
+        if mean_jerk > 50.0:  # Reduzido de 90.0
             return []
 
-        # ------------------------------------------------------------------
-        # TRAVA 3: GIROSCÓPIO GLOBAL (Tolerante ao balanço natural do braço)
-        # ------------------------------------------------------------------
         if gyro_magnitude is not None and len(gyro_magnitude) == n_samples:
-            if float(np.mean(gyro_magnitude)) > 3.8:  # Permite movimento de caminhada normal
+            if float(np.mean(gyro_magnitude)) > 2.8:  # Reduzido de 3.8
                 return []
 
         # ------------------------------------------------------------------
-        # LOCALIZAÇÃO DE PICOS
+        # LOCALIZAÇÃO E FILTRAGEM DE PICOS
         # ------------------------------------------------------------------
-        std_amplitude = float(np.std(filtered_magnitude))
-        if std_amplitude < 0.35:  # Telefone totalmente parado
-            return []
-
         mean_amplitude = float(np.mean(filtered_magnitude))
-        
-        # Mínimo de ~330ms entre passos humanos
         min_distance = max(1, int(0.33 * sr)) 
 
-        # Limiares de picos redefinidos para detectar caminhadas suaves
-        dynamic_height = max(10.2, mean_amplitude + 0.3)
-        min_prominence = max(0.4, 0.25 * std_amplitude)
+        dynamic_height = max(10.3, mean_amplitude + 0.35)
+        min_prominence = max(0.45, 0.30 * std_amplitude)
         
         candidate_peaks, _ = find_peaks(
             filtered_magnitude, 
@@ -125,24 +122,23 @@ class PeakStepDetector(StepDetector):
         for i, peak_idx in enumerate(candidate_peaks):
             peak_val = filtered_magnitude[peak_idx]
 
-            # Trava de aceleração máxima (sacudidas violentas > 20.0 m/s²)
-            if peak_val > 20.0:
+            if peak_val > 15.5:  # Reduzido de 20.0
                 continue
 
-            # Trava de Jerk Local no pico
+            # Jerk Local no pico
             p_start = max(0, peak_idx - 2)
             p_end = min(len(jerk), peak_idx + 2)
-            if float(np.max(jerk[p_start:p_end])) > 150.0:
+            if float(np.max(jerk[p_start:p_end])) > 65.0:  # Reduzido de 150.0
                 continue
 
-            # Trava de Giroscópio Local no pico (Permite até 4.5 rad/s)
+            # Giroscópio Local no pico
             if gyro_magnitude is not None and len(gyro_magnitude) == n_samples:
                 w_start = max(0, peak_idx - min_distance // 2)
                 w_end = min(n_samples, peak_idx + min_distance // 2)
-                if float(np.max(gyro_magnitude[w_start:w_end])) > 4.5:
+                if float(np.max(gyro_magnitude[w_start:w_end])) > 3.0:  # Reduzido de 4.5
                     continue
 
-            # Janela de variação de amplitude (Weinberg)
+            # Variação de Amplitude (Weinberg)
             window_start = max(0, peak_idx - min_distance // 2)
             window_end = min(n_samples, peak_idx + min_distance // 2)
             
@@ -150,15 +146,15 @@ class PeakStepDetector(StepDetector):
             a_min = np.min(filtered_magnitude[window_start:window_end])
             acc_diff = float(a_max - a_min)
 
-            # Permite passadas mais leves (partindo de 1.1 m/s²)
-            if not (1.1 <= acc_diff <= 10.0):
+            # Faixa restrita para passada real
+            if not (1.2 <= acc_diff <= 5.0):  # Reduzido limite superior de 10.0 para 5.0
                 continue
 
             t_current = timestamps[peak_idx]
             cadence = (60.0 / (t_current - timestamps[candidate_peaks[i - 1]])) if i > 0 else 0.0
 
             raw_step_length = self._k * (acc_diff ** 0.25)
-            step_length = float(np.clip(raw_step_length, 0.40, 1.00))
+            step_length = float(np.clip(raw_step_length, 0.40, 0.95))
 
             steps.append(
                 StepEvent(

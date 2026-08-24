@@ -145,3 +145,16 @@ class Quaternion:
         siny_cosp = 2.0 * (self.w * self.z + self.x * self.y)
         cosy_cosp = 1.0 - 2.0 * (self.y * self.y + self.z * self.z)
         return math.atan2(siny_cosp, cosy_cosp)
+    
+    def get_vertical_acceleration(self, ax: float, ay: float, az: float) -> float:
+        """
+        Calcula a aceleração no eixo Z do MUNDO (vertical real da Terra)
+        usando a orientação deste Quaternion.
+        """
+        # Extrai a direção da gravidade no referencial do dispositivo a partir do Quaternion
+        gx = 2.0 * (self.x * self.z - self.w * self.y)
+        gy = 2.0 * (self.w * self.x + self.y * self.z)
+        gz = self.w * self.w - self.x * self.x - self.y * self.y + self.z * self.z
+
+        # Produto escalar: isola apenas a aceleração contida no eixo da gravidade
+        return float(ax * gx + ay * gy + az * gz)

@@ -29,30 +29,28 @@ def criar_tabelas_sistema(db: ConexaoBD):
     # 3. TABELA DE SENSOR LOGS (Histórico de Sensores Brutos)
     # Útil se você quiser gravar a caminhada real para simulações futuras.
     sql_sensor_logs = """
-    CREATE TABLE IF NOT EXISTS sensor_logs (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        timestamp DOUBLE NOT NULL,
-        acc_x FLOAT NOT NULL,
-        acc_y FLOAT NOT NULL,
-        acc_z FLOAT NOT NULL,
-        gyro_x FLOAT NOT NULL,
-        gyro_y FLOAT NOT NULL,
-        gyro_z FLOAT NOT NULL,
-        mag_x FLOAT NOT NULL,
-        mag_y FLOAT NOT NULL,
-        mag_z FLOAT NOT NULL
-    ) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS sensors_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        source VARCHAR(50),
+        target VARCHAR(50),
+        steps_detected INT DEFAULT 0,
+        distance_m FLOAT DEFAULT 0.0,
+        is_valid BOOLEAN DEFAULT FALSE,
+        message VARCHAR(255),
+        raw_csv LONGTEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """
 
     # Execução dos comandos utilizando a sua infraestrutura
     print("Criando tabela 'checkpoints'...")
-    db.executar_comando(sql_checkpoints)
+    db.execute_query(sql_checkpoints)
 
     print("Criando tabela 'edges'...")
-    db.executar_comando(sql_edges)
+    db.execute_query(sql_edges)
 
     print("Criando tabela 'sensor_logs'...")
-    db.executar_comando(sql_sensor_logs)
+    db.execute_query(sql_sensor_logs)
     
     print("[SETUP] Processo de criação de tabelas concluído.\n")
 
@@ -60,8 +58,8 @@ if __name__ == "__main__":
     # Script para você rodar de forma isolada uma única vez e preparar o XAMPP
     # Certifique-se de que o banco 'POV' já foi criado no phpMyAdmin!
     conexao = ConexaoBD(host="localhost", database="POV", user="root", password="")
-    conexao.conectar()
+    conexao.connect()
     
     if conexao.connection:
         criar_tabelas_sistema(conexao)
-        conexao.desconectar()
+        conexao.disconnect()

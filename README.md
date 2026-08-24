@@ -1,473 +1,240 @@
-# Documentação de Instalação e Execução — Projeto POV
+# Documentação Técnica e Guia de Execução — Projeto POV (PDR Pipeline)
 
-## 1. Estrutura do Projeto
+O **POV** é um sistema de Pedestrian Dead Reckoning (PDR) e mapeamento topológico. Ele processa dados inerciais brutos (acelerômetro e giroscópio), realiza fusão sensorial 3D via **Filtro de Madgwick**, isola a aceleração vertical real da Terra, aplica filtragem **Butterworth** e detecta passos por variação de amplitude (Modelo de Weinberg). O sistema grava os registros brutos em formato CSV no MySQL para análise de sinal e auditoria de erros.
+
+---
+
+## 1. Arquitetura do Pipeline PDR
+
+```text
+[Amostras Brutas] ──► [Reamostratagem Uniforme (TARGET_HZ)]
+                              │
+                              ▼
+                 [Madgwick Attitude Estimator]
+                              │
+                              ▼
+            [Isolamento de Aceleração Vertical Real]
+                              │
+                              ▼
+            [Trava Global de Chacoalho (Giroscópio)] ──(Se Exceder)──► [Log: Inválido]
+                              │ (Se Normal)
+                              ▼
+              [Filtro Passa-Baixas Butterworth]
+                              │
+                              ▼
+            [Detecção de Picos / Comprimento do Passo]
+                              │
+                              ▼
+        [Persistência do Grafo + Gravação de LOG CSV]
+
+```
+
+---
+
+## 2. Estrutura do Projeto
 
 ```text
 POV---prototipo/
 ├── Backend/
 │   ├── api/
-│   │   └── app.py
+│   │   └── app.py                     # API FastAPI (Endpoints REST e envio de CSV)
 │   ├── datasets/
-│   │   ├── create_tables.py
-│   │   ├── generate_sample_dataset.py
-│   │   ├── ManagerDatabase.py
-│   │   └── sample_walk.csv
+│   │   ├── create_tables.py           # Criação de tabelas no MySQL (Inc. sensors_log)
+│   │   ├── generate_sample_dataset.py # Gerador de massa de testes PDR
+│   │   ├── ManagerDatabase.py         # Gerenciador de conexões SQL
+│   │   └── sample_walk.csv            # Amostras para simulação
 │   ├── filters/
-│   │   ├── attitude_estimator.py
-│   │   ├── butterworth.py
-│   │   ├── madgwick.py
-│   │   ├── moving_average.py
-│   │   ├── quaternion.py
-│   │   └── signal_filter.py
+│   │   ├── attitude_estimator.py     # Wrapper de altitude/orientação
+│   │   ├── butterworth.py            # Filtro Butterworth Passa-Baixas 2ª Ordem
+│   │   ├── madgwick.py               # Algoritmo de Fusão Sensorial Madgwick
+│   │   ├── quaternion.py             # Vetores 3D e isolamento de Aceleração Vertical
+│   │   └── signal_filter.py          # Utilitários de sinal
 │   ├── map/
-│   │   ├── MapDatabaseManager.py
-│   │   ├── router.py
-│   │   ├── topological_map.py
-│   │   └── topological_matcher.py
+│   │   ├── MapDatabaseManager.py     # Persistência de grafos, arestas e logs de sensores
+│   │   ├── router.py                 # Algoritmos de roteamento topológico
+│   │   ├── topological_map.py        # Grafo de checkpoints
+│   │   └── topological_matcher.py    # Casamento de posições em mapa
 │   ├── others/
-│   │   ├── example_sensors.py
-│   │   ├── run_csv_client.py
-│   │   └── seed_map.py
+│   │   ├── run_csv_client.py         # Cliente de simulação PDR via cliente HTTP
+│   │   └── seed_map.py               # Alimentador de posições iniciais do mapa
 │   ├── pdr/
-│   │   ├── altitude.py
-│   │   ├── magnitude.py
-│   │   ├── steps.py
-│   │   └── tracker.py
-│   ├── sensors/
-│   │   ├── accelerometer.py
-│   │   ├── barometer.py
-│   │   ├── gyroscope.py
-│   │   ├── magnetometer.py
-│   │   ├── repository.py
-│   │   └── sensor_sample.py
-│   ├── static/
-│   │   ├── index.html
-│   │   ├── mapa-2d.html
-│   │   ├── recorder.html
-│   │   └── sensors_upload.html
-│   ├── tests/
+│   │   ├── processor.py              # Pipeline principal de PDR e validação
+│   │   ├── steps.py                  # Detector de picos de passos (Weinberg)
+│   │   └── tracker.py                # Rastreamento de deslocamento acumulado
 │   └── requirements.txt
 ├── frontend/
-│   ├── src/
-│   ├── index.html
-│   └── package.json
-├── .gitignore
 ├── cloudflared-config.yml
-└── CNAME
+└── README.md
+
 ```
 
 ---
 
-## 2. Pré-requisitos
+## 3. Pré-requisitos
 
-Antes de iniciar, certifique-se de que os seguintes programas estão instalados:
-
-- Git
-- Python 3.10 ou superior
-- XAMPP (Apache e MySQL)
-- Cloudflare CLI (`cloudflared`)
+* **Git**
+* **Python 3.10+**
+* **XAMPP** (Apache e MySQL)
+* **Cloudflare CLI (`cloudflared`)** *(Opcional: Apenas se for expor para rede externa)*
 
 ---
 
-## 3. Clonagem do Repositório, Instalação do Cloudflare CLI e Ambiente Virtual
+## 4. Passo a Passo de Instalação e Configuração
 
-### 3.1. Clonar o repositório
-
-Clone o repositório e acesse a pasta raiz:
+### Passo 1: Clonar o Repositório e Criar Ambiente Virtual
 
 ```bash
+# 1. Clonar o projeto
 git clone https://github.com/Le0assis/POV---prototipo
-cd POV---prototipo
+cd POV---prototipo/Backend
+
+# 2. Criar ambiente virtual
+python -m venv venv
+
+# 3. Ativar o ambiente virtual
+# Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+# Linux/macOS:
+source venv/bin/activate
+
+# 4. Instalar dependências
+pip install -r requirements.txt
+
 ```
 
-### 3.2. Instalar o Cloudflare CLI
+### Passo 2: Configurar o Banco de Dados (MySQL)
 
-Execute o PowerShell como **Administrador** e instale o `cloudflared`:
+1. Inicie o serviço **MySQL** pelo painel do **XAMPP**.
+2. Abra o browser em `http://localhost/phpmyadmin`.
+3. Crie um banco de dados chamado **`POV`** (UTF-8 General CI).
 
-```powershell
-winget install --id Cloudflare.cloudflared
+### Passo 3: Inicializar a Estrutura e Povoar o Banco
+
+Com o ambiente virtual ativado no diretório `Backend/`, execute a sequência obrigatória de inicialização:
+
+```bash
+# 1. Criar tabelas no banco (Incluindo a tabela sensors_log para auditoria)
+python -m datasets.create_tables
+
+# 2. Gerar dataset base de passos
+python -m datasets.generate_sample_dataset
+
+# 3. Povoar o mapa topológico base com checkpoints
+python -m others.seed_map
+
 ```
 
-### 3.3. Criar o ambiente virtual Python
+---
 
-Acesse o diretório do backend:
+## 5. Ordem Correta de Execução do Sistema
+
+Para rodar a aplicação completa com testes e logs de sensores, abra 3 terminais separados.
+
+### Terminal 1: Servidor Principal FastAPI (Backend PDR)
+
+Acesse o diretório `Backend` com o `venv` ativado:
 
 ```bash
 cd Backend
-```
-
-Crie o ambiente virtual:
-
-```bash
-python -m venv venv
-```
-
-### 3.4. Ativar o ambiente virtual
-
-#### Windows — PowerShell
-
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-#### Linux/macOS
-
-```bash
-source venv/bin/activate
-```
-
-### 3.5. Instalar as dependências
-
-Com o ambiente virtual ativado:
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## 4. Configuração do Banco de Dados (MySQL via XAMPP)
-
-### 4.1. Iniciar o XAMPP
-
-Abra o painel de controle do **XAMPP**.
-
-Inicie os seguintes serviços:
-
-- Apache
-- MySQL
-
-### 4.2. Acessar o phpMyAdmin
-
-Abra o navegador e acesse:
-
-[http://localhost/phpmyadmin](http://localhost/phpmyadmin)
-
-### 4.3. Criar o banco de dados
-
-Crie um novo banco de dados com o nome exato:
-
-```text
-POV
-```
-
-> **Observação:** caso o nome do banco esteja configurado de forma diferente no arquivo `Backend/datasets/ManagerDatabase.py`, utilize o nome definido nesse arquivo.
-
----
-
-## 5. Inicialização e Povoamento do Banco de Dados
-
-Dentro do diretório `Backend/`, com o ambiente virtual ativo, execute os scripts na seguinte ordem.
-
-### 5.1. Criar as tabelas no banco de dados
-
-```bash
-python -m datasets.create_tables
-```
-
-### 5.2. Gerar o conjunto de dados de amostra
-
-```bash
-python -m datasets.generate_sample_dataset
-```
-
-### 5.3. Alimentar o banco com os dados de teste do mapa
-
-```bash
-python -m others.seed_map
-```
-
----
-
-## 6. Execução do Servidor Web (API)
-
-Ainda dentro da pasta `Backend/`, inicie o servidor FastAPI utilizando o Uvicorn:
-
-```bash
 uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
+
 ```
 
-O servidor local estará disponível em:
-
-[http://127.0.0.1:8000](http://127.0.0.1:8000)
-
-### 6.1. Documentação Swagger
-
-A documentação interativa da API estará disponível em:
-
-[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
-> **Importante:** mantenha este terminal aberto enquanto estiver utilizando a API.
+> **Status de Sucesso:** API pronta em `[http://127.0.0.1:8000](http://127.0.0.1:8000)` e Swagger em `[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)`.
 
 ---
 
-## 7. Execução do Cloudflare Tunnel (HTTPS)
+### Terminal 2: Exposição Externa via Cloudflare Tunnel (Opcional)
 
-O Cloudflare Tunnel permite expor a API local para a internet utilizando HTTPS.
-
-Isso possibilita o consumo da API por um frontend hospedado, por exemplo, no GitHub Pages ou Vercel.
-
-### 7.1. Abrir um novo terminal
-
-Abra um novo terminal na **raiz do repositório**:
-
-```text
-POV---prototipo/
-```
-
-### 7.2. Realizar o login no Cloudflare
-
-Caso seja a primeira execução nessa máquina, faça o login:
-
-```bash
-cloudflared tunnel login
-```
-
-### 7.3. Configurar a rota DNS
-
-Configure a rota DNS do túnel:
-
-```bash
-cloudflared tunnel route dns pov-backend api.pov-unimar.com
-```
-
-### 7.4. Iniciar o túnel
-
-Ainda na raiz do projeto, execute:
+Execute na raiz do projeto (`POV---prototipo/`):
 
 ```bash
 cloudflared tunnel --config cloudflared-config.yml run
+
 ```
 
-Após a inicialização, a API deverá estar acessível publicamente pelo domínio configurado.
+> **Status de Sucesso:** Rotas mapeadas para HTTPS remoto (ex: `[https://api.pov-unimar.com/docs](https://api.pov-unimar.com/docs)`).
 
 ---
 
-## 8. Simulação de Passos (Cliente PDR)
+### Terminal 3: Cliente de Simulação e Validação PDR
 
-Com a **API** e o **Cloudflare Tunnel** em execução, abra um terceiro terminal.
-
-### 8.1. Acessar o diretório Backend
+Acesse a pasta `Backend`, ative o `venv` e execute o cliente de envio de dados inerciais:
 
 ```bash
-cd POV---prototipo/Backend
-```
-
-### 8.2. Ativar o ambiente virtual
-
-No Windows PowerShell:
-
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-No Linux/macOS:
-
-```bash
-source venv/bin/activate
-```
-
-### 8.3. Executar o cliente PDR
-
-```bash
+cd Backend
 python -m others.run_csv_client
+
 ```
 
-O script utilizará os dados do arquivo de amostra para simular o envio de informações do sistema PDR para a API.
+> **Status de Sucesso:** Envio em lote dos sensores brutos, retornos de validação HTTP `200 OK` e persistência dos CSVs na tabela `sensors_log`.
 
 ---
 
-## 9. Checkpoints de Validação
+## 6. Auditoria de Sensores e Download de CSVs Brutos
 
-### 9.1. Checkpoint 1 — Banco de Dados
+O sistema grava o sinal bruto de cada tentativa de caminhada na tabela `sensors_log` para diagnóstico de sinal e ajuste de limiares.
 
-Acesse:
+### Schema da Tabela `sensors_log`
 
-[http://localhost/phpmyadmin](http://localhost/phpmyadmin)
+```sql
+CREATE TABLE sensors_log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    source VARCHAR(50),
+    target VARCHAR(50),
+    steps_detected INT DEFAULT 0,
+    distance_m FLOAT DEFAULT 0.0,
+    is_valid BOOLEAN DEFAULT FALSE,
+    message VARCHAR(255),
+    raw_csv LONGTEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-Selecione o banco de dados `POV` e confirme que:
+```
 
-- O banco existe.
-- As tabelas foram criadas.
-- Os dados de teste foram inseridos corretamente.
+### Endpoints para Download e Inspeção de Sinal
+
+| Método | Endpoint | Descrição |
+| --- | --- | --- |
+| `GET` | `/api/sensors_log/{log_id}/csv` | Baixa o arquivo `.csv` bruto da gravação |
+| `GET` | `/docs` | Interface Swagger interativa para execução |
+
+Para analisar a curva de aceleração de um teste no Excel ou Python Pandas:
+
+1. Acesse o MySQL via phpMyAdmin e pegue o `id` da gravação desejada na tabela `sensors_log`.
+2. Acesse a URL no seu navegador: `[http://127.0.0.1:8000/api/sensors_log/](http://127.0.0.1:8000/api/sensors_log/){id}/csv`.
 
 ---
 
-### 9.2. Checkpoint 2 — Servidor API Local
+## 7. Estratégia de Branches (Git) e Automação (CI/CD)
 
-Acesse:
+### Branches Principais
 
-[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+* **`main` (Produção):** Contém exclusivamente o código estável e validado.
+* **`dev` (Desenvolvimento):** Branch principal de trabalho, onde novas alterações de filtros e endpoints são integradas e testadas.
 
-A página do Swagger do FastAPI deve ser exibida.
-
-Verifique se os endpoints da API estão disponíveis e funcionando.
-
----
-
-### 9.3. Checkpoint 3 — API Pública via Cloudflare Tunnel
-
-Acesse:
-
-[https://api.pov-unimar.com/docs](https://api.pov-unimar.com/docs)
-
-A documentação Swagger da API deverá ser carregada através do domínio público.
-
-Isso confirma que o Cloudflare Tunnel está conectado corretamente ao servidor local.
-
----
-
-### 9.4. Checkpoint 4 — Cliente PDR
-
-Observe o terminal onde o seguinte comando foi executado:
+### Fluxo de Trabalho Git Recomendado
 
 ```bash
-python -m others.run_csv_client
-```
+# 1. Garantir que está na branch de desenvolvimento
+git checkout dev
 
-O resultado esperado é:
+# 2. Registrar alterações locais
+git add .
+git commit -m "feat: ajuste na taxa de amostragem e log de csv no banco"
 
-- Envio sequencial das coordenadas/dados da simulação.
-- Respostas HTTP `200 OK` da API.
-- Processamento contínuo dos dados pelo backend.
+# 3. Enviar para a branch dev remota
+git push origin dev
 
----
-
-## 10. Resumo da Execução
-
-A ordem geral para executar o projeto é:
-
-### Terminal 1 — Backend/API
-
-```bash
-cd POV---prototipo/Backend
-```
-
-Ative o ambiente virtual.
-
-#### Windows PowerShell
-
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-#### Linux/macOS
-
-```bash
-source venv/bin/activate
-```
-
-Inicie a API:
-
-```bash
-uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
-```
-
----
-
-### Terminal 2 — Cloudflare Tunnel
-
-Na raiz do projeto:
-
-```bash
-cd POV---prototipo
-```
-
-Execute:
-
-```bash
-cloudflared tunnel --config cloudflared-config.yml run
-```
-
----
-
-### Terminal 3 — Cliente PDR
-
-Acesse o diretório do backend:
-
-```bash
-cd POV---prototipo/Backend
-```
-
-Ative o ambiente virtual.
-
-#### Windows PowerShell
-
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-#### Linux/macOS
-
-```bash
-source venv/bin/activate
-```
-
-Execute o cliente:
-
-```bash
-python -m others.run_csv_client
-```
-
----
-
-## 11. URLs de Validação
-
-| Serviço | URL |
-|---|---|
-| phpMyAdmin | [http://localhost/phpmyadmin](http://localhost/phpmyadmin) |
-| API local | [http://127.0.0.1:8000](http://127.0.0.1:8000) |
-| Swagger local | [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) |
-| Swagger público | [https://api.pov-unimar.com/docs](https://api.pov-unimar.com/docs) |
-
----
-
-## 12. Observações
-
-- O MySQL deve estar em execução antes dos scripts de criação e povoamento do banco.
-- O ambiente virtual Python deve estar ativado ao executar os comandos do backend.
-- A API precisa estar em execução antes de iniciar o Cloudflare Tunnel.
-- O Cloudflare Tunnel precisa estar ativo antes de executar o cliente PDR caso o cliente utilize a API pública.
-- Para uma execução completa, mantenha os terminais da API e do Cloudflare Tunnel abertos durante toda a simulação.
-- Certifique-se de que o arquivo `cloudflared-config.yml` está corretamente configurado antes de iniciar o túnel.
-- Certifique-se de que o banco de dados `POV` corresponde às configurações utilizadas pelo backend.
-
-Estrutura do Git e CI/CD
-1. Arquitetura de Branches
-main (Produção): Mantém exclusivamente o código estável. Alterações nesta branch disparam a atualização automática do servidor final.
-
-dev (Desenvolvimento): Ambiente seguro para programar, testar sensores e corrigir falhas sem impactar a aplicação em uso.
-
-2. Fluxo de Comandos e Utilidade
-Criação da Branch de Desenvolvimento:
+# 4. Promover código para produção (Merge) quando estável
+git checkout main
+git merge dev
+git push origin main
+git checkout dev
 
 ```
-git checkout -b dev — Cria e alterna para a nova branch.
 
-git push -u origin dev — Publica a branch dev no GitHub e conecta o rastreamento.
+### CI/CD via GitHub Actions
 
-```
-Trabalho Diário (dev):
-
-```
-git checkout dev — Garante que as alterações fiquem isoladas do ambiente final.
-
-git add . e git commit -m "descrição" — Prepara e registra o histórico das edições locais.
-
-git push origin dev — Salva as alterações na branch de desenvolvimento no GitHub.
-```
-
-Integração com Produção (Merge):
-```
-git checkout main — Alterna para a branch principal.
-
-git merge dev — Copia todas as melhorias testadas da dev para a main.
-
-git push origin main — Envia a versão final para o GitHub e inicia o deploy.
-
-git checkout dev — Retorna para a branch de testes para continuar o desenvolvimento.
-```
-3. Automação com GitHub Actions (CI/CD)
-Em dev (Validação): Cada envio roda um processo automatizado no GitHub para checar a sintaxe do código e garantir que não há erros de compilação antes de prosseguir.
-
-Em main (Deploy): Após a validação do código, o pipeline autoriza e executa a atualização direta no servidor de produção.
+* **Disparo em `dev`:** Roda testes estáticos de compilação Python e validações de rotas para impedir erros de sintaxe ou bibliotecas ausentes.
+* **Disparo em `main`:** Executa o pipeline completo de verificação e dispara a atualização direta no servidor de produção final.

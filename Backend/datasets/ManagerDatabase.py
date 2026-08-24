@@ -11,7 +11,7 @@ class ConexaoBD:
         self.connection = None
         self.cursor = None
 
-    def conectar(self):
+    def connect(self):
         try:
             self.connection = mysql.connector.connect(
                 host=self.host,
@@ -21,13 +21,13 @@ class ConexaoBD:
             )
             if self.connection.is_connected():
                 # dictionary=True faz o fetchall retornar uma lista de dicionários 
-                # em vez de tuplas. É muito melhor para ler colunas pelo nome depois!
+                # em vez de tuplas.
                 self.cursor = self.connection.cursor(dictionary=True)
                 print("Conexão com o banco de dados estabelecida com sucesso!")
         except Error as e:
             print(f"Erro ao conectar ao banco de dados: {e}")
 
-    def executar_consulta(self, sql, params=None):
+    def execute_search(self, sql, params=None):
         try:
             self.cursor.execute(sql, params)
             resultado = self.cursor.fetchall()
@@ -36,10 +36,9 @@ class ConexaoBD:
             print(f"Erro ao executar consulta: {e}")
             return None
 
-    def executar_comando(self, sql, params=None):
+    def execute_query(self, sql, params=None):
         try:
             self.cursor.execute(sql, params)
-            # CORRIGIDO: alterado de self.conexao para self.connection
             self.connection.commit()
             print("Comando executado com sucesso!")
             return True
@@ -49,12 +48,11 @@ class ConexaoBD:
             print(f"Erro ao executar comando: {e}")
             return False
 
-    def desconectar(self):
-        # CORRIGIDO: alterado de self.conexao para self.connection
-        if self.connection and self.connection.is_connected():
-            self.cursor.close()
-            self.connection.close()
-            print("Conexão encerrada.")
+    def disconnect(self):
+            if self.connection and self.connection.is_connected():
+                self.cursor.close()
+                self.connection.close()
+                print("Conexão encerrada.")
 
 
 #db = ConexaoBD(host="localhost", database="POV", user="root", password="")
