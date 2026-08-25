@@ -100,8 +100,14 @@ source venv/bin/activate
 # 4. Instalar dependências
 pip install -r requirements.txt
 
-```
 
+## Instalar plugin do sql
+pip install mysql-connector-python
+
+## instalar cloudflare tunnel (scripts devem estar habilitados)
+winget install --id Cloudflare.cloudflared
+
+```
 ### Passo 2: Configurar o Banco de Dados (MySQL)
 
 1. Inicie o serviço **MySQL** pelo painel do **XAMPP**.
@@ -145,6 +151,14 @@ uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 ---
 
 ### Terminal 2: Exposição Externa via Cloudflare Tunnel (Opcional)
+
+---
+
+#### Primeira vez rodando execute:
+
+cloudflare login
+
+E envie o link que aparece no terminal para o administrador
 
 Execute na raiz do projeto (`POV---prototipo/`):
 
