@@ -98,7 +98,15 @@
 
 <script>
     
-    const API_BASE_URL = "https://api.pov-unimar.com";
+    const isLocalhost = Boolean(
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1' ||
+        window.location.hostname === '[::1]'
+    );
+
+    const API_BASE_URL = isLocalhost 
+        ? 'http://127.0.0.1:8000' 
+        : 'https://api.pov-unimar.com';
 
     const canvas = document.getElementById('mapCanvas');
     const ctx = canvas.getContext('2d');
