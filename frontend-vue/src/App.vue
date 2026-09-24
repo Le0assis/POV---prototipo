@@ -7,12 +7,8 @@ import { RouterView } from 'vue-router'
 </template>
 
 <style>
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
+/* O reset de margin/padding vem do Tailwind (preflight). Um "* { margin:0; padding:0 }"
+   aqui, fora das layers, sobrescreveria todas as classes de espaçamento. */
 html,
 body,
 #app {
