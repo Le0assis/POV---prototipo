@@ -6,7 +6,7 @@ class ConexaoBD:
     Classe responsável por gerenciar a conexão física com o MySQL
     e executar buscas e comandos com suporte a reconexão automática.
     """
-    def __init__(self, host="localhost", database="POV", user="root", password=""):
+    def __init__(self, host="localhost", database="pov", user="root", password=""):
         self.host = host
         self.database = database
         self.user = user

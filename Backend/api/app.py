@@ -227,8 +227,6 @@ def download_sensor_log_csv(log_id: int):
 # ==========================================
 # 7. ROTAS PARA ARQUIVOS ESTÁTICOS / FRONTEND
 # ==========================================
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 @app.get("/")
 def read_index():
     index_path = FRONTEND_DIR / "index.html"
