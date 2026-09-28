@@ -1,8 +1,11 @@
 from datasets.ManagerDatabase import ConexaoBD
 from map.MapDatabaseManager import MapDatabaseManager
 
+# Identificador padrão para o mapa base compartilhado por todos os usuários
+DEFAULT_SESSION_ID = "default_session"
+
 # ======================================
-# CONEXÃO
+# CONEXÃO COM O BANCO DE DADOS
 # ======================================
 
 db = ConexaoBD(
@@ -15,12 +18,12 @@ db = ConexaoBD(
 db.connect()
 
 if not db.connection:
-    raise Exception("Erro ao conectar ao banco.")
+    raise Exception("Erro ao conectar ao banco de dados.")
 
 manager = MapDatabaseManager(db)
 
 # ======================================
-# CHECKPOINTS
+# CHECKPOINTS (LOCAIS)
 # ======================================
 
 checkpoints = [
@@ -34,42 +37,39 @@ checkpoints = [
     "Escada"
 ]
 
-print("Inserindo checkpoints...")
+print("Inserindo checkpoints base para todos os usuários...")
 
 for checkpoint in checkpoints:
-    manager.save_checkpoint(checkpoint)
+    # Repassa o ID de sessão padrão e o nome do cômodo
+    manager.save_checkpoint(DEFAULT_SESSION_ID, checkpoint)
 
 # ======================================
-# EDGES
+# ARESTAS / CONEXÕES (CORREDORES)
 # distance = metros
 # heading = radianos
 # ======================================
 
 edges = [
-
     ("Recepcao", "Corredor A", 4.5, 0.0),
-
     ("Corredor A", "Sala 101", 2.0, 1.57),
     ("Corredor A", "Sala 102", 5.0, 1.57),
-
     ("Corredor A", "Corredor B", 8.0, 0.0),
-
     ("Corredor B", "Sala 103", 3.0, 1.57),
     ("Corredor B", "Banheiro", 2.5, -1.57),
-
     ("Corredor B", "Escada", 4.0, 0.0),
 ]
 
-print("Inserindo conexões...")
+print("Inserindo conexões base para todos os usuários...")
 
 for source, target, distance, heading in edges:
     manager.save_edge(
+        DEFAULT_SESSION_ID,
         source,
         target,
         distance,
         heading
     )
 
-print("Mapa criado com sucesso!")
+print("Mapa base populado com sucesso para a sessão padrão ('default_session')!")
 
 db.disconnect()

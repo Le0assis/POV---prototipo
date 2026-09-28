@@ -7,6 +7,7 @@ def criar_tabelas_sistema(db: ConexaoBD):
     # Guarda o nome semântico de cada ponto de interesse mapeado.
     sql_checkpoints = """
     CREATE TABLE IF NOT EXISTS checkpoints (
+        session_id VARCHAR(255),
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL UNIQUE
     ) ENGINE=InnoDB;
@@ -16,6 +17,7 @@ def criar_tabelas_sistema(db: ConexaoBD):
     # Guarda a relação de vizinhança entre os checkpoints, distância e orientação.
     sql_edges = """
     CREATE TABLE IF NOT EXISTS edges (
+        session_id VARCHAR(255),
         id INT AUTO_INCREMENT PRIMARY KEY,
         source_node VARCHAR(100) NOT NULL,
         target_node VARCHAR(100) NOT NULL,
@@ -30,6 +32,7 @@ def criar_tabelas_sistema(db: ConexaoBD):
     # Útil se você quiser gravar a caminhada real para simulações futuras.
     sql_sensor_logs = """
       CREATE TABLE IF NOT EXISTS sensors_log (
+        session_id VARCHAR(255),
         id INT AUTO_INCREMENT PRIMARY KEY,
         source VARCHAR(50),
         target VARCHAR(50),
