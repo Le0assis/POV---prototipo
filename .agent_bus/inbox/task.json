@@ -1,0 +1,4 @@
+{
+  "instruction": "Execute a primeira tarefa pendente de auditoria-001.md. Aplique as correções necessárias e garanta que o código funcione.",
+  "files": ["auditoria-001.md"]
+}

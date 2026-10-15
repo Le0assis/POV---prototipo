@@ -1,0 +1,5 @@
+{
+  "status": "success",
+  "log": "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nUsing gpt-4o model with API key from environment.\nAider v0.86.2\nMain model: gpt-4o with diff edit format\nWeak model: gpt-4o-mini\nGit repo: .git with 53 files\nRepo-map: using 4096 tokens, auto refresh\nAdded auditoria-001.md to the chat (read-only).\n\nlitellm.BadRequestError: OpenAIException - /chat/completions: Invalid model name\npassed in model=gpt-4o. Call `/v1/models` to view available models for your key.\n\n",
+  "error": "Warning: Input is not a terminal (fd=0).\n"
+}

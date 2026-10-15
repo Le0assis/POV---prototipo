@@ -59,6 +59,82 @@
         </div>
     </div>
 
+    <!-- BÚSSOLA DE NAVEGAÇÃO -->
+    <div id="panel-compass" class="card" style="display: none;">
+        <h3 style="font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 15px; text-align: center;">Bússola de Navegação</h3>
+        <div style="position: relative; width: 200px; height: 200px; margin: 0 auto;">
+            <!-- Seta apontando para o destino -->
+            <div id="compass-arrow" style="
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%) rotate(0deg);
+                width: 0;
+                height: 0;
+                border-left: 20px solid transparent;
+                border-right: 20px solid transparent;
+                border-bottom: 60px solid #38bdf8;
+                transition: transform 0.15s ease-out;
+                transform-origin: center bottom;
+                z-index: 10;
+            "></div>
+            <!-- Círculo da bússola -->
+            <div style="
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 180px;
+                height: 180px;
+                border: 3px solid #334155;
+                border-radius: 50%;
+                background: #0f172a;
+            ">
+                <div style="
+                    position: absolute;
+                    top: -8px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    color: #38bdf8;
+                    font-size: 0.7rem;
+                    font-weight: bold;
+                ">N</div>
+                <div style="
+                    position: absolute;
+                    bottom: -8px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    color: #64748b;
+                    font-size: 0.7rem;
+                ">S</div>
+                <div style="
+                    position: absolute;
+                    left: -8px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: #64748b;
+                    font-size: 0.7rem;
+                ">O</div>
+                <div style="
+                    position: absolute;
+                    right: -8px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: #64748b;
+                    font-size: 0.7rem;
+                ">L</div>
+            </div>
+        </div>
+        <div style="text-align: center; margin-top: 12px;">
+            <span id="compass-target" style="color: #38bdf8; font-weight: bold; font-size: 0.9rem;">--</span>
+            <br>
+            <span id="compass-delta" style="color: #94a3b8; font-size: 0.75rem;">Aguardando rota...</span>
+        </div>
+        <div style="text-align: center; margin-top: 8px; font-size: 0.7rem; color: #64748b;">
+            <span id="compass-status">Orientação do dispositivo: --</span>
+        </div>
+    </div>
+
     <!-- PAINEL MAPEADOR (GRAVAR MAPA NO MYSQL) -->
     <div id="panel-map" class="card" style="display: none;">
         <h3>Cadastrar Elementos no Banco de Dados</h3>
@@ -116,8 +192,14 @@
     let currentRoute = [];
     let visitedPath = [];
 
+    // Bússola de navegação
+    let routeSegments = [];
+    let currentSegmentIndex = 0;
+    let currentYawRad = 0; // Orientação atual do dispositivo (radianos)
+
     function switchMode(mode) {
         document.getElementById('panel-nav').style.display = (mode === 'nav') ? 'flex' : 'none';
+        document.getElementById('panel-compass').style.display = (mode === 'nav') ? 'block' : 'none';
         document.getElementById('panel-map').style.display = (mode === 'map') ? 'block' : 'none';
         document.getElementById('btn-mode-nav').classList.toggle('active', mode === 'nav');
         document.getElementById('btn-mode-map').classList.toggle('active', mode === 'map');
@@ -150,6 +232,83 @@
             srcSelect.innerHTML += `<option value="${n.id}">${n.label}</option>`;
             tgtSelect.innerHTML += `<option value="${n.id}">${n.label}</option>`;
         });
+    }
+
+    // Normaliza ângulo para [-PI, PI]
+    function normalizeAngle(angle) {
+        while (angle <= -Math.PI) angle += 2 * Math.PI;
+        while (angle > Math.PI) angle -= 2 * Math.PI;
+        return angle;
+    }
+
+    // Handler de orientação do dispositivo (DeviceOrientationEvent)
+    function handleOrientation(event) {
+        // alpha = azimute em graus (0 = Norte, sentido horário)
+        const alpha = event.alpha;
+        if (alpha !== null && alpha !== undefined) {
+            // Converter para radianos: 0 = Norte, sentido horário
+            currentYawRad = (alpha * Math.PI) / 180.0;
+
+            document.getElementById('compass-status').innerText =
+                `Orientação do dispositivo: ${alpha.toFixed(0)}° (${currentYawRad.toFixed(2)} rad)`;
+
+            updateCompass();
+        }
+    }
+
+    // Atualiza a bússola: calcula delta e rotaciona a seta
+    function updateCompass() {
+        if (routeSegments.length === 0 || currentSegmentIndex >= routeSegments.length) {
+            document.getElementById('compass-target').innerText = '--';
+            document.getElementById('compass-delta').innerText = 'Rota não iniciada';
+            return;
+        }
+
+        const segment = routeSegments[currentSegmentIndex];
+        const targetHeading = segment.heading_rad; // Já vem em radianos do backend
+
+        // Delta = target - current (normalizado para [-PI, PI])
+        let delta = normalizeAngle(targetHeading - currentYawRad);
+
+        // Rotacionar a seta (CSS rotate aceita graus)
+        const deltaDeg = delta * 180.0 / Math.PI;
+        const arrow = document.getElementById('compass-arrow');
+        if (arrow) {
+            arrow.style.transform = `translate(-50%, -50%) rotate(${deltaDeg}deg)`;
+        }
+
+        // Atualizar textos
+        document.getElementById('compass-target').innerText =
+            `${segment.source} → ${segment.target} (${segment.heading_deg.toFixed(0)}°)`;
+
+        const directionLabel = deltaDeg > -22.5 && deltaDeg <= 22.5 ? '⬆️ Frente' :
+                               deltaDeg > 22.5 && deltaDeg <= 67.5 ? '↗️ Diag. Dir.' :
+                               deltaDeg > 67.5 && deltaDeg <= 112.5 ? '➡️ Direita' :
+                               deltaDeg > 112.5 && deltaDeg <= 157.5 ? '↘️ Diag. Dir. Tras' :
+                               deltaDeg > 157.5 || deltaDeg <= -157.5 ? '⬇️ Trás' :
+                               deltaDeg > -157.5 && deltaDeg <= -112.5 ? '↙️ Diag. Esq. Tras' :
+                               deltaDeg > -112.5 && deltaDeg <= -67.5 ? '⬅️ Esquerda' :
+                               deltaDeg > -67.5 && deltaDeg <= -22.5 ? '↖️ Diag. Esq.' : '⬆️ Frente';
+
+        document.getElementById('compass-delta').innerText =
+            `Delta: ${deltaDeg.toFixed(0)}° | ${directionLabel} | Dist: ${segment.distance_m.toFixed(1)}m`;
+    }
+
+    // Verifica se chegou no próximo nó e avança segmento
+    function checkSegmentProgress() {
+        if (routeSegments.length === 0 || currentSegmentIndex >= routeSegments.length) return;
+
+        const segment = routeSegments[currentSegmentIndex];
+        // Se o nó atual mudou para o target do segmento atual, avança
+        if (currentNode === segment.target) {
+            currentSegmentIndex++;
+            if (currentSegmentIndex < routeSegments.length) {
+                console.log(`Avançou para segmento ${currentSegmentIndex}: ${routeSegments[currentSegmentIndex].source} → ${routeSegments[currentSegmentIndex].target}`);
+            } else {
+                console.log('Chegou ao destino final!');
+                document.getElementById('compass-delta').innerText = '🎯 Destino alcançado!';
+            }
+        }
     }
 
     // 2. GRAVAR CHECKPOINT NO BANCO VIA API
@@ -194,26 +353,44 @@
         try {
             const res = await fetch(`${API_BASE_URL}/api/current_location`);
             const data = await res.json();
-            
+
             currentNode = data.current_node;
             visitedPath = data.visited_path || [];
-            
+
             document.getElementById('current-node').innerText = currentNode || 'Aguardando...';
             document.getElementById('accumulated-dist').innerText = `Distância trecho: ${(data.accumulated_distance_m || 0).toFixed(2)}m`;
-            
+
+            // Verificar progresso na rota
+            checkSegmentProgress();
+
             drawMap();
         } catch (err) { console.error("Erro na localização:", err); }
     }
 
     async function onRequestRoute() {
         const dest = document.getElementById('dest-select').value;
-        if (!dest || !currentNode) { currentRoute = []; drawMap(); return; }
+        if (!dest || !currentNode) {
+            currentRoute = [];
+            routeSegments = [];
+            currentSegmentIndex = 0;
+            drawMap();
+            return;
+        }
 
-        const res = await fetch(`${API_BASE_URL}/api/route?start=${encodeURIComponent(currentNode)}&end=${encodeURIComponent(dest)}`);
+        // Buscar rota com segmentos detalhados (heading, distance)
+        const res = await fetch(`${API_BASE_URL}/api/compass_route?start=${encodeURIComponent(currentNode)}&end=${encodeURIComponent(dest)}`);
         if (res.ok) {
             const data = await res.json();
             currentRoute = data.path_sequence || [];
-        } else { currentRoute = []; }
+            routeSegments = data.segments || [];
+            currentSegmentIndex = 0;
+            console.log('Rota carregada:', routeSegments);
+            updateCompass();
+        } else {
+            currentRoute = [];
+            routeSegments = [];
+            currentSegmentIndex = 0;
+        }
         drawMap();
     }
 
@@ -302,4 +479,19 @@
     
     loadMapLayout();
     setInterval(fetchUserLocation, 500);
+
+    // Iniciar escuta de orientação do dispositivo
+    window.addEventListener('deviceorientation', handleOrientation);
+
+    // Para iOS 13+ requer permissão
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        // Opcional: solicitar permissão no primeiro toque do usuário
+        document.body.addEventListener('click', async () => {
+            try {
+                await DeviceOrientationEvent.requestPermission();
+            } catch (e) {
+                console.log('Permissão de orientação não concedida:', e);
+            }
+        }, { once: true });
+    }
 </script>

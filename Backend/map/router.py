@@ -93,6 +93,37 @@ class TopologicalRouter:
             path.append(step_node)
             step_node = predecessors[step_node]
 
-        # Como o caminho foi montado de trás para frente (Destino -> Origem), 
+        # Como o caminho foi montado de trás para frente (Destino -> Origem),
         # inverta a lista antes de retornar! (Dica Python: path.reverse() ou path[::-1])
         return path[::-1]
+
+    def calculate_route_with_segments(self, start_node: str, end_node: str) -> list[dict]:
+        """Calcula a rota mais curta e retorna detalhes de cada segmento (aresta).
+
+        Returns:
+            Lista de dicts com: source, target, distance_m, heading_rad, heading_deg
+        """
+        # Reutiliza o Dijkstra para obter a sequência de nós
+        node_path = self.calculate_route(start_node, end_node)
+        if not node_path or len(node_path) < 2:
+            return []
+
+        segments = []
+        for i in range(len(node_path) - 1):
+            source = node_path[i]
+            target = node_path[i + 1]
+
+            # Encontrar a aresta correspondente no grafo
+            outgoing_edges = self.map.get_outgoing_edges(source)
+            edge = next((e for e in outgoing_edges if e.target == target), None)
+
+            if edge:
+                segments.append({
+                    "source": source,
+                    "target": target,
+                    "distance_m": edge.distance_m,
+                    "heading_rad": edge.heading_rad,
+                    "heading_deg": edge.heading_rad * 180.0 / 3.141592653589793
+                })
+
+        return segments

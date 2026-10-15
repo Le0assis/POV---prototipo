@@ -129,17 +129,38 @@ def localize_user(sensor_data: StepSensorSchema):
 def get_route(start: str = Query(...), end: str = Query(...)):
     if start not in topo_map.nodes or end not in topo_map.nodes:
         raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
-        
+
     calculated_path = router.calculate_route(start, end)
     if not calculated_path:
         raise HTTPException(status_code=404, detail=f"Sem caminho viável entre '{start}' e '{end}'.")
-        
+
     return {
         "status": "success",
         "origin": start,
         "destination": end,
         "path_sequence": calculated_path,
         "total_nodes_to_cross": len(calculated_path)
+    }
+
+
+@app.get("/api/compass_route", status_code=status.HTTP_200_OK)
+def get_compass_route(start: str = Query(...), end: str = Query(...)):
+    """Retorna a rota com segmentos detalhados (heading, distance) para navegação por bússola."""
+    if start not in topo_map.nodes or end not in topo_map.nodes:
+        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+
+    segments = router.calculate_route_with_segments(start, end)
+    if not segments:
+        raise HTTPException(status_code=404, detail=f"Sem caminho viável entre '{start}' e '{end}'.")
+
+    total_distance = sum(s["distance_m"] for s in segments)
+
+    return {
+        "status": "success",
+        "origin": start,
+        "destination": end,
+        "segments": segments,
+        "total_distance_m": round(total_distance, 2)
     }
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
