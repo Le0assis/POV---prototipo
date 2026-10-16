@@ -1,4 +1,4 @@
-<html>frontend/index.html</html><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -6,18 +6,41 @@
     <title>POV - Mapeamento e Localização Indoor 2D</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { width: 100%; max-width: 950px; display: flex; flex-direction: column; gap: 20px; }
-        
-        /* Modos / Abas */
-        .mode-selector { display: flex; gap: 10px; }
-        .mode-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .mode-btn.active { background: #0284c7; color: white; border-color: #38bdf8; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 0; }
+
+        /* MENU SUPERIOR FIXO */
+        .top-nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            display: flex;
+            background: #0f172a;
+            border-bottom: 1px solid #1e293b;
+            z-index: 1000;
+            padding: 0 10px;
+        }
+
+        .nav-btn {
+            flex: 1;
+            padding: 12px 8px;
+            text-align: center;
+            text-decoration: none;
+            color: #94a3b8;
+            font-weight: 600;
+            font-size: 0.85rem;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .nav-btn:hover { color: #38bdf8; background: #1e293b; }
+        .nav-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; background: #1e293b; }
+
+        .container { width: 100%; max-width: 950px; display: flex; flex-direction: column; gap: 20px; padding: 60px 20px 20px; }
 
         /* Painel Superior */
         .card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; }
         .header-card { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 15px; }
-        
+
         /* Formulários de Mapeamento */
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px; }
         .form-group { display: flex; flex-direction: column; gap: 8px; background: #0f172a; padding: 15px; border-radius: 10px; }
@@ -32,18 +55,25 @@
         .legend { display: flex; gap: 20px; justify-content: center; font-size: 0.85rem; color: #cbd5e1; margin-top: 10px; }
         .legend-item { display: flex; align-items: center; gap: 6px; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
+
+        /* Link para rotas */
+        .routes-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #0284c7;
+            color: white;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .routes-link:hover { background: #0369a1; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <!-- SELEÇÃO DE MODO DE USO -->
-    <div class="mode-selector">
-        <button id="btn-mode-nav" class="mode-btn active" onclick="switchMode('nav')">📍 Modo Navegação</button>
-        <button id="btn-mode-map" class="mode-btn" onclick="switchMode('map')">🗺️ Modo Mapeador (Gravar Mapa)</button>
-        <a href="/recorder"> <button id="btn-mode-map" class="mode-btn">Modo de Gravacao</button></a>
-    </div>
-
     <!-- PAINEL DE NAVEGAÇÃO -->
     <div id="panel-nav" class="card header-card">
         <div>
@@ -59,80 +89,9 @@
         </div>
     </div>
 
-    <!-- BÚSSOLA DE NAVEGAÇÃO -->
-    <div id="panel-compass" class="card" style="display: none;">
-        <h3 style="font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 15px; text-align: center;">Bússola de Navegação</h3>
-        <div style="position: relative; width: 200px; height: 200px; margin: 0 auto;">
-            <!-- Seta apontando para o destino -->
-            <div id="compass-arrow" style="
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%) rotate(0deg);
-                width: 0;
-                height: 0;
-                border-left: 20px solid transparent;
-                border-right: 20px solid transparent;
-                border-bottom: 60px solid #38bdf8;
-                transition: transform 0.15s ease-out;
-                transform-origin: center bottom;
-                z-index: 10;
-            "></div>
-            <!-- Círculo da bússola -->
-            <div style="
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 180px;
-                height: 180px;
-                border: 3px solid #334155;
-                border-radius: 50%;
-                background: #0f172a;
-            ">
-                <div style="
-                    position: absolute;
-                    top: -8px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    color: #38bdf8;
-                    font-size: 0.7rem;
-                    font-weight: bold;
-                ">N</div>
-                <div style="
-                    position: absolute;
-                    bottom: -8px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    color: #64748b;
-                    font-size: 0.7rem;
-                ">S</div>
-                <div style="
-                    position: absolute;
-                    left: -8px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    color: #64748b;
-                    font-size: 0.7rem;
-                ">O</div>
-                <div style="
-                    position: absolute;
-                    right: -8px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    color: #64748b;
-                    font-size: 0.7rem;
-                ">L</div>
-            </div>
-        </div>
-        <div style="text-align: center; margin-top: 12px;">
-            <span id="compass-target" style="color: #38bdf8; font-weight: bold; font-size: 0.9rem;">--</span>
-            <br>
-            <span id="compass-delta" style="color: #94a3b8; font-size: 0.75rem;">Aguardando rota...</span>
-        </div>
-        <div style="text-align: center; margin-top: 8px; font-size: 0.7rem; color: #64748b;">
-            <span id="compass-status">Orientação do dispositivo: --</span>
-        </div>
+    <!-- Link para página de rotas -->
+    <div style="text-align: center;">
+        <a href="/routes" class="routes-link">📋 Ver Rotas Salvas e Testar</a>
     </div>
 
     <!-- PAINEL MAPEADOR (GRAVAR MAPA NO MYSQL) -->
@@ -173,15 +132,15 @@
 
 
 <script>
-    
+
     const isLocalhost = Boolean(
         window.location.hostname === 'localhost' ||
         window.location.hostname === '127.0.0.1' ||
         window.location.hostname === '[::1]'
     );
 
-    const API_BASE_URL = isLocalhost 
-        ? 'http://127.0.0.1:8000' 
+    const API_BASE_URL = isLocalhost
+        ? 'http://127.0.0.1:8000'
         : 'https://api.pov-unimar.com';
 
     const canvas = document.getElementById('mapCanvas');
@@ -192,31 +151,13 @@
     let currentRoute = [];
     let visitedPath = [];
 
-    // Bússola de navegação
+    // Rota com segmentos para desenhar no canvas
     let routeSegments = [];
-    let currentSegmentIndex = 0;
-    let currentYawRad = 0; // Orientação atual do dispositivo (radianos)
 
-    function switchMode(mode) {
-        document.getElementById('panel-nav').style.display = (mode === 'nav') ? 'flex' : 'none';
-        document.getElementById('panel-compass').style.display = (mode === 'nav') ? 'block' : 'none';
-        document.getElementById('panel-map').style.display = (mode === 'map') ? 'block' : 'none';
-        document.getElementById('btn-mode-nav').classList.toggle('active', mode === 'nav');
-        document.getElementById('btn-mode-map').classList.toggle('active', mode === 'map');
-    }
-
-    // 1. CARREGA O MAPA DO BACKEND (LAYOUT 2D)
-    async function loadMapLayout() {
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/map`);
-            const data = await res.json();
-            if (data.status === 'success') {
-                mapData = data;
-                populateSelects(data.nodes);
-                drawMap();
-            }
-        } catch (err) { console.error("Erro ao carregar mapa:", err); }
-    }
+    // Inserir menu superior
+    import('/static/js/nav.js').then(({ insertTopNav }) => {
+        insertTopNav('nav');
+    }).catch(err => console.error('Erro ao carregar nav:', err));
 
     function populateSelects(nodes) {
         const destSelect = document.getElementById('dest-select');
@@ -234,81 +175,17 @@
         });
     }
 
-    // Normaliza ângulo para [-PI, PI]
-    function normalizeAngle(angle) {
-        while (angle <= -Math.PI) angle += 2 * Math.PI;
-        while (angle > Math.PI) angle -= 2 * Math.PI;
-        return angle;
-    }
-
-    // Handler de orientação do dispositivo (DeviceOrientationEvent)
-    function handleOrientation(event) {
-        // alpha = azimute em graus (0 = Norte, sentido horário)
-        const alpha = event.alpha;
-        if (alpha !== null && alpha !== undefined) {
-            // Converter para radianos: 0 = Norte, sentido horário
-            currentYawRad = (alpha * Math.PI) / 180.0;
-
-            document.getElementById('compass-status').innerText =
-                `Orientação do dispositivo: ${alpha.toFixed(0)}° (${currentYawRad.toFixed(2)} rad)`;
-
-            updateCompass();
-        }
-    }
-
-    // Atualiza a bússola: calcula delta e rotaciona a seta
-    function updateCompass() {
-        if (routeSegments.length === 0 || currentSegmentIndex >= routeSegments.length) {
-            document.getElementById('compass-target').innerText = '--';
-            document.getElementById('compass-delta').innerText = 'Rota não iniciada';
-            return;
-        }
-
-        const segment = routeSegments[currentSegmentIndex];
-        const targetHeading = segment.heading_rad; // Já vem em radianos do backend
-
-        // Delta = target - current (normalizado para [-PI, PI])
-        let delta = normalizeAngle(targetHeading - currentYawRad);
-
-        // Rotacionar a seta (CSS rotate aceita graus)
-        const deltaDeg = delta * 180.0 / Math.PI;
-        const arrow = document.getElementById('compass-arrow');
-        if (arrow) {
-            arrow.style.transform = `translate(-50%, -50%) rotate(${deltaDeg}deg)`;
-        }
-
-        // Atualizar textos
-        document.getElementById('compass-target').innerText =
-            `${segment.source} → ${segment.target} (${segment.heading_deg.toFixed(0)}°)`;
-
-        const directionLabel = deltaDeg > -22.5 && deltaDeg <= 22.5 ? '⬆️ Frente' :
-                               deltaDeg > 22.5 && deltaDeg <= 67.5 ? '↗️ Diag. Dir.' :
-                               deltaDeg > 67.5 && deltaDeg <= 112.5 ? '➡️ Direita' :
-                               deltaDeg > 112.5 && deltaDeg <= 157.5 ? '↘️ Diag. Dir. Tras' :
-                               deltaDeg > 157.5 || deltaDeg <= -157.5 ? '⬇️ Trás' :
-                               deltaDeg > -157.5 && deltaDeg <= -112.5 ? '↙️ Diag. Esq. Tras' :
-                               deltaDeg > -112.5 && deltaDeg <= -67.5 ? '⬅️ Esquerda' :
-                               deltaDeg > -67.5 && deltaDeg <= -22.5 ? '↖️ Diag. Esq.' : '⬆️ Frente';
-
-        document.getElementById('compass-delta').innerText =
-            `Delta: ${deltaDeg.toFixed(0)}° | ${directionLabel} | Dist: ${segment.distance_m.toFixed(1)}m`;
-    }
-
-    // Verifica se chegou no próximo nó e avança segmento
-    function checkSegmentProgress() {
-        if (routeSegments.length === 0 || currentSegmentIndex >= routeSegments.length) return;
-
-        const segment = routeSegments[currentSegmentIndex];
-        // Se o nó atual mudou para o target do segmento atual, avança
-        if (currentNode === segment.target) {
-            currentSegmentIndex++;
-            if (currentSegmentIndex < routeSegments.length) {
-                console.log(`Avançou para segmento ${currentSegmentIndex}: ${routeSegments[currentSegmentIndex].source} → ${routeSegments[currentSegmentIndex].target}`);
-            } else {
-                console.log('Chegou ao destino final!');
-                document.getElementById('compass-delta').innerText = '🎯 Destino alcançado!';
+    // 1. CARREGA O MAPA DO BACKEND (LAYOUT 2D)
+    async function loadMapLayout() {
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/map`);
+            const data = await res.json();
+            if (data.status === 'success') {
+                mapData = data;
+                populateSelects(data.nodes);
+                drawMap();
             }
-        }
+        } catch (err) { console.error("Erro ao carregar mapa:", err); }
     }
 
     // 2. GRAVAR CHECKPOINT NO BANCO VIA API
@@ -360,9 +237,6 @@
             document.getElementById('current-node').innerText = currentNode || 'Aguardando...';
             document.getElementById('accumulated-dist').innerText = `Distância trecho: ${(data.accumulated_distance_m || 0).toFixed(2)}m`;
 
-            // Verificar progresso na rota
-            checkSegmentProgress();
-
             drawMap();
         } catch (err) { console.error("Erro na localização:", err); }
     }
@@ -372,24 +246,20 @@
         if (!dest || !currentNode) {
             currentRoute = [];
             routeSegments = [];
-            currentSegmentIndex = 0;
             drawMap();
             return;
         }
 
-        // Buscar rota com segmentos detalhados (heading, distance)
+        // Buscar rota com segmentos detalhados (heading, distance) para desenhar no canvas
         const res = await fetch(`${API_BASE_URL}/api/compass_route?start=${encodeURIComponent(currentNode)}&end=${encodeURIComponent(dest)}`);
         if (res.ok) {
             const data = await res.json();
             currentRoute = data.path_sequence || [];
             routeSegments = data.segments || [];
-            currentSegmentIndex = 0;
-            console.log('Rota carregada:', routeSegments);
-            updateCompass();
+            console.log('Rota carregada para canvas:', routeSegments);
         } else {
             currentRoute = [];
             routeSegments = [];
-            currentSegmentIndex = 0;
         }
         drawMap();
     }
@@ -476,22 +346,10 @@
         });
     }
 
-    
+
     loadMapLayout();
     setInterval(fetchUserLocation, 500);
 
-    // Iniciar escuta de orientação do dispositivo
-    window.addEventListener('deviceorientation', handleOrientation);
-
-    // Para iOS 13+ requer permissão
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        // Opcional: solicitar permissão no primeiro toque do usuário
-        document.body.addEventListener('click', async () => {
-            try {
-                await DeviceOrientationEvent.requestPermission();
-            } catch (e) {
-                console.log('Permissão de orientação não concedida:', e);
-            }
-        }, { once: true });
-    }
 </script>
+</body>
+</html>

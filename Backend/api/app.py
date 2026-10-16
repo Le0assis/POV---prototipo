@@ -13,7 +13,7 @@ from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
-from .schema import ProcessRawEdgeSchema, CheckpointSchema, StepSensorSchema
+from .schema import ProcessRawEdgeSchema, CheckpointSchema, StepSensorSchema, RouteCreateSchema
 
 # --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
 from filters.butterworth import ButterworthLowPassFilter
@@ -163,7 +163,83 @@ def get_compass_route(start: str = Query(...), end: str = Query(...)):
         "total_distance_m": round(total_distance, 2)
     }
 
+# --- ENDPOINTS DE ROTAS SALVAS ---
+
+@app.get("/api/routes", status_code=status.HTTP_200_OK)
+def get_all_routes():
+    """Lista todas as rotas salvas (resumo)."""
+    routes = map_db_manager.get_all_routes()
+    return {
+        "status": "success",
+        "routes": routes
+    }
+
+@app.post("/api/routes", status_code=status.HTTP_201_CREATED)
+def create_route(route_data: RouteCreateSchema):
+    """Cria e salva uma nova rota calculando via Dijkstra."""
+    start = route_data.start_node
+    end = route_data.end_node
+
+    if start not in topo_map.nodes or end not in topo_map.nodes:
+        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+
+    segments = router.calculate_route_with_segments(start, end)
+    if not segments:
+        raise HTTPException(status_code=404, detail=f"Sem caminho viável entre '{start}' e '{end}'.")
+
+    path_sequence = router.calculate_route(start, end)
+
+    # Nome automático se não fornecido
+    name = route_data.name or f"{start} → {end}"
+
+    success = map_db_manager.save_route(name, start, end, segments, path_sequence)
+    if not success:
+        raise HTTPException(status_code=500, detail="Falha ao salvar rota no banco.")
+
+    # Retorna a rota criada (busca pelo último ID)
+    routes = map_db_manager.get_all_routes()
+    new_route = routes[0] if routes else None
+
+    return {
+        "status": "success",
+        "message": f"Rota '{name}' salva com sucesso.",
+        "route": new_route
+    }
+
+@app.get("/api/routes/{route_id}", status_code=status.HTTP_200_OK)
+def get_route(route_id: int):
+    """Retorna uma rota completa com todos os segmentos para modo teste."""
+    route = map_db_manager.get_route_by_id(route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Rota não encontrada.")
+
+    return {
+        "status": "success",
+        "route": route
+    }
+
+@app.delete("/api/routes/{route_id}", status_code=status.HTTP_200_OK)
+def delete_route(route_id: int):
+    """Remove uma rota salva."""
+    success = map_db_manager.delete_route(route_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Rota não encontrada ou erro ao remover.")
+
+    return {"status": "success", "message": "Rota removida com sucesso."}
+
+# Modificar reset para aceitar start_node dinâmico
+@app.post("/api/reset")
+def reset_session(start_node: str = Query(default="Recepcao")):
+    """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
+    global matcher, visited_path
+    if start_node not in topo_map.nodes:
+        start_node = "Recepcao"
+    matcher = TopologicalMatcher(topo_map, starting_node=start_node)
+    visited_path = [start_node]
+    return {"status": "success", "message": "Estado do PDR e sensores resetados.", "start_node": start_node}
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/frontend_static", StaticFiles(directory=FRONTEND_DIR / "static"), name="frontend_static")
 
 @app.get("/api/current_location")
 def get_current_location():
@@ -195,6 +271,13 @@ def read_recorder():
     if recorder_path.exists():
         return FileResponse(recorder_path)
     return {"error": "Arquivo recorder.html nao encontrado em frontend/"}
+
+@app.get("/routes")
+def read_routes():
+    routes_path = FRONTEND_DIR / "routes.html"
+    if routes_path.exists():
+        return FileResponse(routes_path)
+    return {"error": "Arquivo routes.html nao encontrado em frontend/"}
 
 from fastapi import Response, HTTPException
 

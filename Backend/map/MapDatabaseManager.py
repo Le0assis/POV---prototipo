@@ -101,3 +101,84 @@ class MapDatabaseManager:
         if result and len(result) > 0:
             return result[0]['raw_csv'] if isinstance(result[0], dict) else result[0][0]
         return None
+
+    def save_route(self, name: str, start_node: str, end_node: str, segments: list, path_sequence: list):
+        """Salva uma rota calculada com todos os segmentos no banco de dados."""
+        import json
+
+        total_distance = sum(s["distance_m"] for s in segments)
+        # Estimativa: passo médio de 0.75m
+        total_steps_estimated = int(round(total_distance / 0.75))
+
+        sql = """
+            INSERT INTO saved_routes (name, start_node, end_node, total_distance_m, total_steps_estimated, segments_json, path_sequence_json)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+
+        success = self.db.execute_query(sql, (
+            name, start_node, end_node, total_distance, total_steps_estimated,
+            json.dumps(segments), json.dumps(path_sequence)
+        ))
+
+        if success:
+            print(f"Rota '{name}' salva com sucesso ({len(segments)} segmentos, {total_distance:.1f}m)")
+            return True
+        else:
+            print(f"Erro ao salvar rota '{name}'")
+            return False
+
+    def get_all_routes(self):
+        """Lista todas as rotas salvas (resumo para UI)."""
+        sql = """
+            SELECT id, name, start_node, end_node, total_distance_m, total_steps_estimated, created_at
+            FROM saved_routes
+            ORDER BY created_at DESC
+        """
+        rows = self.db.execute_search(sql)
+        if rows:
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "start_node": row["start_node"],
+                    "end_node": row["end_node"],
+                    "total_distance_m": row["total_distance_m"],
+                    "total_steps_estimated": row["total_steps_estimated"],
+                    "created_at": row["created_at"]
+                }
+                for row in rows
+            ]
+        return []
+
+    def get_route_by_id(self, route_id: int):
+        """Carrega uma rota completa com todos os segmentos para modo teste."""
+        sql = """
+            SELECT id, name, start_node, end_node, total_distance_m, total_steps_estimated,
+                   segments_json, path_sequence_json, created_at
+            FROM saved_routes
+            WHERE id = %s
+        """
+        rows = self.db.execute_search(sql, (route_id,))
+        if rows and len(rows) > 0:
+            row = rows[0]
+            import json
+            return {
+                "id": row["id"],
+                "name": row["name"],
+                "start_node": row["start_node"],
+                "end_node": row["end_node"],
+                "total_distance_m": row["total_distance_m"],
+                "total_steps_estimated": row["total_steps_estimated"],
+                "segments": json.loads(row["segments_json"]),
+                "path_sequence": json.loads(row["path_sequence_json"]),
+                "created_at": row["created_at"]
+            }
+        return None
+
+    def delete_route(self, route_id: int):
+        """Remove uma rota salva."""
+        sql = "DELETE FROM saved_routes WHERE id = %s"
+        success = self.db.execute_query(sql, (route_id,))
+        if success:
+            print(f"Rota {route_id} removida com sucesso")
+        return success

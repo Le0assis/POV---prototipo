@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>POV - Rotas Salvas</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            padding: 0;
+        }
+
+        /* MENU SUPERIOR FIXO */
+        .top-nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            display: flex;
+            background: #0f172a;
+            border-bottom: 1px solid #1e293b;
+            z-index: 1000;
+            padding: 0 10px;
+        }
+
+        .nav-btn {
+            flex: 1;
+            padding: 12px 8px;
+            text-align: center;
+            text-decoration: none;
+            color: #94a3b8;
+            font-weight: 600;
+            font-size: 0.85rem;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .nav-btn:hover { color: #38bdf8; background: #1e293b; }
+        .nav-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; background: #1e293b; }
+
+        /* CONTAINER PRINCIPAL */
+        .container {
+            width: 100%;
+            max-width: 100%;
+            padding: 60px 15px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* CARDS */
+        .card {
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 18px;
+            border: 1px solid #334155;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .page-header h1 { font-size: 1.3rem; color: #38bdf8; }
+
+        /* BOTÕES */
+        .btn-primary {
+            background: #0284c7; color: white; border: none;
+            padding: 10px 16px; border-radius: 8px;
+            font-weight: 600; cursor: pointer; font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #0369a1; }
+
+        .btn-secondary {
+            background: #334155; color: #f8fafc; border: 1px solid #475569;
+            padding: 10px 16px; border-radius: 8px;
+            font-weight: 600; cursor: pointer; font-size: 0.9rem;
+        }
+        .btn-secondary:hover { background: #475569; }
+
+        .btn-danger {
+            background: #dc2626; color: white; border: none;
+            padding: 8px 16px; border-radius: 8px;
+            font-weight: 600; cursor: pointer; font-size: 0.85rem;
+        }
+        .btn-danger:hover { background: #b91c1c; }
+
+        .btn-test {
+            background: #22c55e; color: white; border: none;
+            padding: 8px 16px; border-radius: 8px;
+            font-weight: 600; cursor: pointer; font-size: 0.85rem;
+        }
+        .btn-test:hover { background: #16a34a; }
+
+        .btn-delete {
+            background: #dc2626; color: white; border: none;
+            padding: 8px 16px; border-radius: 8px;
+            font-weight: 600; cursor: pointer; font-size: 0.85rem;
+        }
+        .btn-delete:hover { background: #b91c1c; }
+
+        /* FORMULÁRIOS */
+        .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+        label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; font-weight: bold; }
+        select, input {
+            background: #0f172a; color: #f8fafc; border: 1px solid #0284c7;
+            padding: 10px; border-radius: 8px; font-size: 0.95rem; outline: none;
+        }
+        select:focus, input:focus { border-color: #38bdf8; }
+
+        .hint { font-size: 0.75rem; color: #94a3b8; display: block; margin-top: 4px; }
+
+        /* SELETOR DE PONTO DE PARTIDA */
+        .start-point-selector { margin-bottom: 10px; }
+        .start-point-selector label { display: block; margin-bottom: 6px; }
+
+        /* LISTA DE ROTAS */
+        .routes-grid { display: flex; flex-direction: column; gap: 12px; }
+
+        .route-card {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 16px;
+            transition: border-color 0.2s, transform 0.1s;
+        }
+        .route-card:hover { border-color: #0284c7; }
+        .route-card:active { transform: scale(0.99); }
+
+        .route-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .route-header h3 { font-size: 1rem; color: #f8fafc; }
+        .route-id { font-size: 0.7rem; color: #64748b; background: #1e293b; padding: 2px 6px; border-radius: 4px; }
+
+        .route-path { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.9rem; }
+        .route-node.start { color: #22c55e; font-weight: 600; }
+        .route-node.end { color: #38bdf8; font-weight: 600; }
+        .route-arrow { color: #64748b; }
+
+        .route-meta { display: flex; gap: 16px; font-size: 0.8rem; color: #94a3b8; }
+        .meta-item { display: flex; align-items: center; gap: 4px; }
+        .meta-icon { font-size: 0.85rem; }
+
+        .route-actions { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155; }
+        .route-actions button { flex: 1; }
+
+        .empty-state { text-align: center; padding: 40px 20px; color: #64748b; }
+        .empty-state p { margin-bottom: 16px; }
+
+        /* MODAL */
+        .modal {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;
+            z-index: 2000; padding: 20px;
+        }
+        .modal.hidden { display: none; }
+        .modal-content {
+            background: #1e293b; border-radius: 16px; padding: 24px;
+            border: 1px solid #334155; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto;
+        }
+        .modal-content h3 { color: #38bdf8; margin-bottom: 20px; font-size: 1.1rem; }
+        .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+        .modal-actions button { flex: 1; max-width: 140px; }
+
+        /* MODO TESTE - OVERLAY FULLSCREEN */
+        .test-mode {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: #0f172a; z-index: 3000;
+            display: flex; flex-direction: column;
+            padding: env(safe-area-inset-top, 10px) env(safe-area-inset-right, 10px) env(safe-area-inset-bottom, 10px) env(safe-area-inset-left, 10px);
+        }
+        .test-mode.hidden { display: none; }
+
+        .test-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 0; border-bottom: 1px solid #1e293b;
+        }
+        .test-header span { font-weight: 600; color: #38bdf8; font-size: 0.9rem; }
+
+        .test-compass-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 20px 0; }
+
+        /* BÚSSOLA GRANDE PARA TESTE */
+        .compass-wrapper { position: relative; width: 280px; height: 280px; }
+        .compass-circle {
+            position: relative; width: 100%; height: 100%;
+            border: 4px solid #334155; border-radius: 50%;
+            background: #0f172a; display: flex; align-items: center; justify-content: center;
+        }
+        .compass-cardinal {
+            position: absolute; font-weight: bold; font-size: 1rem; color: #64748b;
+            text-shadow: 0 0 4px #0f172a;
+        }
+        .compass-cardinal.N { top: 8px; left: 50%; transform: translateX(-50%); color: #38bdf8; }
+        .compass-cardinal.S { bottom: 8px; left: 50%; transform: translateX(-50%); }
+        .compass-cardinal.E { right: 8px; top: 50%; transform: translateY(-50%); }
+        .compass-cardinal.W { left: 8px; top: 50%; transform: translateY(-50%); }
+
+        .compass-arrow {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(0deg);
+            width: 0; height: 0;
+            border-left: 18px solid transparent;
+            border-right: 18px solid transparent;
+            border-bottom: 70px solid #38bdf8;
+            transition: transform 0.1s ease-out;
+            transform-origin: center bottom; z-index: 10;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+        }
+
+        .compass-info { text-align: center; }
+        .compass-target { color: #38bdf8; font-weight: bold; font-size: 0.95rem; margin-bottom: 4px; min-height: 1.3em; }
+        .compass-delta { color: #94a3b8; font-size: 0.8rem; margin-bottom: 8px; min-height: 1.2em; font-family: monospace; }
+        .compass-status { font-size: 0.7rem; color: #64748b; }
+
+        .test-target-info { text-align: center; }
+        #test-current-segment { color: #f8fafc; font-weight: 600; font-size: 1rem; margin-bottom: 4px; }
+        #test-segment-distance { color: #94a3b8; font-size: 0.85rem; margin-bottom: 8px; }
+        .direction-large { font-size: 1.5rem; font-weight: bold; min-height: 2em; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .direction-large.frente { color: #22c55e; }
+        .direction-large.direita { color: #f59e0b; }
+        .direction-large.esquerda { color: #f59e0b; }
+        .direction-large.tras { color: #ef4444; }
+
+        /* BARRA DE PROGRESSO */
+        .test-progress-bar {
+            width: 100%; max-width: 320px; height: 8px;
+            background: #1e293b; border-radius: 4px; overflow: hidden;
+            border: 1px solid #334155;
+        }
+        #test-progress-fill {
+            height: 100%; background: linear-gradient(90deg, #0284c7, #38bdf8);
+            border-radius: 4px; transition: width 0.3s ease; width: 0%;
+        }
+
+        .test-stats { display: flex; justify-content: space-around; width: 100%; max-width: 320px; font-size: 0.8rem; color: #94a3b8; margin-top: 8px; }
+        .test-stats b { color: #f8fafc; }
+
+        .test-sensor-status { display: flex; flex-direction: column; gap: 4px; width: 100%; max-width: 320px; margin-top: 16px; padding: 12px; background: #1e293b; border-radius: 8px; border: 1px solid #334155; font-size: 0.75rem; color: #94a3b8; }
+        .test-sensor-status span { display: flex; align-items: center; gap: 8px; }
+
+        /* RESPONSIVO */
+        @media (max-width: 480px) {
+            .compass-wrapper { width: 240px; height: 240px; }
+            .compass-arrow { border-left: 15px solid transparent; border-right: 15px solid transparent; border-bottom: 60px solid #38bdf8; }
+            .container { padding: 55px 12px 15px; }
+            .top-nav { padding: 0 5px; }
+            .nav-btn { padding: 10px 4px; font-size: 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- CONTAINER PRINCIPAL -->
+    <div class="container">
+        <!-- CABEÇALHO -->
+        <header class="page-header">
+            <h1>Rotas Salvas</h1>
+            <button id="btn-new-route" class="btn-primary">+ Nova Rota</button>
+        </header>
+
+        <!-- SELETOR DE PONTO DE PARTIDA DINÂMICO -->
+        <div class="start-point-selector card">
+            <label>📍 Meu Ponto de Partida Atual</label>
+            <select id="start-point-select">
+                <option value="">-- Selecione onde você está --</option>
+            </select>
+            <small id="start-point-hint" class="hint">Usado como origem ao criar/testar rotas</small>
+        </div>
+
+        <!-- LISTA DE ROTAS -->
+        <div id="routes-list" class="routes-grid">
+            <!-- Cards renderizados via JS -->
+        </div>
+
+        <!-- MODAL: CRIAR NOVA ROTA -->
+        <div id="modal-new-route" class="modal hidden">
+            <div class="modal-content">
+                <h3>Criar Nova Rota</h3>
+                <div class="form-group">
+                    <label>Origem</label>
+                    <select id="new-route-start"><option value="">-- Selecione a Origem --</option></select>
+                </div>
+                <div class="form-group">
+                    <label>Destino</label>
+                    <select id="new-route-end"><option value="">-- Selecione o Destino --</option></select>
+                </div>
+                <div class="form-group">
+                    <label>Nome (opcional)</label>
+                    <input type="text" id="new-route-name" placeholder="Ex: Ida ao Auditório">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button class="btn-primary" onclick="createRoute()">Salvar Rota</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODO TESTE (Fullscreen Overlay) -->
+    <div id="test-mode-overlay" class="test-mode hidden">
+        <header class="test-header">
+            <span id="test-route-name">Rota: Carregando...</span>
+            <button id="btn-exit-test" class="btn-danger">✕ Finalizar Teste</button>
+        </header>
+
+        <div class="test-compass-area">
+            <!-- BÚSSOLA GRANDE -->
+            <div class="compass-wrapper">
+                <div id="test-compass" class="compass-circle">
+                    <div class="compass-cardinal N">N</div>
+                    <div class="compass-cardinal S">S</div>
+                    <div class="compass-cardinal E">L</div>
+                    <div class="compass-cardinal W">O</div>
+                    <div id="test-compass-arrow" class="compass-arrow"></div>
+                </div>
+            </div>
+
+            <!-- INFO DO SEGMENTO ATUAL -->
+            <div class="test-target-info">
+                <div id="test-current-segment">--</div>
+                <div id="test-segment-distance">Distância: --m</div>
+                <div id="test-direction-label" class="direction-large">⬆️ Frente</div>
+            </div>
+        </div>
+
+        <!-- BARRA DE PROGRESSO -->
+        <div class="test-progress-bar">
+            <div id="test-progress-fill"></div>
+        </div>
+
+        <!-- ESTATÍSTICAS -->
+        <div class="test-stats">
+            <span>Passos: <b id="test-steps-count">0</b> / <b id="test-steps-total">0</b></span>
+            <span>Distância: <b id="test-dist-current">0.0</b>m / <b id="test-dist-total">0.0</b>m</span>
+        </div>
+
+        <!-- STATUS SENSORES -->
+        <div class="test-sensor-status">
+            <span id="test-orientation-status">🧭 Orientação: Aguardando...</span>
+            <span id="test-pdr-status">👣 PDR: Conectando...</span>
+        </div>
+    </div>
+
+    <script type="module" src="/static/js/routes.js"></script>
+</body>
+</html>

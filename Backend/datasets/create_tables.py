@@ -54,6 +54,28 @@ def criar_tabelas_sistema(db: ConexaoBD):
     
     print("[SETUP] Processo de criação de tabelas concluído.\n")
 
+    # 4. TABELA DE ROTAS SALVAS
+    # Guarda rotas calculadas com segmentos completos para navegação offline/teste
+    sql_saved_routes = """
+    CREATE TABLE IF NOT EXISTS saved_routes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        start_node VARCHAR(100) NOT NULL,
+        end_node VARCHAR(100) NOT NULL,
+        total_distance_m FLOAT NOT NULL,
+        total_steps_estimated INT NOT NULL,
+        segments_json JSON NOT NULL,
+        path_sequence_json JSON NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (start_node) REFERENCES checkpoints(name) ON DELETE CASCADE,
+        FOREIGN KEY (end_node) REFERENCES checkpoints(name) ON DELETE CASCADE
+    ) ENGINE=InnoDB;
+    """
+    print("Criando tabela 'saved_routes'...")
+    db.execute_query(sql_saved_routes)
+    print("[SETUP] Processo de criação de tabelas concluído.\n")
+
 if __name__ == "__main__":
     # Script para você rodar de forma isolada uma única vez e preparar o XAMPP
     # Certifique-se de que o banco 'POV' já foi criado no phpMyAdmin!

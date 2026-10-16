@@ -2,21 +2,49 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>POV - Gravador & Telemetria de Sensores</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 15px; }
-        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 0; }
+
+        /* MENU SUPERIOR FIXO */
+        .top-nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            display: flex;
+            background: #0f172a;
+            border-bottom: 1px solid #1e293b;
+            z-index: 1000;
+            padding: 0 10px;
+        }
+
+        .nav-btn {
+            flex: 1;
+            padding: 12px 8px;
+            text-align: center;
+            text-decoration: none;
+            color: #94a3b8;
+            font-weight: 600;
+            font-size: 0.85rem;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .nav-btn:hover { color: #38bdf8; background: #1e293b; }
+        .nav-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; background: #1e293b; }
+
+        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; padding: 60px 15px 20px; }
         .card { background: #1e293b; border-radius: 16px; padding: 18px; border: 1px solid #334155; }
         h2 { color: #38bdf8; margin-bottom: 10px; font-size: 1.3rem; }
         .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
         label { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; font-weight: bold; }
         select { background: #0f172a; color: #f8fafc; border: 1px solid #0284c7; padding: 10px; border-radius: 8px; font-size: 0.95rem; outline: none; }
-        
+
         .btn-record { background: #22c55e; color: white; border: none; padding: 14px; border-radius: 12px; font-size: 1.1rem; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s; }
         .btn-record.recording { background: #ef4444; }
-        
+
         /* Painel de Telemetria */
         .sensor-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
         .sensor-box { background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #1e293b; }
@@ -58,7 +86,7 @@
 <div class="container">
     <div class="card">
         <h2>📱 Captura & Telemetria Indoor</h2>
-        
+
         <div class="form-group">
             <label for="src-select">Origem:</label>
             <select id="src-select"><option value="">Carregando nós...</option></select>
@@ -75,7 +103,7 @@
     <!-- PAINEL DE MONITORAMENTO EM TEMPO REAL -->
     <div class="card">
         <h2>📊 Monitor de Sensores em Tempo Real</h2>
-        
+
         <div class="sensor-panel">
             <div id="gyro-badge" class="gyro-status gyro-inactive">Giroscópio: Aguardando Movimento...</div>
 
@@ -102,8 +130,8 @@
     </div>
 
     <!-- Painel de Amostras e Passos ao Vivo -->
-    <div class="status-panel">
-        <p><b>Amostras Capturadas:</b> <span id="sample-count">0</span></p>
+    <div class="card">
+        <p><b>Amostras Capturadas:</b> <span id="sample-count-2">0</span></p>
         <p><b>Passos Detectados (Ao Vivo):</b> <span id="live-step-count" style="font-size: 1.3em; font-weight: bold; color: #007bff;">0</span></p>
     </div>
 
@@ -114,11 +142,14 @@
             <p class="text-muted" style="color: #6c757d;">Nenhuma caminhada realizada nesta sessão.</p>
         </div>
     </div>
-    
+
     <div id="status-msg" class="alert" style="display: none;"></div>
 </div>
 
-<script>
+<script type="module">
+    import { insertTopNav } from '/static/js/nav.js';
+    insertTopNav('map');
+
     const API_BASE_URL = "https://api.pov-unimar.com";
 
     let isRecording = false;
@@ -234,10 +265,10 @@
         const gyroMag = Math.sqrt(gxRad**2 + gyRad**2 + gzRad**2);
 
         // Atualização da telemetria visual
-        document.getElementById('acc-val').innerHTML = 
+        document.getElementById('acc-val').innerHTML =
             `X: ${accX.toFixed(2)}<br>Y: ${accY.toFixed(2)}<br>Z: ${accZ.toFixed(2)}<br><b>Mag: ${accMag.toFixed(2)}</b>`;
-        
-        document.getElementById('gyro-val').innerHTML = 
+
+        document.getElementById('gyro-val').innerHTML =
             `X: ${gxRad.toFixed(2)}<br>Y: ${gyRad.toFixed(2)}<br>Z: ${gzRad.toFixed(2)}<br><b>Mag: ${gyroMag.toFixed(2)}</b>`;
 
         const gyroBadge = document.getElementById('gyro-badge');
@@ -270,7 +301,7 @@
                 mag_z: Number.isNaN(currentMag.gamma) ? 0.0 : currentMag.gamma
             });
 
-            document.querySelectorAll('#sample-count').forEach(el => el.innerText = `${rawSamples.length}`);
+            document.querySelectorAll('#sample-count, #sample-count-2').forEach(el => el.innerText = `${rawSamples.length}`);
         }
     }
 
@@ -279,7 +310,7 @@
         currentMag.beta = event.beta || 0.0;
         currentMag.gamma = event.gamma || 0.0;
 
-        document.getElementById('mag-val').innerText = 
+        document.getElementById('mag-val').innerText =
             `Alpha: ${currentMag.alpha.toFixed(0)}° | Beta: ${currentMag.beta.toFixed(0)}° | Gamma: ${currentMag.gamma.toFixed(0)}°`;
     }
 
@@ -345,8 +376,8 @@
                     </span>
                 </div>
                 <div style="font-size: 0.9em; margin-top: 6px; color: #444;">
-                    <span><b>Passos Processados:</b> ${item.processedSteps} (Ao Vivo: ${item.liveSteps})</span> | 
-                    <span><b>Distância:</b> ${item.distance}m</span> | 
+                    <span><b>Passos Processados:</b> ${item.processedSteps} (Ao Vivo: ${item.liveSteps})</span> |
+                    <span><b>Distância:</b> ${item.distance}m</span> |
                     <span><b>Horário:</b> ${item.time}</span>
                 </div>
                 <div style="font-size: 0.85em; color: #666; margin-top: 4px;">

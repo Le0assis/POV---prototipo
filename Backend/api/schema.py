@@ -53,3 +53,21 @@ class ProcessRawEdgeSchema(BaseModel):
     target: str
     samples: List[RawSampleSchema]
 
+
+# SCHEMAS PARA ROTAS SALVAS
+class RouteCreateSchema(BaseModel):
+    start_node: str
+    end_node: str
+    name: str = None
+
+class RouteResponseSchema(BaseModel):
+    id: int
+    name: str
+    start_node: str
+    end_node: str
+    total_distance_m: float
+    total_steps_estimated: int
+    segments: list
+    path_sequence: list
+    created_at: str
+
