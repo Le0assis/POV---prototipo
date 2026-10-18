@@ -49,7 +49,7 @@ app.add_middleware(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-FRONTEND_DIR = BASE_DIR / "../../frontend"
+FRONTEND_DIR = (BASE_DIR / "../../frontend").resolve()
 
 db = ConexaoBD(host="localhost", database="POV", user="root", password="")
 db.connect()
@@ -72,15 +72,6 @@ matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
 visited_path = [starting_node]
 
 # --- ROTAS DA API ---
-
-# NOVO ENDPOINT: ZERAR O ESTADO DO MATCHER E SENSORES
-@app.post("/api/reset")
-def reset_session():
-    """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
-    global matcher, visited_path
-    matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
-    visited_path = [starting_node]
-    return {"status": "success", "message": "Estado do PDR e sensores resetados."}
 
 edge_processor = RawEdgeProcessor(map_db_manager, topo_map)
 
@@ -160,6 +151,7 @@ def get_compass_route(start: str = Query(...), end: str = Query(...)):
         "origin": start,
         "destination": end,
         "segments": segments,
+        "path_sequence": [start] + [s["target"] for s in segments],
         "total_distance_m": round(total_distance, 2)
     }
 
@@ -207,7 +199,7 @@ def create_route(route_data: RouteCreateSchema):
     }
 
 @app.get("/api/routes/{route_id}", status_code=status.HTTP_200_OK)
-def get_route(route_id: int):
+def get_saved_route(route_id: int):
     """Retorna uma rota completa com todos os segmentos para modo teste."""
     route = map_db_manager.get_route_by_id(route_id)
     if not route:
@@ -233,19 +225,21 @@ def reset_session(start_node: str = Query(default="Recepcao")):
     """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
     global matcher, visited_path
     if start_node not in topo_map.nodes:
-        start_node = "Recepcao"
+        start_node = next(iter(topo_map.nodes), starting_node)
     matcher = TopologicalMatcher(topo_map, starting_node=start_node)
     visited_path = [start_node]
     return {"status": "success", "message": "Estado do PDR e sensores resetados.", "start_node": start_node}
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/frontend_static", StaticFiles(directory=FRONTEND_DIR / "static"), name="frontend_static")
+app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
+app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
 
 @app.get("/api/current_location")
 def get_current_location():
     return {
         "current_node": getattr(matcher, 'current_node', getattr(matcher, 'current_state', 'Desconhecido')),
         "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0),
+        "steps_count": getattr(matcher, "steps_count", 0),
         "visited_path": visited_path
     }
 
@@ -259,6 +253,7 @@ def get_map_layout():
     }
     
 @app.get("/")
+@app.get("/index.html")
 def read_index():
     index_path = FRONTEND_DIR / "index.html"
     if index_path.exists():
@@ -266,6 +261,7 @@ def read_index():
     return {"error": f"Arquivo index.html nao encontrado no caminho {index_path}"}
 
 @app.get("/recorder")
+@app.get("/recorder.html")
 def read_recorder():
     recorder_path = FRONTEND_DIR / "recorder.html"
     if recorder_path.exists():
@@ -273,6 +269,7 @@ def read_recorder():
     return {"error": "Arquivo recorder.html nao encontrado em frontend/"}
 
 @app.get("/routes")
+@app.get("/routes.html")
 def read_routes():
     routes_path = FRONTEND_DIR / "routes.html"
     if routes_path.exists():
