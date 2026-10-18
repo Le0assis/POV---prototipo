@@ -1,0 +1,226 @@
+/* ==========================================================================
+   POV - compass.css
+   Estilos da Bússola Vetorial SVG e painel de leituras.
+   ========================================================================== */
+
+.compass-host {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: clamp(260px, 85vw, 360px);
+    margin: 0 auto;
+    user-select: none;
+}
+
+/* ---------- SVG Raiz e Gráficos ---------- */
+.compass-svg {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    overflow: visible;
+    filter: drop-shadow(0 0 18px rgba(34, 211, 238, 0.15));
+}
+
+.compass-ring-outer {
+    fill: rgba(15, 23, 42, 0.65);
+    stroke: var(--border, rgba(148, 163, 184, 0.25));
+    stroke-width: 2;
+}
+
+.compass-ring-mid {
+    fill: none;
+    stroke: rgba(148, 163, 184, 0.15);
+    stroke-width: 1;
+    stroke-dasharray: 3 4;
+}
+
+.compass-ring-inner {
+    fill: rgba(6, 10, 20, 0.5);
+    stroke: rgba(148, 163, 184, 0.2);
+    stroke-width: 1;
+}
+
+.compass-center-dot {
+    fill: var(--cyan, #22d3ee);
+    filter: drop-shadow(0 0 6px var(--cyan, #22d3ee));
+}
+
+.compass-tick {
+    stroke: rgba(148, 163, 184, 0.4);
+    stroke-width: 1;
+}
+
+.compass-tick-medium {
+    stroke: rgba(148, 163, 184, 0.7);
+    stroke-width: 1.5;
+}
+
+.compass-tick-major {
+    stroke: var(--text, #f1f5f9);
+    stroke-width: 2;
+}
+
+.compass-label {
+    font-family: var(--font-sans, system-ui);
+    font-size: 11px;
+    font-weight: 700;
+    fill: var(--muted, #94a3b8);
+}
+
+.compass-label-deg {
+    font-size: 9px;
+    font-weight: 500;
+    fill: rgba(148, 163, 184, 0.65);
+}
+
+.compass-label-cardinal {
+    font-size: 13px;
+    fill: var(--text, #f1f5f9);
+}
+
+.compass-label-n {
+    font-size: 14px;
+    fill: var(--cyan, #22d3ee);
+    filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.8));
+}
+
+.compass-front-marker {
+    fill: var(--cyan, #22d3ee);
+    filter: drop-shadow(0 0 6px var(--cyan, #22d3ee));
+}
+
+/* ---------- Cone de Tolerância ---------- */
+.compass-cone {
+    fill: rgba(148, 163, 184, 0.08);
+    stroke: rgba(148, 163, 184, 0.2);
+    stroke-width: 1;
+    transition: fill 200ms ease, stroke 200ms ease;
+}
+
+/* Estados de alinhamento */
+.compass-host.is-aligned .compass-cone {
+    fill: rgba(34, 197, 94, 0.25);
+    stroke: var(--ok, #22c55e);
+    filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.4));
+}
+
+.compass-host.is-close .compass-cone {
+    fill: rgba(245, 158, 11, 0.22);
+    stroke: var(--warn, #f59e0b);
+    filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.35));
+}
+
+.compass-host.is-off .compass-cone {
+    fill: rgba(239, 68, 68, 0.18);
+    stroke: var(--danger, #ef4444);
+}
+
+/* ---------- Agulha Alvo Neon ---------- */
+.compass-needle-stem {
+    stroke: var(--cyan, #22d3ee);
+    stroke-width: 3;
+    stroke-linecap: round;
+}
+
+.compass-needle-head {
+    fill: var(--cyan, #22d3ee);
+}
+
+.compass-host.is-aligned .compass-needle-stem,
+.compass-host.is-aligned .compass-needle-head {
+    stroke: var(--ok, #22c55e);
+    fill: var(--ok, #22c55e);
+    filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.8));
+}
+
+.compass-host.is-close .compass-needle-stem,
+.compass-host.is-close .compass-needle-head {
+    stroke: var(--warn, #f59e0b);
+    fill: var(--warn, #f59e0b);
+    filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.7));
+}
+
+.compass-host.is-off .compass-needle-stem,
+.compass-host.is-off .compass-needle-head {
+    stroke: var(--danger, #ef4444);
+    fill: var(--danger, #ef4444);
+    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.7));
+}
+
+/* ---------- Painel de Leituras ---------- */
+.compass-readouts {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 14px;
+    text-align: center;
+}
+
+.compass-readout-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+}
+
+.compass-heading-val {
+    font-family: var(--font-mono, monospace);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--cyan, #22d3ee);
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+}
+
+.compass-delta-val {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text, #f1f5f9);
+}
+
+.compass-host.is-aligned .compass-delta-val {
+    color: var(--ok, #22c55e);
+}
+
+.compass-host.is-close .compass-delta-val {
+    color: var(--warn, #f59e0b);
+}
+
+.compass-host.is-off .compass-delta-val {
+    color: var(--danger, #ef4444);
+}
+
+.compass-target-val {
+    font-size: 0.88rem;
+    color: var(--muted, #94a3b8);
+}
+
+.compass-source {
+    font-size: 0.75rem;
+    color: var(--muted, #94a3b8);
+}
+
+.compass-source-warn {
+    color: var(--warn, #f59e0b);
+    font-weight: 600;
+}
+
+.compass-calibrate-btn {
+    margin-top: 4px;
+    font-size: 0.8rem;
+    padding: 6px 12px;
+}
+
+/* ---------- Movimento Reduzido ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .compass-cone,
+    .compass-needle-stem,
+    .compass-needle-head,
+    .compass-front-marker {
+        transition: none !important;
+        animation: none !important;
+    }
+}
