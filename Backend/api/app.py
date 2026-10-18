@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from fastapi import FastAPI, HTTPException, status, Query
 from pydantic import BaseModel
@@ -13,7 +14,7 @@ from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
-from .schema import ProcessRawEdgeSchema, CheckpointSchema, StepSensorSchema, RouteCreateSchema
+from .schema import ProcessRawEdgeSchema, CheckpointSchema, EdgeSchema, StepSensorSchema, RouteCreateSchema
 
 # --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
 from filters.butterworth import ButterworthLowPassFilter
@@ -93,6 +94,37 @@ def create_checkpoint(checkpoint: CheckpointSchema):
         return {"status": "success", "message": f"Checkpoint '{node_name}' integrado com sucesso."}
     else:
         raise HTTPException(status_code=500, detail="Falha interna ao persistir checkpoint no banco.")
+
+
+@app.post("/api/edges", status_code=status.HTTP_201_CREATED)
+def create_edge(edge: EdgeSchema):
+    """Cadastra manualmente uma conexão (ida e volta) entre dois checkpoints."""
+    if edge.source not in topo_map.nodes or edge.target not in topo_map.nodes:
+        raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
+
+    if edge.source == edge.target:
+        raise HTTPException(status_code=400, detail="Origem e destino não podem ser o mesmo nó.")
+
+    if edge.distance_m <= 0:
+        raise HTTPException(status_code=400, detail="A distância deve ser maior que zero.")
+
+    success = map_db_manager.save_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
+    if not success:
+        raise HTTPException(status_code=500, detail="Falha interna ao persistir conexão no banco.")
+
+    # connect_checkpoints recebe GRAUS e já cria os sentidos de ida e volta
+    topo_map.connect_checkpoints(edge.source, edge.target, edge.distance_m, math.degrees(edge.heading_rad))
+
+    return {
+        "status": "success",
+        "message": f"Conexão '{edge.source}' <-> '{edge.target}' criada com sucesso.",
+        "edge": {
+            "source": edge.source,
+            "target": edge.target,
+            "distance_m": edge.distance_m,
+            "heading_rad": edge.heading_rad
+        }
+    }
 
 
 @app.post("/api/localize", status_code=status.HTTP_200_OK)
