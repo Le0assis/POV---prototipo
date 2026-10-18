@@ -20,7 +20,14 @@ TIMEOUT_S = 1200
 
 
 def build_command(task: dict) -> list[str]:
-    cmd = ["aider", "--model", task.get("model", DEFAULT_MODEL), "--yes-always", "--no-pretty", "--no-stream"]
+    cmd = [
+        "aider", "--model", task.get("model", DEFAULT_MODEL),
+        "--model-metadata-file", ".aider.model.metadata.json",
+        "--edit-format", task.get("edit_format", "diff"),
+        "--yes-always", "--no-pretty", "--no-stream",
+        "--no-show-model-warnings", "--no-check-update", "--no-detect-urls",
+        "--no-suggest-shell-commands", "--map-tokens", "1024",
+    ]
 
     for path in task.get("read", DEFAULT_READ):
         if Path(path).exists():
@@ -49,7 +56,10 @@ def run_task(task_file: str) -> int:
         output = {"status": "error", "returncode": -1, "files": task.get("files", []),
                   "log": "", "error": f"timeout apos {TIMEOUT_S}s"}
 
-    OUTBOX.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = json.dumps(output, indent=2, ensure_ascii=False)
+    OUTBOX.write_text(payload, encoding="utf-8")
+    if task.get("task_id"):
+        (OUTBOX.parent / f"{task['task_id']}.json").write_text(payload, encoding="utf-8")
     return 0 if output["status"] == "success" else 1
 
 

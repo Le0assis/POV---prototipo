@@ -1,4 +1,6 @@
 {
-  "instruction": "Execute a primeira tarefa pendente de auditoria-001.md. Aplique as correções necessárias e garanta que o código funcione.",
-  "files": ["auditoria-001.md"]
+  "task_id": "T1",
+  "instruction": "Tarefa T1 da auditoria 003 (backend minimo para o front). Edite SOMENTE Backend/api/app.py: (1) Remova o PRIMEIRO @app.post(\"/api/reset\") (funcao reset_session sem parametros, logo apos o comentario 'NOVO ENDPOINT: ZERAR O ESTADO'). Mantenha o segundo, que aceita start_node: str = Query(default=\"Recepcao\"); nele, se start_node nao existir em topo_map.nodes, use o primeiro no do mapa (next(iter(topo_map.nodes), starting_node)) em vez de \"Recepcao\" fixo. (2) Renomeie a funcao do GET /api/routes/{route_id} de get_route para get_saved_route (hoje ela sobrescreve o nome get_route de /api/route). (3) Em get_compass_route inclua no retorno \"path_sequence\": [start] + [s[\"target\"] for s in segments]. (4) Defina FRONTEND_DIR = (BASE_DIR / \"../../frontend\").resolve(). Substitua o mount \"/frontend_static\" por dois mounts: app.mount(\"/css\", StaticFiles(directory=FRONTEND_DIR / \"css\"), name=\"css\") e app.mount(\"/js\", StaticFiles(directory=FRONTEND_DIR / \"js\"), name=\"js\"). Mantenha o mount \"/static\" do Backend. (5) Mantenha as rotas GET /, /recorder e /routes e adicione tambem /index.html, /recorder.html e /routes.html (empilhe os decorators @app.get na mesma funcao). (6) Em /api/current_location adicione \"steps_count\": getattr(matcher, \"steps_count\", 0). Nao altere nenhum outro endpoint, import ou logica de PDR.",
+  "files": ["Backend/api/app.py"],
+  "read": ["Backend/map/router.py", "Backend/api/schema.py", "contexto-IA.md"]
 }
