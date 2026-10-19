@@ -37,14 +37,17 @@ export class HeadingProvider {
         this._started = false;
         this._sensorActive = false;
         this._absoluteSeen = false;
+        this._orientation = { alpha: 0, beta: 0, gamma: 0 };
 
         this._onAbsolute = (event) => {
+            this._captureOrientation(event);
             if (event.alpha === null || event.alpha === undefined) return;
             this._absoluteSeen = true;
             this._handleSensor(360 - event.alpha, 'absolute', null);
         };
 
         this._onOrientation = (event) => {
+            this._captureOrientation(event);
             const wk = event.webkitCompassHeading;
             if (typeof wk === 'number' && Number.isFinite(wk)) {
                 const acc = typeof event.webkitCompassAccuracy === 'number' ? event.webkitCompassAccuracy : null;
@@ -144,6 +147,14 @@ export class HeadingProvider {
         return this._offsetDeg;
     }
 
+    /**
+     * Última orientação bruta do aparelho (alpha/beta/gamma), usada no payload
+     * de gravação como mag_x/mag_y/mag_z.
+     */
+    get orientation() {
+        return { ...this._orientation };
+    }
+
     /** Yaw (rad, em (-PI, PI]) no referencial do backend, já com o offset aplicado. */
     getYawRadForBackend() {
         const corrected = this.correctedHeadingDeg ?? 0;
@@ -154,6 +165,16 @@ export class HeadingProvider {
     injectHeading(deg) {
         if (!Number.isFinite(deg)) return;
         this._publish(normalizeDeg(deg), 'injected', null, false);
+    }
+
+    _captureOrientation(event) {
+        if (!event) return;
+        const num = (value) => (Number.isFinite(value) ? value : 0);
+        this._orientation = {
+            alpha: num(event.alpha),
+            beta: num(event.beta),
+            gamma: num(event.gamma)
+        };
     }
 
     _handleSensor(rawBearingDeg, source, accuracy) {

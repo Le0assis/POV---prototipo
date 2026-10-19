@@ -1,8 +1,7 @@
 # Auditoria 003 — Refatoração completa do Frontend (visão Administrador)
 
-> **Status:** PLANEJADA (nenhuma micro-tarefa executada ainda)
-> **Executor:** Aider (via `tools/run_aider.py` ou manualmente com `/add` e `/read`)
-> **Orquestrador:** Claude Code — valida cada tarefa antes de liberar a próxima
+> **Status:** CONCLUÍDA (T0–T10)
+> **Executor:** implementação direta no repositório (T6–T10). T0–T5 tinham sido feitas antes, com Aider.
 > **Antecessoras:** `auditoria-001.md` (bússola/endpoint), `auditoria-002.md` (aba Rotas/modo teste)
 
 ## 1. Objetivo
@@ -234,14 +233,15 @@ Ordem obrigatória: T0 → T10. Cada tarefa só começa após o critério de ace
 
 | Tarefa | Status | Commit | Observações |
 |---|---|---|---|
-| T0 | pendente | – | – |
-| T1 | pendente | – | – |
-| T2 | pendente | – | – |
-| T3 | pendente | – | – |
-| T4 | pendente | – | – |
-| T5 | pendente | – | – |
-| T6 | pendente | – | – |
-| T7 | pendente | – | – |
-| T8 | pendente | – | – |
-| T9 | pendente | – | – |
-| T10 | pendente | – | – |
+| T0 | feito | c549934 | infra do Aider (removida depois, com o restante da estrutura antiga) |
+| T1 | feito | 7cd16b4 | reset único, path_sequence, mounts /css e /js |
+| T1b | feito | 38d2dba | POST /api/edges |
+| T2 | feito | 9de3861 | base.css |
+| T3 | feito | 7ee0ed0 | núcleo JS |
+| T4 | feito | cbf38cc | ângulos, rumo, detector de passos |
+| T5 | feito | 8e2aa4c | bússola SVG |
+| T6 | feito | — | sessão e simulador; sem commit nesta sessão |
+| T7 | feito | — | página Rotas |
+| T8 | feito | — | dashboard |
+| T9 | feito | — | recorder |
+| T10 | feito | — | legado removido, manifest, README, contexto |

@@ -18,7 +18,6 @@ Base de conhecimento central do POV. Leia antes de qualquer tarefa. Atualize a s
 | Frontend | HTML5, CSS3, JavaScript puro (ES modules, sem framework) |
 | APIs de hardware | `DeviceMotionEvent`, `DeviceOrientationEvent`, Page Visibility |
 | Infra | Cloudflare Tunnel (`api.pov-unimar.com` → `:8000`), GitHub Pages (front, branch `gh-pages`), GitHub Actions (`.github/workflows/frontend-deploy.yml`) |
-| Orquestração IA | Claude Code (orquestrador) + Aider (executor) via `tools/run_aider.py` |
 
 ## 3. Estrutura de pastas
 
@@ -34,11 +33,8 @@ POV---prototipo/
 │   ├── others/         run_csv_client.py, seed_map.py, example_sensors.py
 │   ├── static/         páginas legadas (index.html, mapa-2d.html, sensors_upload.html)
 │   └── tests/
-├── frontend/           (alvo da auditoria 003 — ver seção 8)
-├── auditorias/         planos de execução: auditoria-001.md, 002, 003 (ativo)
-├── tools/run_aider.py  ponte task.json → Aider
-├── .agent_bus/         inbox/task.json, outbox/result.json
-├── CLAUDE.md           regras de orquestração
+├── frontend/           visão do administrador (css/, js/, index, recorder, routes)
+├── auditorias/         planos de execução: auditoria-001.md, 002, 003
 ├── cloudflared-config.yml
 └── README.md
 ```
@@ -108,7 +104,7 @@ frontend/
 ```
 
 Regras: HTML sem `<style>`/`<script>` inline; ES modules; sem `alert/confirm`; HTTP só em `js/core/api.js`; URL da API só em `js/core/config.js`; caminhos relativos (funciona no FastAPI e no GitHub Pages); `escapeHtml` em todo texto vindo do backend.
-Até a T10, o legado ainda existe em `frontend/static/js/` (`nav.js`, `compass.js`, `routes.js`) e CSS/JS inline nos HTML.
+O legado `frontend/static/` foi removido. As páginas são só marcação, com CSS em `frontend/css/` e JS em `frontend/js/`.
 
 ## 9. Decisões técnicas (histórico)
 
@@ -131,7 +127,6 @@ Até a T10, o legado ainda existe em `frontend/static/js/` (`nav.js`, `compass.j
 ```bash
 cd Backend && uvicorn api.app:app --reload        # http://127.0.0.1:8000  (precisa do MySQL/XAMPP ligado)
 cloudflared tunnel --config cloudflared-config.yml run   # HTTPS para celular (iOS exige HTTPS)
-python3 tools/run_aider.py .agent_bus/inbox/task.json    # delega ao Aider
 python -m compileall Backend                              # checagem de sintaxe (CI)
 ```
 Banco `POV`, usuário `root` sem senha (dev). Tabelas via `Backend/datasets/create_tables.py`; seed via `Backend/others/seed_map.py`.
@@ -142,14 +137,13 @@ Banco `POV`, usuário `root` sem senha (dev). Tabelas via `Backend/datasets/crea
 |---|---|---|
 | 001 | Bússola + `/api/compass_route` | feito (a bússola será refeita na 003) |
 | 002 | Aba Rotas, `saved_routes`, modo teste | feito (bugs: passos sempre 0, `/api/reset` duplicado) |
-| **003** | **Refatoração do front (css/js), bússola nova, contagem de passos, "Simular rota"** | **planejada — ver `auditorias/auditoria-003.md` (T0–T10)** |
+| **003** | **Refatoração do front (css/js), bússola nova, contagem de passos, "Simular rota"** | **feito (T0–T10)** |
 
-Bugs abertos: B1–B11 listados na auditoria 003. Débitos: ícones PWA inexistentes; heading do grafo relativo (não magnético).
+Débito que permanece: o heading do grafo é relativo à pose da gravação, não é Norte magnético. Ícone PWA é o SVG em `frontend/assets/icon.svg`.
 
 ## 13. Próximos passos
 
-1. Executar a auditoria 003 (T0→T10).
-2. Calibração dinâmica de `k` (Weinberg) por altura/histórico do usuário.
-3. Yaw absoluto (magnetômetro) também na gravação, para alinhar grafo e bússola.
-4. Visão do usuário final (navegação guiada) após fechar a visão admin.
-5. Script offline que baixa `/api/sensors_log/{id}/csv` e plota bruto × Butterworth × picos.
+1. Calibração dinâmica de `k` (Weinberg) por altura/histórico do usuário.
+2. Yaw absoluto (magnetômetro) também na gravação, para alinhar grafo e bússola.
+3. Visão do usuário final (navegação guiada) após fechar a visão admin.
+4. Script offline que baixa `/api/sensors_log/{id}/csv` e plota bruto × Butterworth × picos.
