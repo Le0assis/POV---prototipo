@@ -39,6 +39,10 @@ class WalkLabels:
     notes: str | None = None
     step_times_s: list[float] | None = None
     time_base: str | None = None
+    # Quando existe, a meta desta gravação é |N_det - N_real| <= este valor
+    # (caminhada curta: 5% de 4 passos é menos de 1). Sem o campo, vale o
+    # percentual de conftest.TARGETS.
+    tolerance_steps: int | None = None
     raw: dict = field(default_factory=dict)
 
 
@@ -101,6 +105,15 @@ def rate_stats(timestamps: np.ndarray) -> dict[str, float]:
     }
 
 
+def _optional_tolerance(data: dict, name: str) -> int | None:
+    if "tolerance_steps" not in data or data["tolerance_steps"] is None:
+        return None
+    tolerance = int(data["tolerance_steps"])
+    if tolerance < 0:
+        raise ValueError(f"{name} tem tolerance_steps negativo.")
+    return tolerance
+
+
 def load_labels(path: Path) -> WalkLabels:
     data = json.loads(path.read_text(encoding="utf-8"))
     if "steps_real" not in data:
@@ -133,6 +146,7 @@ def load_labels(path: Path) -> WalkLabels:
         notes=data.get("notes"),
         step_times_s=step_times,
         time_base=time_base,
+        tolerance_steps=_optional_tolerance(data, path.name),
         raw=data,
     )
 
@@ -176,6 +190,7 @@ def _apply_step_mark(frame: pd.DataFrame, labels: WalkLabels) -> WalkLabels:
         notes=labels.notes,
         step_times_s=[float(value) for value in marked],
         time_base=labels.time_base or "epoch",
+        tolerance_steps=labels.tolerance_steps,
         raw=labels.raw,
     )
 

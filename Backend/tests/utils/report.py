@@ -12,7 +12,17 @@ from tests.utils.walk_loader import discover_walks, frame_to_samples, load_senso
 from pdr.pipeline import detect_steps_from_samples
 
 
-def _row(name: str, n_real: int, n_det: int, rate_hz: float) -> str:
+def _row(
+    name: str,
+    n_real: int,
+    n_det: int,
+    rate_hz: float,
+    tolerance_steps: int | None = None,
+) -> str:
+    if tolerance_steps is not None:
+        delta = abs(n_det - n_real)
+        flag = "ok" if delta <= tolerance_steps else "FORA"
+        return f"| {name} | {n_real} | {n_det} | ±{delta} | {rate_hz:.2f} | {flag} |"
     if n_real <= 0:
         flag = "ok" if n_det <= TARGETS["A2_phantoms_max"] else "FORA"
         return f"| {name} | {n_real} | {n_det} | fantasmas | {rate_hz:.2f} | {flag} |"
@@ -39,6 +49,7 @@ def build_table() -> str:
             walk.labels.steps_real,
             result.steps_count,
             result.sample_rate_hz,
+            walk.labels.tolerance_steps,
         ))
         if walk.labels.steps_real > 0:
             total_abs += abs(result.steps_count - walk.labels.steps_real)

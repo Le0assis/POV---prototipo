@@ -46,7 +46,7 @@ O erro agregado de 3% é desejável e não bloqueia. A tabela sai com `python -m
 
 ## O que falta
 
-As gravações de 2026-10-20 (abaixo) são Android nativo, Sensor Logger, ~100 Hz. Ainda falta o mesmo protocolo pelo recorder do Chrome (~50 Hz). A suíte também reamostra esses CSV para 50 Hz, para o detector não ficar preso à taxa do app. Escada e bolso ficam fora desta missão.
+Escada e bolso ficam fora desta missão. A suíte reamostra cada CSV para 50 Hz, para o detector não ficar preso à taxa do app.
 
 ## Gravações de 2026-10-20 (Poco 6 Pro, Sensor Logger)
 
@@ -60,3 +60,13 @@ Gravadas com o app Sensor Logger 1.68 (Android nativo, ~100 Hz), não com o reco
 | 20261020_normal_mao_04 | quarta-45 | 45 |
 | 20261020_parado_mao_01 | parado (≈12 s, não 30 s) | 0 |
 | 20261020_chacoalho_mao_01 | chacoalho (chacoalhando, sem andar) | 0 |
+
+## Gravações de 2026-10-20 (Poco 6 Pro, recorder do Chrome)
+
+Saíram do banco do próprio app (`timestamp` em epoch s, `mag_*` = orientação alpha/beta/gamma, aceleração com gravidade, giro em rad/s, ~59 Hz). O bruto continua em `tests/fixtures/chrome_raw/`. Aqui o CSV está no formato dos outros fixtures: timestamp relativo em s, só accel e giro. Contagem à mão por Leonardo. Em 4 ou 8 passos, 5% é menos de um passo, então o rótulo traz `tolerance_steps: 1`.
+
+| fixture | trecho | duração | N_real |
+|---|---|---:|---:|
+| 20261020_chrome_quarto-sala | quarto-sala | 7,5 s | 4 |
+| 20261020_chrome_sala-cozinha | sala-cozinha | 4,9 s | 4 |
+| 20261020_chrome_cozinha-quarto | cozinha-quarto | 8,2 s | 8 |

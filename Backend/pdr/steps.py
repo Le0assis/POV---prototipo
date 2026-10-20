@@ -208,7 +208,7 @@ class PeakStepDetector(StepDetector):
         calm: set[int] = set()
         for index, (peak, prominence) in enumerate(zip(peaks, prominences, strict=False)):
             peak = int(peak)
-            own_swing, full_swing = _bilateral_swing(signal, peaks, index, sample_rate, config)
+            own_swing = _bilateral_swing(signal, peaks, index, sample_rate, config)
             if self._peak_is_step(
                 peak,
                 float(prominence),
@@ -219,7 +219,6 @@ class PeakStepDetector(StepDetector):
                 min_distance,
                 gravity_present,
                 own_swing,
-                full_swing,
             ):
                 accepted.append(peak)
                 if _peak_gyro_is_calm(gyro, peak, signal, sample_rate, min_distance, config):
@@ -237,7 +236,6 @@ class PeakStepDetector(StepDetector):
         min_distance: int,
         gravity_present: bool,
         own_swing: float,
-        full_swing: float,
     ) -> bool:
         config = self._config
         n = len(signal)
@@ -295,27 +293,24 @@ class PeakStepDetector(StepDetector):
             height_limit = max(config.min_height_abs, window_mean + config.height_offset)
         else:
             height_limit = window_mean + config.height_offset
-        # Piso absoluto de 10,3 assume a gravidade em ~9,8. Com o celular
-        # na mão o Madgwick deixa a base um pouco abaixo e a passada fica
-        # em 10,1–10,3, mas a proeminência e o vale fundo continuam de passo.
-        rise = config.acc_diff_min + config.min_prominence_abs
-        above_floor = float(signal[peak]) >= height_limit
-        soft_step = (
-            gravity_present
-            and float(signal[peak]) >= window_mean + config.height_offset
-            and prominence >= rise
-            and full_swing >= rise
-            and own_swing >= config.min_prominence_abs
-        )
-        if not above_floor and not soft_step:
+        # O piso absoluto fica. Aceitar pico abaixo de 10,3 por proeminência
+        # somava dois picos de arranque (9,8–10,1) numa caminhada curta do
+        # Chrome e passava de 8 para 10. No Sensor Logger isso custava um
+        # pico interior (30→29), ainda dentro de 5%.
+        if float(signal[peak]) < height_limit:
             return False
 
         # O meio-refratário (±0,16 s) não alcança o vale de uma passada
-        # de ~0,7 s. ``own_swing`` é a subida acima do vale mais alto dos
-        # dois lados, limitada ao pico vizinho — ondulação entre dois
-        # passos fortes não herda o Δa do vizinho.
+        # de ~0,7 s. ``own_swing`` cobre esse vale, mas só se a janela
+        # curta já viu quase o Δa mínimo: a folga é ``height_offset``
+        # (0,35). Abaixo disso o bilateral está pegando o vizinho ou o
+        # fim da gravação — no Chrome, um bump a 0,4 s do final com
+        # Δa local 0,81 virava o sexto passo de uma contagem de 4.
         acc_diff = float(np.max(signal[step_lo:step_hi]) - np.min(signal[step_lo:step_hi]))
-        if acc_diff < config.acc_diff_min and own_swing < config.acc_diff_min:
+        local_floor = max(0.0, config.acc_diff_min - config.height_offset)
+        if acc_diff < config.acc_diff_min and not (
+            own_swing >= config.acc_diff_min and acc_diff >= local_floor
+        ):
             return False
         # O teto 5,0 foi posto para barrar pancada. Numa passada forte e
         # lisa (giro baixo, jerk baixo, std de caminhada) ele cortava pico
@@ -458,13 +453,12 @@ def _bilateral_swing(
     index: int,
     sample_rate: float,
     config: StepDetectorConfig,
-) -> tuple[float, float]:
-    """Subida do pico até os vales, sem atravessar o pico vizinho.
+) -> float:
+    """Subida do pico acima do vale mais alto dos dois lados.
 
-    O olhar vai no máximo até metade de ``max_step_interval_s`` (0,6 s):
-    cabe o vale de uma passada normal e não usa o fundo de uma pausa.
-    ``own`` é a subida acima do vale mais alto (os dois lados). ``full``
-    é a subida acima do vale mais fundo (passada assimétrica).
+    O olhar vai no máximo até metade de ``max_step_interval_s`` (0,6 s)
+    e para no meio do caminho até o pico vizinho. Não usa o fundo de uma
+    pausa nem a excursão do passo ao lado.
     """
     peak = int(peaks[index])
     n = len(signal)
@@ -477,8 +471,7 @@ def _bilateral_swing(
     right_bound = min(right_bound, peak + look)
     left_min = float(np.min(signal[left_bound:peak + 1]))
     right_min = float(np.min(signal[peak:right_bound + 1]))
-    value = float(signal[peak])
-    return value - max(left_min, right_min), value - min(left_min, right_min)
+    return float(signal[peak]) - max(left_min, right_min)
 
 
 def _peak_gyro_is_calm(

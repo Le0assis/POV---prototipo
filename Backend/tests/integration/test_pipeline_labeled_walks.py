@@ -34,7 +34,20 @@ def _pack(time, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z) -> list[dict]
     return samples
 
 
-def assert_walk_target(name: str, n_real: int, n_det: int, rate_hz: float) -> None:
+def assert_walk_target(
+    name: str,
+    n_real: int,
+    n_det: int,
+    rate_hz: float,
+    tolerance_steps: int | None = None,
+) -> None:
+    if tolerance_steps is not None:
+        message = (
+            f"{name}: N_real={n_real} N_det={n_det} "
+            f"(meta ±{tolerance_steps}), taxa {rate_hz:.2f} Hz"
+        )
+        assert abs(n_det - n_real) <= tolerance_steps, message
+        return
     if n_real <= 0:
         message = (
             f"{name}: N_real=0 N_det={n_det} fantasmas "
@@ -125,6 +138,7 @@ def _bind_labeled_walks() -> None:
             walk.labels.steps_real,
             result.steps_count,
             result.sample_rate_hz,
+            walk.labels.tolerance_steps,
         )
 
     globals()["test_pipeline_walk_count_error_within_target"] = test_pipeline_walk_count_error_within_target
@@ -143,6 +157,7 @@ def _bind_labeled_walks() -> None:
             walk.labels.steps_real,
             result.steps_count,
             result.sample_rate_hz,
+            walk.labels.tolerance_steps,
         )
 
     globals()["test_pipeline_walk_count_holds_when_downsampled_to_50hz"] = (

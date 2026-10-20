@@ -1,0 +1,14 @@
+{
+  "steps_real": 8,
+  "scenario": "chrome",
+  "position": "mao",
+  "device": "Poco 6 Pro",
+  "date": "2026-10-20",
+  "sample_rate_hz": 59.863,
+  "dt_median_ms": 17.0,
+  "dt_p95_ms": 19.0,
+  "step_times_s": null,
+  "time_base": null,
+  "notes": "Recorder do Chrome (~60 Hz), trecho cozinha-quarto (8.2 s). Contagem à mão: 8. Bruto em tests/fixtures/chrome_raw/20261020_chrome_cozinha-quarto_8passos.csv. mag_* do bruto é orientação, não entra neste CSV. tolerance_steps=1 porque 5% de uma contagem curta é menos de 1 passo.",
+  "tolerance_steps": 1
+}
