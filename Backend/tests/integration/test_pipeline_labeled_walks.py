@@ -129,5 +129,46 @@ def _bind_labeled_walks() -> None:
 
     globals()["test_pipeline_walk_count_error_within_target"] = test_pipeline_walk_count_error_within_target
 
+    @pytest.mark.integration
+    @pytest.mark.parametrize("walk", _WALKS, ids=[walk.name for walk in _WALKS])
+    def test_pipeline_walk_count_holds_when_downsampled_to_50hz(walk: WalkRecording):
+        """Sensor Logger é ~100 Hz. O Chrome no Android entrega ~50 Hz.
+
+        A mesma gravação, interpolada para 50 Hz, continua na meta. O
+        detector não pode depender da taxa nativa do app.
+        """
+        result = detect_steps_from_samples(_downsample(walk.samples, 50.0))
+        assert_walk_target(
+            f"{walk.name}@50Hz",
+            walk.labels.steps_real,
+            result.steps_count,
+            result.sample_rate_hz,
+        )
+
+    globals()["test_pipeline_walk_count_holds_when_downsampled_to_50hz"] = (
+        test_pipeline_walk_count_holds_when_downsampled_to_50hz
+    )
+
+
+def _downsample(samples: list[dict], hz: float) -> list[dict]:
+    time = np.array([sample["timestamp"] for sample in samples], dtype=np.float64)
+    order = np.argsort(time, kind="mergesort")
+    time = time[order]
+    keep = np.ones(len(time), dtype=bool)
+    keep[1:] = np.diff(time) > 1e-4
+    time = time[keep]
+    keys = [key for key in samples[0] if key != "timestamp"]
+    columns = {
+        key: np.array([samples[index][key] for index in order], dtype=np.float64)[keep]
+        for key in keys
+    }
+    count = int(round((time[-1] - time[0]) * hz)) + 1
+    grid = np.linspace(time[0], time[-1], count)
+    interpolated = {key: np.interp(grid, time, values) for key, values in columns.items()}
+    return [
+        {"timestamp": float(grid[index]), **{key: float(interpolated[key][index]) for key in keys}}
+        for index in range(count)
+    ]
+
 
 _bind_labeled_walks()

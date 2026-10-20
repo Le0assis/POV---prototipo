@@ -42,6 +42,15 @@ def test_step_detector_config_defaults_match_legacy_constants():
     assert config.max_gap_s == 0.25
 
 
+def test_sanitize_rate_keeps_native_android_100hz():
+    """~100,6 Hz do Sensor Logger não pode ser grampeado em 100."""
+    from pdr.sampling import RATE_SANITY_MAX_HZ, sanitize_rate_hz
+
+    assert sanitize_rate_hz(100.64) == pytest.approx(100.64)
+    assert sanitize_rate_hz(50.0) == 50.0
+    assert sanitize_rate_hz(5000.0) == RATE_SANITY_MAX_HZ
+
+
 def test_step_detector_config_has_no_fixed_sample_rate():
     names = {item.name for item in fields(StepDetectorConfig)}
     assert "sample_rate_hz" not in names

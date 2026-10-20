@@ -20,8 +20,10 @@ from scipy.interpolate import interp1d
 # Limites só para não alimentar o Butterworth com uma taxa absurda
 # (timestamp repetido que escapou, ou rajada de 0,1 ms). Não são a taxa
 # esperada do aparelho: dentro da faixa, o valor medido passa intacto.
+# O Sensor Logger no Poco 6 Pro entrega ~100,6 Hz. Um teto de 100 Hz
+# cortava essa taxa e reamostrava o arquivo nativo como se fosse 100.
 RATE_SANITY_MIN_HZ = 10.0
-RATE_SANITY_MAX_HZ = 100.0
+RATE_SANITY_MAX_HZ = 200.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,7 +10,9 @@ refratário fica em segundos e vira amostras só na hora.
 
 Um pico isolado (toque, pancada, celular na mão parado) não forma uma
 sequência de cadência e é descartado. Passo de verdade vem em série,
-com intervalo estável.
+com intervalo estável. Duas passadas calmas separadas do resto por uma
+hesitação curta também ficam: o giro local ainda é de caminhada, não
+de chacoalho.
 """
 
 from __future__ import annotations
@@ -180,8 +182,8 @@ class PeakStepDetector(StepDetector):
         if not np.isfinite(sample_rate):
             return []
 
-        candidates = self._candidate_indices(signal, time, gyro, sample_rate)
-        accepted = _keep_regular_runs(candidates, time, self._config)
+        candidates, calm = self._candidate_indices(signal, time, gyro, sample_rate)
+        accepted = _keep_regular_runs(candidates, time, self._config, calm)
         return self._events_from_indices(accepted, signal, time, sample_rate)
 
     def _candidate_indices(
@@ -190,7 +192,7 @@ class PeakStepDetector(StepDetector):
         time: npt.NDArray[np.float64],
         gyro: npt.NDArray[np.float64] | None,
         sample_rate: float,
-    ) -> list[int]:
+    ) -> tuple[list[int], set[int]]:
         config = self._config
         min_distance = max(1, int(np.ceil(config.min_step_interval_s * sample_rate - 1e-9)))
         peaks, properties = find_peaks(
@@ -203,9 +205,12 @@ class PeakStepDetector(StepDetector):
         gravity_present = float(np.median(signal)) >= config.gravity_present_above
 
         accepted: list[int] = []
-        for peak, prominence in zip(peaks, prominences, strict=False):
+        calm: set[int] = set()
+        for index, (peak, prominence) in enumerate(zip(peaks, prominences, strict=False)):
+            peak = int(peak)
+            own_swing, full_swing = _bilateral_swing(signal, peaks, index, sample_rate, config)
             if self._peak_is_step(
-                int(peak),
+                peak,
                 float(prominence),
                 signal,
                 gyro,
@@ -213,9 +218,13 @@ class PeakStepDetector(StepDetector):
                 sample_rate,
                 min_distance,
                 gravity_present,
+                own_swing,
+                full_swing,
             ):
-                accepted.append(int(peak))
-        return accepted
+                accepted.append(peak)
+                if _peak_gyro_is_calm(gyro, peak, signal, sample_rate, min_distance, config):
+                    calm.add(peak)
+        return accepted, calm
 
     def _peak_is_step(
         self,
@@ -227,6 +236,8 @@ class PeakStepDetector(StepDetector):
         sample_rate: float,
         min_distance: int,
         gravity_present: bool,
+        own_swing: float,
+        full_swing: float,
     ) -> bool:
         config = self._config
         n = len(signal)
@@ -263,30 +274,48 @@ class PeakStepDetector(StepDetector):
         if handling:
             return False
 
-        if gravity_present:
-            height_limit = max(config.min_height_abs, window_mean + config.height_offset)
-        else:
-            height_limit = window_mean + config.height_offset
-        if float(signal[peak]) < height_limit:
-            return False
-
         prominence_limit = max(config.min_prominence_abs, config.prominence_std_factor * window_std)
         if prominence < prominence_limit:
             return False
 
         # Giro e jerk locais: rejeitam o pico, não o resto da gravação.
-        # O teto antigo do processor (7,5 / 4,0) entra junto; o mais estrito
-        # (3,0 / 2,8) é o que efetivamente corta o manuseio.
+        # Média da janela acima de 2,8 rad/s é manuseio. Um pico de giro
+        # na passada (braço, ~3–4 rad/s) com a média ainda baixa fica:
+        # o teto que corta esse pico é o do processor (7,5), não o 3,0.
+        # O 3,0 continua na decisão de impacto e do par calmo.
         if gyro is not None:
-            if gyro_max_local > config.max_local_gyro or gyro_max_local > config.gyro_peak_limit:
-                return False
             if gyro_mean > config.max_mean_gyro or gyro_mean > config.gyro_mean_limit:
+                return False
+            if gyro_max_local > config.gyro_peak_limit:
                 return False
         if local_jerk > config.max_local_jerk and gyro_max_local > config.max_local_gyro:
             return False
 
+        if gravity_present:
+            height_limit = max(config.min_height_abs, window_mean + config.height_offset)
+        else:
+            height_limit = window_mean + config.height_offset
+        # Piso absoluto de 10,3 assume a gravidade em ~9,8. Com o celular
+        # na mão o Madgwick deixa a base um pouco abaixo e a passada fica
+        # em 10,1–10,3, mas a proeminência e o vale fundo continuam de passo.
+        rise = config.acc_diff_min + config.min_prominence_abs
+        above_floor = float(signal[peak]) >= height_limit
+        soft_step = (
+            gravity_present
+            and float(signal[peak]) >= window_mean + config.height_offset
+            and prominence >= rise
+            and full_swing >= rise
+            and own_swing >= config.min_prominence_abs
+        )
+        if not above_floor and not soft_step:
+            return False
+
+        # O meio-refratário (±0,16 s) não alcança o vale de uma passada
+        # de ~0,7 s. ``own_swing`` é a subida acima do vale mais alto dos
+        # dois lados, limitada ao pico vizinho — ondulação entre dois
+        # passos fortes não herda o Δa do vizinho.
         acc_diff = float(np.max(signal[step_lo:step_hi]) - np.min(signal[step_lo:step_hi]))
-        if acc_diff < config.acc_diff_min:
+        if acc_diff < config.acc_diff_min and own_swing < config.acc_diff_min:
             return False
         # O teto 5,0 foi posto para barrar pancada. Numa passada forte e
         # lisa (giro baixo, jerk baixo, std de caminhada) ele cortava pico
@@ -423,16 +452,70 @@ def _shake_dominates(
     return shake_energy > config.shake_energy_ratio * walk_energy and shake_energy > scaled_min
 
 
+def _bilateral_swing(
+    signal: npt.NDArray[np.float64],
+    peaks: npt.NDArray[np.int64],
+    index: int,
+    sample_rate: float,
+    config: StepDetectorConfig,
+) -> tuple[float, float]:
+    """Subida do pico até os vales, sem atravessar o pico vizinho.
+
+    O olhar vai no máximo até metade de ``max_step_interval_s`` (0,6 s):
+    cabe o vale de uma passada normal e não usa o fundo de uma pausa.
+    ``own`` é a subida acima do vale mais alto (os dois lados). ``full``
+    é a subida acima do vale mais fundo (passada assimétrica).
+    """
+    peak = int(peaks[index])
+    n = len(signal)
+    look = max(1, int(round(0.5 * config.max_step_interval_s * sample_rate)))
+    left_peak = int(peaks[index - 1]) if index else None
+    right_peak = int(peaks[index + 1]) if index + 1 < len(peaks) else None
+    left_bound = 0 if left_peak is None else (left_peak + peak) // 2
+    right_bound = n - 1 if right_peak is None else (right_peak + peak) // 2
+    left_bound = max(left_bound, peak - look)
+    right_bound = min(right_bound, peak + look)
+    left_min = float(np.min(signal[left_bound:peak + 1]))
+    right_min = float(np.min(signal[peak:right_bound + 1]))
+    value = float(signal[peak])
+    return value - max(left_min, right_min), value - min(left_min, right_min)
+
+
+def _peak_gyro_is_calm(
+    gyro: npt.NDArray[np.float64] | None,
+    peak: int,
+    signal: npt.NDArray[np.float64],
+    sample_rate: float,
+    min_distance: int,
+    config: StepDetectorConfig,
+) -> bool:
+    """Giro de caminhada, não de chacoalho, na janela do pico."""
+    n = len(signal)
+    half_step = max(1, min_distance // 2)
+    step_lo = max(0, peak - half_step)
+    step_hi = min(n, peak + half_step + 1)
+    win = max(8, int(round(config.analysis_window_s * sample_rate)))
+    half_win = win // 2
+    win_lo = max(0, peak - half_win)
+    win_hi = min(n, peak + half_win + 1)
+    gyro_mean, gyro_max_local, _ = _gyro_stats(gyro, win_lo, win_hi, step_lo, step_hi)
+    return gyro_max_local <= config.max_local_gyro and gyro_mean <= config.max_mean_gyro
+
+
 def _keep_regular_runs(
     peaks: list[int],
     timestamps: npt.NDArray[np.float64],
     config: StepDetectorConfig,
+    calm: set[int] | None = None,
 ) -> list[int]:
     """Só fica o pico que pertence a uma série com intervalo de passada.
 
     A cadência é medida contra o último pico ainda candidato, e a série
-    curta (1–2 picos) sai fora. É o que barra o toque isolado no celular
-    parado, que o refratário sozinho deixava passar.
+    curta (1 pico, ou 2 com giro de manuseio) sai fora. É o que barra o
+    toque isolado no celular parado, que o refratário sozinho deixava
+    passar. Duas passadas com giro local ainda abaixo de ``max_local_gyro``
+    sobrevivem a uma hesitação: no começo da caminhada isso são passos,
+    no chacoalho o giro local passa de 3 rad/s e o par cai.
     """
     if not peaks:
         return []
@@ -444,7 +527,10 @@ def _keep_regular_runs(
         else:
             runs.append([peak])
     kept: list[int] = []
+    calm_peaks = calm or set()
     for run in runs:
         if len(run) >= config.min_consecutive_steps:
+            kept.extend(run)
+        elif len(run) == 2 and all(peak in calm_peaks for peak in run):
             kept.extend(run)
     return kept

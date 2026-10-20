@@ -102,6 +102,34 @@ def test_peak_detector_events_share_input_time_base(detector):
     assert len(steps) == len({step.index for step in steps})
 
 
+def _two_hand_pulses(gyro_peak: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Dois pulsos no ritmo de passada, giro calmo ou de chacoalho."""
+    sample_rate = 50.0
+    n = int(4 * sample_rate)
+    time = np.arange(n) / sample_rate
+    signal = np.full(n, 9.81)
+    gyro = np.full(n, 0.2)
+    for center in (0.8, 1.5):
+        start = int(round((center - 0.2) * sample_rate))
+        signal[start:start + 20] += np.hanning(20) * 3.0
+        gyro_start = int(round((center - 0.12) * sample_rate))
+        gyro[gyro_start:gyro_start + 12] = gyro_peak
+    return time, signal, gyro
+
+
+def test_two_calm_steps_survive_a_short_recording(detector):
+    """Duas passadas com giro de caminhada não precisam de uma terceira."""
+    time, signal, gyro = _two_hand_pulses(gyro_peak=0.4)
+    steps = detector.detect(time, signal, gyro)
+    assert len(steps) == 2
+
+
+def test_shaky_pair_is_not_a_step_run(detector):
+    """O mesmo par com giro local de chacoalho não vira passo."""
+    time, signal, gyro = _two_hand_pulses(gyro_peak=5.0)
+    assert detector.detect(time, signal, gyro) == []
+
+
 def test_peak_detector_duplicate_timestamps_do_not_raise(detector):
     time, signal, gyro = _gait()
     duplicated = time.copy()

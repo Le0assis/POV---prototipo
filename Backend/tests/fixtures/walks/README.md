@@ -46,7 +46,7 @@ O erro agregado de 3% é desejável e não bloqueia. A tabela sai com `python -m
 
 ## O que falta
 
-As gravações reais do Poco 6 Pro (Chrome para Android), celular na mão, ritmo normal, ainda não estão nesta pasta. Quando chegarem, registrar aqui o cenário, o N_real, a taxa efetiva, quem contou e como contou. Escada e bolso ficam fora desta missão.
+As gravações de 2026-10-20 (abaixo) são Android nativo, Sensor Logger, ~100 Hz. Ainda falta o mesmo protocolo pelo recorder do Chrome (~50 Hz). A suíte também reamostra esses CSV para 50 Hz, para o detector não ficar preso à taxa do app. Escada e bolso ficam fora desta missão.
 
 ## Gravações de 2026-10-20 (Poco 6 Pro, Sensor Logger)
 
