@@ -1,0 +1,29 @@
+.home {
+    width: min(880px, 100%);
+    margin: 0 auto;
+    padding: 20px 16px 40px;
+}
+
+.home h1 { font-size: 1.6rem; margin-bottom: 6px; }
+
+.home-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.home-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-decoration: none;
+    color: inherit;
+}
+
+.home-card strong { color: var(--text); font-size: 1.05rem; }
+.home-card span { color: var(--muted); font-size: .88rem; }
+
+@media (max-width: 640px) {
+    .home-grid { grid-template-columns: 1fr; }
+}

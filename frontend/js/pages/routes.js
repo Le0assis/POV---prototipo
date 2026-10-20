@@ -29,7 +29,7 @@ async function init() {
     bindStatic();
     renderSkeleton();
     await Promise.all([loadNodes(), loadRoutes()]);
-    window.addEventListener('pagehide', () => { shutdown({ reset: false }); }, { once: true });
+    window.addEventListener('pagehide', () => { shutdown(); }, { once: true });
 }
 
 function bindStatic() {
@@ -42,8 +42,8 @@ function bindStatic() {
     $('#step-length').addEventListener('change', onStepLength);
     $('#routes-list').addEventListener('click', onListClick);
 
-    $('#exec-close').addEventListener('click', () => { shutdown({ reset: true }); });
-    $('#exec-summary-close').addEventListener('click', () => { shutdown({ reset: true }); });
+    $('#exec-close').addEventListener('click', () => { shutdown(); });
+    $('#exec-summary-close').addEventListener('click', () => { shutdown(); });
     $('#exec-finish').addEventListener('click', finishEarly);
     $('#exec-repeat').addEventListener('click', repeatRun);
     $('#exec-play').addEventListener('click', togglePause);
@@ -62,7 +62,7 @@ function onKeyDown(event) {
         closeModal();
         return;
     }
-    if (state.run) shutdown({ reset: true });
+    if (state.run) shutdown();
 }
 
 async function loadNodes() {
@@ -239,7 +239,7 @@ async function begin(id, mode) {
         toast('Essa rota não tem segmentos.', 'erro');
         return;
     }
-    await shutdown({ reset: false });
+    await shutdown();
     const run = {
         mode,
         route,
@@ -287,12 +287,6 @@ async function begin(id, mode) {
     if (!grantedHeading || !grantedSteps) {
         toast('Permissão de sensor negada. No desktop, use as setas ← → para o rumo.', 'warn');
     }
-    try {
-        await api.reset(route.start_node);
-    } catch (err) {
-        toast(err.message || 'Não foi possível resetar a sessão.', 'erro');
-    }
-
     run.offHeading = run.heading.onHeading((sample) => {
         run.lastSource = sample.source;
         const corrected = run.heading.correctedHeadingDeg;
@@ -417,7 +411,7 @@ async function repeatRun() {
     const run = state.run;
     if (!run) return;
     const { mode, route } = run;
-    await shutdown({ reset: true });
+    await shutdown();
     const fresh = state.routes.find((item) => String(item.id) === String(route.id)) || route;
     await begin(fresh.id, mode);
 }
@@ -469,7 +463,7 @@ function stopPoll(run) {
     }
 }
 
-async function shutdown({ reset }) {
+async function shutdown() {
     const run = state.run;
     if (!run) {
         $('#exec').classList.add('hidden');
@@ -491,11 +485,4 @@ async function shutdown({ reset }) {
     $('#exec').classList.add('hidden');
     const host = $('#exec-compass');
     if (host) host.replaceChildren();
-    if (reset && run.route) {
-        try {
-            await api.reset(run.route.start_node);
-        } catch (_) {
-            /* fechar a tela não depende do reset */
-        }
-    }
 }

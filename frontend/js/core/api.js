@@ -1,9 +1,17 @@
 /**
  * Camada HTTP única do frontend POV.
  * Toda chamada ao backend passa por aqui.
+ *
+ * Escritas protegidas enviam `X-Editor-Password` (sessionStorage, mesma chave
+ * no editor, no gravador e nas rotas). Inclui process-raw, checkpoints, edges,
+ * posição, map-config, POST/DELETE /api/routes e POST /api/reset.
+ * 401 pede a senha de novo e tenta outra vez. 503 avisa que a senha não está
+ * configurada no servidor. Leitura (viewer, locate) não pede senha.
  */
 
 import { API_BASE_URL } from './config.js';
+
+const EDITOR_PASSWORD_KEY = 'pov_editor_password';
 
 export class ApiError extends Error {
     constructor(detail, status = 0) {
@@ -34,7 +42,14 @@ function extractDetail(data, status) {
     if (typeof detail === 'string') return detail;
     if (Array.isArray(detail)) {
         const msgs = detail
-            .map(item => (item && typeof item === 'object' ? item.msg : String(item)))
+            .map(item => {
+                if (!item || typeof item !== 'object') return String(item);
+                const loc = Array.isArray(item.loc)
+                    ? item.loc.filter(part => part !== 'body').join('.')
+                    : '';
+                const msg = item.msg || '';
+                return loc && msg ? `${loc}: ${msg}` : (msg || loc);
+            })
             .filter(Boolean);
         return msgs.length ? msgs.join('; ') : fallback;
     }
@@ -45,13 +60,16 @@ function extractDetail(data, status) {
     }
 }
 
-async function request(path, { method = 'GET', body, query, timeout = 8000 } = {}) {
+async function request(path, { method = 'GET', body, query, timeout = 8000, password } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
 
+    const headers = { 'Content-Type': 'application/json' };
+    if (password) headers['X-Editor-Password'] = password;
+
     const options = {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         signal: controller.signal
     };
     if (body !== undefined) {
@@ -83,6 +101,157 @@ async function request(path, { method = 'GET', body, query, timeout = 8000 } = {
     return data;
 }
 
+export function getEditorPassword() {
+    try {
+        return sessionStorage.getItem(EDITOR_PASSWORD_KEY) || '';
+    } catch (_) {
+        return '';
+    }
+}
+
+export function setEditorPassword(value) {
+    try {
+        sessionStorage.setItem(EDITOR_PASSWORD_KEY, value);
+    } catch (_) {
+        /* sessionStorage indisponível: a senha vale só nesta chamada */
+    }
+}
+
+export function clearEditorPassword() {
+    try {
+        sessionStorage.removeItem(EDITOR_PASSWORD_KEY);
+    } catch (_) {
+        /* ignora */
+    }
+}
+
+let pendingPrompt = null;
+
+/**
+ * Garante a senha do editor na sessionStorage.
+ * Editor e gravador usam este mesmo prompt e a mesma chave.
+ * @returns {Promise<string|null>} senha, ou null se o usuário cancelar
+ */
+export function ensureEditorPassword({ force = false, message = '' } = {}) {
+    if (!force) {
+        const existing = getEditorPassword();
+        if (existing) return Promise.resolve(existing);
+    }
+    if (pendingPrompt) return pendingPrompt;
+    pendingPrompt = promptEditorPassword(message).finally(() => {
+        pendingPrompt = null;
+    });
+    return pendingPrompt;
+}
+
+/**
+ * Escrita protegida: envia a senha, e em 401 pede de novo e tenta uma vez.
+ * Em 503 não insiste.
+ */
+async function editorWrite(path, options) {
+    let password = await ensureEditorPassword();
+    if (!password) throw new ApiError('Senha do editor necessária.', 401);
+    try {
+        return await request(path, { ...options, password });
+    } catch (err) {
+        if (err.status === 503) {
+            throw new ApiError('A senha do editor não está configurada no servidor.', 503);
+        }
+        if (err.status !== 401) throw err;
+        clearEditorPassword();
+        password = await ensureEditorPassword({
+            force: true,
+            message: 'Senha incorreta. Digite de novo.'
+        });
+        if (!password) throw new ApiError('Senha incorreta.', 401);
+        try {
+            return await request(path, { ...options, password });
+        } catch (retryErr) {
+            if (retryErr.status === 503) {
+                throw new ApiError('A senha do editor não está configurada no servidor.', 503);
+            }
+            if (retryErr.status === 401) {
+                clearEditorPassword();
+                throw new ApiError('Senha incorreta.', 401);
+            }
+            throw retryErr;
+        }
+    }
+}
+
+function promptEditorPassword(message) {
+    return new Promise((resolve) => {
+        const previous = document.activeElement;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+
+        const content = document.createElement('form');
+        content.className = 'modal-content';
+        content.setAttribute('role', 'dialog');
+        content.setAttribute('aria-modal', 'true');
+        content.setAttribute('aria-labelledby', 'editor-password-title');
+
+        const title = document.createElement('h2');
+        title.id = 'editor-password-title';
+        title.textContent = 'Senha do editor';
+
+        const hint = document.createElement('p');
+        hint.className = 'hint';
+        hint.textContent = message
+            || 'Vale para o editor e para o gravador, só nesta aba.';
+
+        const label = document.createElement('label');
+        label.className = 'form-group';
+        label.textContent = 'Senha';
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.autocomplete = 'current-password';
+        input.required = true;
+        label.appendChild(input);
+
+        const actions = document.createElement('div');
+        actions.className = 'form-actions';
+
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn btn-ghost';
+        cancel.textContent = 'Cancelar';
+
+        const ok = document.createElement('button');
+        ok.type = 'submit';
+        ok.className = 'btn btn-primary';
+        ok.textContent = 'Entrar';
+
+        actions.append(cancel, ok);
+        content.append(title, hint, label, actions);
+        overlay.appendChild(content);
+
+        let settled = false;
+        const close = (value) => {
+            if (settled) return;
+            settled = true;
+            overlay.remove();
+            if (previous && typeof previous.focus === 'function') previous.focus();
+            resolve(value);
+        };
+
+        content.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const value = input.value;
+            if (!value) return;
+            setEditorPassword(value);
+            close(value);
+        });
+        cancel.addEventListener('click', () => close(null));
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) close(null);
+        });
+
+        document.body.appendChild(overlay);
+        input.focus();
+    });
+}
+
 export function getMap() {
     return request('/api/map');
 }
@@ -96,14 +265,14 @@ export function getRoute(id) {
 }
 
 export function createRoute({ start_node, end_node, name }) {
-    return request('/api/routes', {
+    return editorWrite('/api/routes', {
         method: 'POST',
         body: { start_node, end_node, name }
     });
 }
 
 export function deleteRoute(id) {
-    return request(`/api/routes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return editorWrite(`/api/routes/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function getCompassRoute(start, end) {
@@ -111,7 +280,7 @@ export function getCompassRoute(start, end) {
 }
 
 export function reset(startNode) {
-    return request('/api/reset', {
+    return editorWrite('/api/reset', {
         method: 'POST',
         query: { start_node: startNode }
     });
@@ -129,24 +298,56 @@ export function currentLocation() {
 }
 
 export function saveCheckpoint(name) {
-    return request('/api/checkpoints', {
+    return editorWrite('/api/checkpoints', {
         method: 'POST',
         body: { name }
     });
 }
 
 export function saveEdge({ source, target, distance_m, heading_rad }) {
-    return request('/api/edges', {
+    return editorWrite('/api/edges', {
         method: 'POST',
         body: { source, target, distance_m, heading_rad }
     });
 }
 
 export function processRaw({ source, target, samples }) {
-    return request('/api/edges/process-raw', {
+    return editorWrite('/api/edges/process-raw', {
         method: 'POST',
         body: { source, target, samples },
         timeout: 30000
+    });
+}
+
+export function getConnections({ includePath = true } = {}) {
+    return request('/api/connections', {
+        query: { include_path: includePath }
+    });
+}
+
+export function getConnection(edgeId) {
+    return request(`/api/connections/${encodeURIComponent(edgeId)}`);
+}
+
+export function getPdrConfig() {
+    return request('/api/pdr/config');
+}
+
+export function updateCheckpointPosition(name, { pos_x_px, pos_y_px }) {
+    return editorWrite(`/api/checkpoints/${encodeURIComponent(name)}/position`, {
+        method: 'PATCH',
+        body: { pos_x_px, pos_y_px }
+    });
+}
+
+export function getMapConfig() {
+    return request('/api/map-config');
+}
+
+export function saveMapConfig({ plan_image, px_per_m, rotation_rad }) {
+    return editorWrite('/api/map-config', {
+        method: 'PUT',
+        body: { plan_image, px_per_m, rotation_rad }
     });
 }
 

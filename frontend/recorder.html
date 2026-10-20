@@ -8,6 +8,7 @@
     <meta name="theme-color" content="#22d3ee">
     <link rel="stylesheet" href="css/base.css">
     <link rel="stylesheet" href="css/recorder.css">
+    <link rel="stylesheet" href="css/map.css">
 </head>
 <body>
     <main class="rec">
@@ -53,6 +54,12 @@
                 <span>Amostras <strong class="mono" id="sample-count">0</strong></span>
                 <span>Passos ao vivo <strong class="mono" id="live-steps">0</strong></span>
             </div>
+        </section>
+
+        <section class="card">
+            <h2>Prévia do caminho</h2>
+            <p class="hint" id="rec-path-caption">Depois do envio, a polilinha devolvida pelo processamento aparece aqui.</p>
+            <canvas id="rec-path" class="path-preview" width="320" height="140" aria-label="Prévia da polilinha gravada"></canvas>
         </section>
 
         <section>

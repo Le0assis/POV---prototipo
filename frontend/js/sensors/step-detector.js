@@ -22,6 +22,13 @@ export class StepDetector {
     constructor() {
         this._callbacks = new Set();
         this._running = false;
+        this._k = WEINBERG_K;
+        this._exponent = WEINBERG_EXPONENT;
+        this._minM = STEP_MIN_M;
+        this._maxM = STEP_MAX_M;
+        this._defaultM = null;
+        this._refractoryMs = REFRACTORY_MS;
+        this._cutoffHz = null;
         this._onMotion = (event) => {
             const acc = event.accelerationIncludingGravity;
             if (!acc || acc.x === null || acc.x === undefined) return;
@@ -72,6 +79,34 @@ export class StepDetector {
         return () => this._callbacks.delete(cb);
     }
 
+    /**
+     * Aplica os parâmetros de GET /api/pdr/config.
+     * Sem esta chamada, o detector mantém o comportamento anterior (rotas/gravador).
+     * A tela de localização sempre chama isto e não usa constantes próprias.
+     */
+    setPdrConfig(pdr) {
+        const step = (pdr && pdr.step_length) || {};
+        const det = (pdr && pdr.step_detection) || {};
+        const num = (value) => {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : null;
+        };
+        const k = num(step.k);
+        const exponent = num(step.exponent);
+        const minM = num(step.min_m);
+        const maxM = num(step.max_m);
+        const defaultM = num(step.default_m);
+        const minInterval = num(det.min_step_interval_s);
+        const cutoff = num(det.lowpass_cutoff_hz);
+        if (k !== null) this._k = k;
+        if (exponent !== null) this._exponent = exponent;
+        if (minM !== null) this._minM = minM;
+        if (maxM !== null) this._maxM = maxM;
+        if (defaultM !== null) this._defaultM = defaultM;
+        if (minInterval !== null) this._refractoryMs = minInterval * 1000;
+        if (cutoff !== null) this._cutoffHz = cutoff;
+    }
+
     /** Limpa o estado interno (mantém os callbacks registrados). */
     reset() {
         this._smooth = null;
@@ -92,12 +127,14 @@ export class StepDetector {
         const t = Number.isFinite(sample.t) ? sample.t : Date.now();
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
         if (this._lastT !== null && t <= this._lastT) return;
+        const dtMs = this._lastT === null ? null : t - this._lastT;
         this._lastT = t;
 
         const raw = Math.sqrt(x * x + y * y + z * z);
+        const alpha = this._smoothAlpha(dtMs);
         this._smooth = this._smooth === null
             ? raw
-            : this._smooth + LOW_PASS_ALPHA * (raw - this._smooth);
+            : this._smooth + alpha * (raw - this._smooth);
         const cur = { v: this._smooth, t };
 
         // Janela deslizante de 1,5 s.
@@ -122,7 +159,7 @@ export class StepDetector {
         const mean = this._windowSum / this._window.length;
         const threshold = Math.max(MIN_HEIGHT, mean + HEIGHT_MARGIN);
         if (peak.v <= threshold) return;
-        if (peak.t - this._lastStepTs < REFRACTORY_MS) return;
+        if (peak.t - this._lastStepTs < this._refractoryMs) return;
 
         let valley = Infinity;
         for (const s of this._window) {
@@ -131,11 +168,23 @@ export class StepDetector {
         const deltaA = peak.v - valley;
         if (deltaA < DELTA_A_MIN || deltaA > DELTA_A_MAX) return;
 
-        const raw = WEINBERG_K * Math.pow(deltaA, WEINBERG_EXPONENT);
-        const length = Math.min(STEP_MAX_M, Math.max(STEP_MIN_M, raw));
+        const rawLength = this._k * Math.pow(deltaA, this._exponent);
+        const fallback = Number.isFinite(this._defaultM) ? this._defaultM : rawLength;
+        const chosen = Number.isFinite(rawLength) ? rawLength : fallback;
+        const length = Math.min(this._maxM, Math.max(this._minM, chosen));
         this._lastStepTs = peak.t;
 
         const payload = { length, ts: peak.t, deltaA };
+        this._emit(payload);
+    }
+
+    _smoothAlpha(dtMs) {
+        if (!Number.isFinite(this._cutoffHz) || !(dtMs > 0)) return LOW_PASS_ALPHA;
+        const dt = dtMs / 1000;
+        return Math.min(1, Math.max(0.01, 1 - Math.exp(-2 * Math.PI * this._cutoffHz * dt)));
+    }
+
+    _emit(payload) {
         for (const cb of this._callbacks) {
             try {
                 cb(payload);

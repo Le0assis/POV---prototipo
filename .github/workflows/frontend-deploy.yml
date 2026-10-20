@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
 
 jobs:
   # JOB 1: Testes e validações do código Python (dev e main)
@@ -28,7 +28,23 @@ jobs:
         run: |
           python -m compileall .
 
-  # JOB 2: Publica a pasta frontend na branch 'gh-pages' (Apenas no push da 'main')
+  # JOB 2: Testes Node do frontend, só em pull request para main e dev
+  frontend-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Rodar testes do frontend
+        run: npm test
+
+  # JOB 3: Publica a pasta frontend na branch 'gh-pages' (Apenas no push da 'main')
   deploy-github-pages:
     needs: test-and-validate
     if: github.ref == 'refs/heads/main'
