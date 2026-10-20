@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV — Localizar</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#22d3ee">
+    <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/map.css">
+</head>
+<body>
+    <main class="map-page">
+        <div class="map-layout">
+            <section>
+                <div class="map-toolbar">
+                    <h1>Localização</h1>
+                    <p class="hint">O ponto segue a polilinha da aresta calibrada. O heading é relativo e zera no checkpoint.</p>
+                </div>
+                <div class="map-stage" id="floor-map" role="application" aria-label="Teste de localização"></div>
+            </section>
+            <div class="side-stack">
+                <section class="card">
+                    <label class="form-group" for="loc-start">
+                        Checkpoint
+                        <select id="loc-start"></select>
+                    </label>
+                    <label class="form-group" for="loc-edge">
+                        Aresta seguinte
+                        <select id="loc-edge"></select>
+                    </label>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-success" id="loc-start-btn">Iniciar</button>
+                        <button type="button" class="btn btn-danger" id="loc-stop" disabled>Parar</button>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="loc-recal" disabled>Recalibrar no checkpoint</button>
+                    <p class="hint">Fique no checkpoint, virado para a aresta seguinte. Recalibrar zera a posição nesse ponto e usa o heading_rad dessa aresta como referência.</p>
+                </section>
+                <section class="card" aria-live="polite">
+                    <div class="stat-row">
+                        <div class="kpi">
+                            <span class="kpi-label">Checkpoint estimado</span>
+                            <span class="kpi-value" id="loc-node">—</span>
+                        </div>
+                        <div class="kpi">
+                            <span class="kpi-label">Erro</span>
+                            <span class="kpi-value" id="loc-error">—</span>
+                        </div>
+                        <div class="kpi">
+                            <span class="kpi-label">Passos</span>
+                            <span class="kpi-value" id="loc-steps">0</span>
+                        </div>
+                        <div class="kpi">
+                            <span class="kpi-label">Distância</span>
+                            <span class="kpi-value" id="loc-dist">0 m</span>
+                        </div>
+                    </div>
+                    <p class="hint" id="loc-edge-label">Nenhuma aresta ativa.</p>
+                    <p class="hint" id="loc-goal"></p>
+                </section>
+                <details class="card">
+                    <summary>Sem sensor (desktop)</summary>
+                    <p class="hint">No Poco, os passos vêm do acelerômetro. Aqui dá para avançar um passo com o comprimento padrão do servidor.</p>
+                    <button type="button" class="btn btn-ghost" id="loc-sim" disabled>Simular passo</button>
+                </details>
+            </div>
+        </div>
+    </main>
+    <script src="vendor/leaflet/leaflet.js"></script>
+    <script type="module" src="js/pages/locate.js"></script>
+</body>
+</html>

@@ -8,9 +8,12 @@ import { ping } from '../core/api.js';
 const PING_INTERVAL_MS = 10000;
 
 const LINKS = [
-    { key: 'nav', aliases: ['index', 'dashboard'], href: 'index.html', label: '📍 Navegação' },
-    { key: 'map', aliases: ['recorder'], href: 'recorder.html', label: '🗺️ Mapeador' },
-    { key: 'routes', aliases: [], href: 'routes.html', label: '📋 Rotas' }
+    { key: 'home', aliases: ['index', 'dashboard', 'nav'], href: 'index.html', label: 'Início' },
+    { key: 'viewer', aliases: [], href: 'viewer.html', label: 'Mapa' },
+    { key: 'editor', aliases: [], href: 'editor.html', label: 'Editor' },
+    { key: 'map', aliases: ['recorder'], href: 'recorder.html', label: 'Gravador' },
+    { key: 'locate', aliases: [], href: 'locate.html', label: 'Localizar' },
+    { key: 'routes', aliases: [], href: 'routes.html', label: 'Rotas' }
 ];
 
 function isActive(link, active) {

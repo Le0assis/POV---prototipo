@@ -265,6 +265,8 @@ def reset_session(start_node: str = Query(default="Recepcao")):
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
 app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
+app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
+app.mount("/vendor", StaticFiles(directory=FRONTEND_DIR / "vendor"), name="vendor")
 
 @app.get("/api/current_location")
 def get_current_location():
@@ -307,6 +309,27 @@ def read_routes():
     if routes_path.exists():
         return FileResponse(routes_path)
     return {"error": "Arquivo routes.html nao encontrado em frontend/"}
+
+@app.get("/editor")
+@app.get("/editor.html")
+def read_editor():
+    return _frontend_page("editor.html")
+
+@app.get("/viewer")
+@app.get("/viewer.html")
+def read_viewer():
+    return _frontend_page("viewer.html")
+
+@app.get("/locate")
+@app.get("/locate.html")
+def read_locate():
+    return _frontend_page("locate.html")
+
+def _frontend_page(name: str):
+    path = FRONTEND_DIR / name
+    if path.exists():
+        return FileResponse(path)
+    return {"error": f"Arquivo {name} nao encontrado em frontend/"}
 
 from fastapi import Response, HTTPException
 

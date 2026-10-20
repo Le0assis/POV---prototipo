@@ -8,7 +8,9 @@ import { HeadingProvider } from '../sensors/heading.js';
 import { StepDetector } from '../sensors/step-detector.js';
 import * as api from '../core/api.js';
 import { $, escapeHtml, fillSelect, formatNum } from '../core/dom.js';
-import { toast } from '../core/toast.js';
+import { toast } from '../ui/toast.js';
+import { renderPathPreview, pathDurationSeconds } from '../map/path-preview.js';
+import { pathFromProcessResponse } from '../route/model.js';
 
 const SPARK_MAX = 200;
 const MIN_SAMPLES = 20;
@@ -29,6 +31,7 @@ document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
     insertTopNav('map');
+    await api.ensureEditorPassword();
     $('#rec-go').addEventListener('click', toggle);
     detector.onStep(() => {
         if (!recording) return;
@@ -87,8 +90,8 @@ async function toggle() {
     paintClock();
     try {
         await api.reset(source);
-    } catch (_) {
-        /* a gravação segue mesmo se o reset falhar */
+    } catch (err) {
+        toast(err.message || 'Não foi possível reiniciar a sessão no servidor.', 'warn');
     }
 }
 
@@ -152,17 +155,36 @@ async function stopAndSend() {
     try {
         const data = await api.processRaw({ source, target, samples: taken });
         const valid = data.valid === true;
+        const path = pathFromProcessResponse(data);
+        const trace = data.path && !Array.isArray(data.path) ? data.path : null;
         history.unshift({
             time: new Date().toLocaleTimeString(),
             source,
             target,
             liveSteps: stepsSeen,
-            processedSteps: data.steps_count || 0,
-            distance: data.distance_m || 0,
+            processedSteps: data.steps_count || (trace && trace.steps_count) || 0,
+            distance: data.distance_m || (trace && trace.distance_m) || 0,
+            edgeDistance: data.edge_distance_m ?? (trace && trace.distance_m),
+            edgeOrigin: data.edge_origin,
+            netHeading: data.net_heading_rad,
+            traceId: data.trace_id ?? (trace && trace.id),
             valid,
+            path,
             message: data.message || (valid ? 'Gravado com sucesso' : 'Trecho descartado')
         });
         renderHistory();
+        renderPathPreview($('#rec-path'), path);
+        const duration = pathDurationSeconds(path);
+        const traceId = data.trace_id ?? (trace && trace.id);
+        const edgeDistance = data.edge_distance_m ?? (trace && trace.distance_m);
+        const caption = [
+            traceId != null ? `trace ${traceId}` : null,
+            data.edge_origin ? `origem ${data.edge_origin}` : null,
+            Number.isFinite(Number(edgeDistance)) ? `aresta ${formatNum(edgeDistance, 2)} m` : null,
+            Number.isFinite(Number(data.net_heading_rad)) ? `heading ${formatNum(data.net_heading_rad, 3)} rad` : null,
+            duration != null ? `duração ${formatNum(duration, 1)} s` : null
+        ].filter(Boolean).join(' · ');
+        $('#rec-path-caption').textContent = caption || 'Polilinha recebida.';
         toast(data.message || (valid ? 'Trecho gravado.' : 'Trecho descartado.'), valid ? 'ok' : 'warn');
     } catch (err) {
         toast(err.message || 'Erro ao enviar a caminhada.', 'erro');
@@ -237,6 +259,14 @@ function renderHistory() {
             <p>Passos processados ${escapeHtml(item.processedSteps)} · ao vivo ${escapeHtml(item.liveSteps)} · ${escapeHtml(item.distance)} m · ${escapeHtml(item.time)}</p>
             <p>${escapeHtml(item.message)}</p>
         `;
+        if (Array.isArray(item.path) && item.path.length) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 96;
+            canvas.setAttribute('aria-label', 'Prévia da polilinha');
+            card.appendChild(canvas);
+            renderPathPreview(canvas, item.path);
+        }
         host.appendChild(card);
     });
 }

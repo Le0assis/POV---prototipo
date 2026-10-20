@@ -90,3 +90,28 @@ export function bearingToBackendYaw(deg, offsetDeg = 0) {
         : deg - offsetDeg;
     return degToRad(signedDelta(0, yawDeg));
 }
+
+/**
+ * Heading relativo à calibração no checkpoint.
+ * `bearingDeg` e `calibBearingDeg` são rumos de bússola (horário).
+ * `referenceRad` é o `heading_rad` da aresta seguinte (anti-horário, 0 = +x).
+ * Um giro horário do aparelho diminui o heading do plano.
+ * Esta é a única conversão bússola → referencial do backend.
+ */
+export function relativeHeadingRad(bearingDeg, calibBearingDeg, referenceRad) {
+    const bearing = Number(bearingDeg);
+    const calib = Number(calibBearingDeg);
+    const reference = Number(referenceRad);
+    if (!Number.isFinite(bearing) || !Number.isFinite(calib) || !Number.isFinite(reference)) return null;
+    const deltaClockwiseRad = degToRad(signedDelta(calib, bearing));
+    return normalizeRad(reference - deltaClockwiseRad);
+}
+
+/** Normaliza radianos para (−π, π]. */
+export function normalizeRad(rad) {
+    const tau = Math.PI * 2;
+    let r = rad % tau;
+    if (r <= -Math.PI) r += tau;
+    if (r > Math.PI) r -= tau;
+    return r;
+}

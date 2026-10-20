@@ -3,106 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POV — Administração</title>
+    <title>POV — Início</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#22d3ee">
     <link rel="stylesheet" href="css/base.css">
-    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/home.css">
 </head>
 <body>
-    <main class="dash">
-        <section class="kpis" aria-label="Indicadores">
-            <article class="kpi">
-                <span class="kpi-label">Nós</span>
-                <span class="kpi-value mono" id="kpi-nodes">—</span>
-            </article>
-            <article class="kpi">
-                <span class="kpi-label">Arestas</span>
-                <span class="kpi-value mono" id="kpi-edges">—</span>
-            </article>
-            <article class="kpi">
-                <span class="kpi-label">Rotas salvas</span>
-                <span class="kpi-value mono" id="kpi-routes">—</span>
-            </article>
-            <article class="kpi">
-                <span class="kpi-label">API</span>
-                <span class="kpi-value" id="kpi-api">offline</span>
-            </article>
-            <article class="kpi">
-                <span class="kpi-label">Nó atual</span>
-                <span class="kpi-value" id="kpi-node">—</span>
-            </article>
-        </section>
-
-        <div class="dash-grid">
-            <section class="card map-card">
-                <div class="map-toolbar">
-                    <h1>Mapa</h1>
-                    <p class="hint">Roda ou pinça para zoom, arraste para mover, duplo clique reajusta.</p>
-                </div>
-                <div class="map-stage" id="map-stage">
-                    <canvas id="map-canvas" aria-label="Mapa topológico"></canvas>
-                    <div class="map-tip hidden" id="map-tip" role="tooltip"></div>
-                </div>
-                <ul class="legend">
-                    <li><i class="swatch edge"></i> Conexão</li>
-                    <li><i class="swatch route"></i> Rota planejada</li>
-                    <li><i class="swatch trail"></i> Trilha visitada</li>
-                </ul>
-            </section>
-
-            <aside class="admin">
-                <form class="card" id="form-checkpoint">
-                    <h2>Novo checkpoint</h2>
-                    <label class="form-group" for="checkpoint-name">
-                        Nome
-                        <input id="checkpoint-name" type="text" maxlength="80" required placeholder="Laboratório">
-                    </label>
-                    <button type="submit" class="btn btn-primary">Cadastrar nó</button>
-                </form>
-
-                <form class="card" id="form-edge">
-                    <h2>Nova conexão</h2>
-                    <label class="form-group" for="edge-source">
-                        Origem
-                        <select id="edge-source" required></select>
-                    </label>
-                    <label class="form-group" for="edge-target">
-                        Destino
-                        <select id="edge-target" required></select>
-                    </label>
-                    <label class="form-group" for="edge-distance">
-                        Distância (m)
-                        <input id="edge-distance" type="number" min="0.1" step="0.1" required>
-                    </label>
-                    <label class="form-group" for="edge-heading">
-                        Heading do grafo (graus, anti-horário)
-                        <input id="edge-heading" type="number" step="1" value="0" required>
-                    </label>
-                    <p class="hint">Em radianos: <span class="mono" id="edge-rad">0.000</span></p>
-                    <button type="submit" class="btn btn-primary">Gravar conexão</button>
-                </form>
-
-                <form class="card" id="form-reset">
-                    <h2>Sessão PDR</h2>
-                    <label class="form-group" for="reset-node">
-                        Nó inicial
-                        <select id="reset-node"></select>
-                    </label>
-                    <button type="submit" class="btn btn-ghost">Resetar sessão</button>
-                </form>
-
-                <form class="card" id="form-dest">
-                    <h2>Rota planejada</h2>
-                    <label class="form-group" for="dest-node">
-                        Destino
-                        <select id="dest-node"></select>
-                    </label>
-                    <p class="hint" id="route-hint">A linha verde sai do nó atual.</p>
-                </form>
-            </aside>
-        </div>
+    <main class="home">
+        <h1>POV</h1>
+        <p class="hint">Mapa da planta, gravação do caminho real e teste de localização no celular.</p>
+        <p class="hint">API: <span id="home-api">verificando…</span></p>
+        <nav class="home-grid" aria-label="Páginas">
+            <a class="card home-card" href="viewer.html">
+                <strong>Mapa</strong>
+                <span>Trajetórias gravadas, só leitura.</span>
+            </a>
+            <a class="card home-card" href="editor.html">
+                <strong>Editor</strong>
+                <span>Checkpoints, conexões e posição na planta. Pede senha.</span>
+            </a>
+            <a class="card home-card" href="recorder.html">
+                <strong>Gravador</strong>
+                <span>Envia a caminhada e mostra a polilinha devolvida.</span>
+            </a>
+            <a class="card home-card" href="locate.html">
+                <strong>Localizar</strong>
+                <span>PDR no aparelho, blue dot e erro até o checkpoint.</span>
+            </a>
+            <a class="card home-card" href="routes.html">
+                <strong>Rotas</strong>
+                <span>Rotas salvas, teste e simulação.</span>
+            </a>
+        </nav>
     </main>
-    <script type="module" src="js/pages/dashboard.js"></script>
+    <script type="module" src="js/pages/home.js"></script>
 </body>
 </html>
