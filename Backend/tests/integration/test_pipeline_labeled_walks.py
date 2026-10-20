@@ -96,16 +96,6 @@ def test_labeled_walk_directory_is_ready_for_recordings():
     assert isinstance(found, list)
 
 
-# A pasta walks/ ainda não tem CSV do Poco 6 Pro, então o assert abaixo falha.
-# O xfail segura o CI. Quando entrar pelo menos um par *.csv + *.labels.json,
-# o teste passa (xpass) e strict=True derruba o job: apague este marcador.
-@pytest.mark.xfail(
-    reason=(
-        "Ligar quando as gravações reais entrarem em Backend/tests/fixtures/walks/: "
-        "remover este xfail."
-    ),
-    strict=True,
-)
 def test_labeled_walks_directory_is_not_empty():
     walks = discover_walks(WALKS_DIR)
     assert walks, (

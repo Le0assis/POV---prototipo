@@ -47,3 +47,16 @@ O erro agregado de 3% é desejável e não bloqueia. A tabela sai com `python -m
 ## O que falta
 
 As gravações reais do Poco 6 Pro (Chrome para Android), celular na mão, ritmo normal, ainda não estão nesta pasta. Quando chegarem, registrar aqui o cenário, o N_real, a taxa efetiva, quem contou e como contou. Escada e bolso ficam fora desta missão.
+
+## Gravações de 2026-10-20 (Poco 6 Pro, Sensor Logger)
+
+Gravadas com o app Sensor Logger 1.68 (Android nativo, ~100 Hz), não com o recorder do Chrome. Convertidas com `Backend/tools/convert_sensor_logger.py`: `TotalAcceleration` (com gravidade, eixos do Android = devicemotion) e `Gyroscope` (rad/s, interpolado na base do acelerômetro), timestamp relativo em s. Celular na mão, ritmo normal, passos contados à mão por Leonardo.
+
+| fixture | origem | N_real |
+|---|---|---:|
+| 20261020_normal_mao_01 | primeira-30 | 30 |
+| 20261020_normal_mao_02 | segunda-11 | 11 |
+| 20261020_normal_mao_03 | terceira-8 | 8 |
+| 20261020_normal_mao_04 | quarta-45 | 45 |
+| 20261020_parado_mao_01 | parado (≈12 s, não 30 s) | 0 |
+| 20261020_chacoalho_mao_01 | chacoalho (chacoalhando, sem andar) | 0 |
