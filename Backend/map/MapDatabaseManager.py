@@ -2,8 +2,10 @@ import json
 import threading
 
 import numpy as np
+from mysql.connector import IntegrityError
 
 from datasets.ManagerDatabase import ConexaoBD, request_connection
+from map.checkpoint_slug import DEFAULT_BUILDING_ID, allocate_slug
 from map.edge_rules import group_edge_pairs, resolve_recorded_edge
 from pdr.trajectory import (
     displacement_m,
@@ -12,6 +14,34 @@ from pdr.trajectory import (
     straight_path,
     trace_payload,
 )
+
+class UnknownCategoryError(Exception):
+    """``category_code`` não existe em ``checkpoint_categories``."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class CheckpointLookupError(Exception):
+    """A consulta de checkpoint ou categoria falhou."""
+
+
+class CheckpointConflictError(Exception):
+    """UNIQUE(building_id, slug) ainda colidiu depois de gerar o slug de novo."""
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(slug)
+        self.slug = slug
+
+
+_CHECKPOINT_COLUMNS = """
+    SELECT c.id, c.name, c.slug, c.building_id, c.pos_x_px, c.pos_y_px,
+           cat.code AS category_code, cat.label AS category_label
+    FROM checkpoints c
+    LEFT JOIN checkpoint_categories cat ON cat.id = c.category_id
+"""
+
 
 class MapDatabaseManager:
     """Responsável por salvar e carregar o grafo diretamente do MySQL do XAMPP."""
@@ -30,18 +60,159 @@ class MapDatabaseManager:
                 return current
         return self._database
     
-    def save_checkpoint(self, name: str):
-        """Salva um novo nó semântico no banco de dados."""
-        sql = """INSERT INTO checkpoints (name) VALUES (%s)"""
-        # IMPORTANTE: Notar a vírgula (name,) para o Python entender que é uma tupla de 1 elemento
-        succsses = self.db.execute_query(sql, (name,))
-        
-        if succsses:
+    def save_checkpoint(self, name: str, category_code: str | None = None):
+        """Salva um novo nó. O slug nasce aqui e não é recalculado depois.
+
+        Dois POST ao mesmo tempo podem escolher o mesmo slug. A primeira
+        colisão em UNIQUE(building_id, slug) gera o slug de novo, já vendo
+        a linha que ganhou a corrida. A segunda vira conflito.
+        """
+        category_id = None
+        if category_code is not None:
+            category_id = int(self._require_category(category_code)["id"])
+        sql = """INSERT INTO checkpoints (name, building_id, slug, category_id) VALUES (%s, %s, %s, %s)"""
+        slug = ""
+        for attempt in range(2):
+            taken = self._slugs_for_building(DEFAULT_BUILDING_ID)
+            slug = allocate_slug(name, taken)
+            try:
+                success = self.db.execute_query(
+                    sql, (name, DEFAULT_BUILDING_ID, slug, category_id)
+                )
+            except IntegrityError:
+                print(
+                    f"[M03] Conflito ao gravar slug '{slug}' "
+                    f"(tentativa {attempt + 1} de 2)."
+                )
+                if attempt == 0:
+                    continue
+                raise CheckpointConflictError(slug)
+            if not success:
+                print(f"Erro ao adicionar checkpoint {name}")
+                return False
             print(f"Checkpoint {name} adicionado com sucesso")
-            return True
-        else:
-            print(f"Erro ao adicionar checkpoint {name}")
+            loaded = self.get_checkpoint_by_name(name)
+            if loaded is not None:
+                return loaded
+            return _public_checkpoint({
+                "name": name,
+                "slug": slug,
+                "building_id": DEFAULT_BUILDING_ID,
+                "category_code": category_code,
+                "category_label": None,
+                "pos_x_px": None,
+                "pos_y_px": None,
+            })
+        raise CheckpointConflictError(slug)
+
+    def update_checkpoint_name(self, name: str, new_name: str) -> bool:
+        """Troca o nome e mantém o slug gerado na criação."""
+        cleaned = new_name.strip()
+        if not cleaned:
             return False
+        current = self.db.execute_search(
+            "SELECT slug FROM checkpoints WHERE name = %s",
+            (name,),
+        )
+        if current is None:
+            raise CheckpointLookupError("Falha ao buscar checkpoint.")
+        if not current:
+            return False
+        previous_slug = current[0]["slug"]
+        updated = self.db.execute_query(
+            "UPDATE checkpoints SET name = %s WHERE name = %s",
+            (cleaned, name),
+        )
+        if not updated:
+            return False
+        renamed = self.db.execute_search(
+            "SELECT slug FROM checkpoints WHERE name = %s",
+            (cleaned,),
+        )
+        if renamed is None:
+            raise CheckpointLookupError("Falha ao buscar checkpoint.")
+        if not renamed:
+            return False
+        return renamed[0]["slug"] == previous_slug
+
+    def update_checkpoint_category(self, name: str, category_code: str | None) -> dict | None:
+        """Grava a categoria, ou NULL quando ``category_code`` é None. Não mexe no slug."""
+        category_id = None
+        if category_code is not None:
+            category_id = int(self._require_category(category_code)["id"])
+        found = self.db.execute_search(
+            "SELECT name FROM checkpoints WHERE name = %s",
+            (name,),
+        )
+        if found is None:
+            raise CheckpointLookupError("Falha ao buscar checkpoint.")
+        if not found:
+            return None
+        updated = self.db.execute_query(
+            "UPDATE checkpoints SET category_id = %s WHERE name = %s",
+            (category_id, name),
+        )
+        if not updated:
+            return None
+        return self.get_checkpoint_by_name(name)
+
+    def list_categories(self) -> list | None:
+        rows = self.db.execute_search(
+            "SELECT code, label, sort_order FROM checkpoint_categories "
+            "ORDER BY sort_order ASC, code ASC"
+        )
+        if rows is None:
+            return None
+        return [
+            {
+                "code": row["code"],
+                "label": row["label"],
+                "sort_order": int(row["sort_order"]),
+            }
+            for row in rows
+        ]
+
+    def resolve_checkpoint(self, building_id: int, slug: str) -> dict | None:
+        rows = self.db.execute_search(
+            _CHECKPOINT_COLUMNS + " WHERE c.building_id = %s AND c.slug = %s",
+            (building_id, slug),
+        )
+        if rows is None:
+            raise CheckpointLookupError("Falha ao resolver checkpoint.")
+        if not rows:
+            return None
+        return _public_checkpoint(rows[0])
+
+    def get_checkpoint_by_name(self, name: str) -> dict | None:
+        rows = self.db.execute_search(
+            _CHECKPOINT_COLUMNS + " WHERE c.name = %s",
+            (name,),
+        )
+        if rows is None:
+            raise CheckpointLookupError("Falha ao buscar checkpoint.")
+        if not rows:
+            return None
+        return _public_checkpoint(rows[0])
+
+    def _require_category(self, code: str) -> dict:
+        rows = self.db.execute_search(
+            "SELECT id, code, label FROM checkpoint_categories WHERE code = %s",
+            (code,),
+        )
+        if rows is None:
+            raise CheckpointLookupError("Falha ao consultar checkpoint_categories.")
+        if not rows:
+            raise UnknownCategoryError(code)
+        return rows[0]
+
+    def _slugs_for_building(self, building_id: int) -> set[str]:
+        rows = self.db.execute_search(
+            "SELECT slug FROM checkpoints WHERE building_id = %s AND slug IS NOT NULL",
+            (building_id,),
+        )
+        if rows is None:
+            raise CheckpointLookupError("Falha ao listar slugs.")
+        return {row["slug"] for row in rows if row.get("slug")}
         
     def save_edge(self, source: str, target: str, distance: float, heading_rad: float):
         """Upsert manual dos dois sentidos. Uma linha por sentido; manual vence."""
@@ -564,16 +735,23 @@ class MapDatabaseManager:
         return traces
 
     def get_checkpoint_positions(self) -> dict:
-        rows = self.db.execute_search("SELECT name, pos_x_px, pos_y_px FROM checkpoints")
+        """Posições e slug. Consulta que falha não vira mapa sem posições.
+
+        ``execute_search`` devolve None quando o SQL quebra (migração 003
+        ainda não aplicada). Lista vazia continua sendo “não há checkpoints”.
+        """
+        rows = self.db.execute_search(_CHECKPOINT_COLUMNS)
+        if rows is None:
+            print(
+                "[M03] Falha ao ler checkpoints para /api/map. "
+                "Execute a migração 003."
+            )
+            raise CheckpointLookupError(
+                "Falha ao ler checkpoints. Execute a migração 003."
+            )
         if not rows:
             return {}
-        positions = {}
-        for row in rows:
-            positions[row["name"]] = (
-                None if row.get("pos_x_px") is None else float(row["pos_x_px"]),
-                None if row.get("pos_y_px") is None else float(row["pos_y_px"]),
-            )
-        return positions
+        return {row["name"]: _public_checkpoint(row) for row in rows}
 
     def update_checkpoint_position(self, name: str, pos_x_px, pos_y_px) -> bool:
         found = self.db.execute_search("SELECT name FROM checkpoints WHERE name = %s", (name,))
@@ -620,6 +798,26 @@ class MapDatabaseManager:
         if not self.db.execute_query(sql, (plan_image, px_per_m, float(rotation_rad))):
             return None
         return self.get_map_config()
+
+
+def _public_checkpoint(row: dict) -> dict:
+    code = row.get("category_code")
+    category = None
+    if code:
+        category = {"code": code, "label": row.get("category_label")}
+    pos_x = row.get("pos_x_px")
+    pos_y = row.get("pos_y_px")
+    payload = {
+        "name": row["name"],
+        "slug": row.get("slug"),
+        "building_id": None if row.get("building_id") is None else int(row["building_id"]),
+        "category": category,
+        "pos_x_px": None if pos_x is None else float(pos_x),
+        "pos_y_px": None if pos_y is None else float(pos_y),
+    }
+    if row.get("id") is not None:
+        payload["id"] = int(row["id"])
+    return payload
 
 
 def _edge_view(row: dict) -> dict:

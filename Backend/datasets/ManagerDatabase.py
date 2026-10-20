@@ -1,7 +1,7 @@
 from contextvars import ContextVar
 
 import mysql.connector
-from mysql.connector import Error
+from mysql.connector import Error, IntegrityError
 
 # Conexão da requisição atual. O singleton de boot fica só para a subida
 # e para scripts. GETs e a gravação da trajetória não dividem cursor.
@@ -53,6 +53,10 @@ class ConexaoBD:
             self.connection.commit()
             print("Comando executado com sucesso!")
             return True
+        except IntegrityError:
+            if self.connection:
+                self.connection.rollback()
+            raise
         except Error as e:
             if self.connection:
                 self.connection.rollback()

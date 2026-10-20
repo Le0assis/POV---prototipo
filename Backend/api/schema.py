@@ -1,9 +1,44 @@
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import List
+
+
+def _clean_category_code(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError("category_code vazio.")
+    return cleaned
+
 
 class CheckpointSchema(BaseModel):
     name: str
+    category_code: str | None = None
+
+    @field_validator("category_code")
+    @classmethod
+    def category_code_or_null(cls, value: str | None) -> str | None:
+        return _clean_category_code(value)
+
+
+class CheckpointCategorySchema(BaseModel):
+    """PATCH de categoria. ``slug`` no corpo é recusado: o slug não se edita."""
+
+    model_config = ConfigDict(extra="forbid")
+    category_code: str | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def slug_is_immutable(cls, value):
+        if isinstance(value, dict) and "slug" in value:
+            raise ValueError("O slug não pode ser alterado.")
+        return value
+
+    @field_validator("category_code")
+    @classmethod
+    def category_code_or_null(cls, value: str | None) -> str | None:
+        return _clean_category_code(value)
 
 class EdgeSchema(BaseModel):
     source: str
