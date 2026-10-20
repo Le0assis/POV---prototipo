@@ -15,9 +15,11 @@ from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
 from .editor_auth import require_editor_password
+from map.MapDatabaseManager import CheckpointLookupError, UnknownCategoryError
 from .schema import (
     ProcessRawEdgeSchema,
     CheckpointSchema,
+    CheckpointCategorySchema,
     CheckpointPositionSchema,
     EdgeSchema,
     StepSensorSchema,
@@ -141,11 +143,31 @@ def create_checkpoint(
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     
-    success = map_db_manager.save_checkpoint(node_name)
+    try:
+        if checkpoint.category_code is None:
+            success = map_db_manager.save_checkpoint(node_name)
+        else:
+            success = map_db_manager.save_checkpoint(node_name, checkpoint.category_code)
+    except UnknownCategoryError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Categoria '{exc.code}' não existe.",
+        ) from exc
+    except CheckpointLookupError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível consultar as categorias. Execute a migração 003.",
+        ) from exc
     if success:
         if node_name not in topo_map.nodes:
             topo_map.add_checkpoint(node_name)
-        return {"status": "success", "message": f"Checkpoint '{node_name}' integrado com sucesso."}
+        body = {
+            "status": "success",
+            "message": f"Checkpoint '{node_name}' integrado com sucesso.",
+        }
+        if isinstance(success, dict):
+            body["checkpoint"] = success
+        return body
     else:
         raise HTTPException(status_code=500, detail="Falha interna ao persistir checkpoint no banco.")
 
@@ -344,6 +366,21 @@ def get_current_location():
         "visited_path": visited_path
     }
 
+def _checkpoint_meta(raw):
+    """Tupla legada (x, y) ou o dict público do checkpoint."""
+    if isinstance(raw, dict):
+        return (
+            raw.get("pos_x_px"),
+            raw.get("pos_y_px"),
+            raw.get("slug"),
+            raw.get("building_id"),
+            raw.get("category"),
+        )
+    if isinstance(raw, tuple) and len(raw) >= 2:
+        return raw[0], raw[1], None, None, None
+    return None, None, None, None, None
+
+
 @app.get("/api/map", status_code=status.HTTP_200_OK)
 def get_map_layout():
     """Nós com posição da planta e arestas só da tabela edges (já carregada sem espelho)."""
@@ -351,17 +388,80 @@ def get_map_layout():
     positions = map_db_manager.get_checkpoint_positions()
     nodes = []
     for node in layout["nodes"]:
-        pos_x, pos_y = positions.get(node["id"], (None, None))
+        pos_x, pos_y, slug, building_id, category = _checkpoint_meta(positions.get(node["id"]))
         nodes.append({
             **node,
             "pos_x_px": pos_x,
             "pos_y_px": pos_y,
+            "slug": slug,
+            "building_id": building_id,
+            "category": category,
         })
     return {
         "status": "success",
         "nodes": nodes,
         "edges": layout["edges"]
     }
+
+
+@app.get("/api/categories", status_code=status.HTTP_200_OK)
+def list_categories():
+    """Categorias de checkpoint, da menor sort_order para a maior."""
+    categories = map_db_manager.list_categories()
+    if categories is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível listar as categorias. Execute a migração 003.",
+        )
+    return {"status": "success", "categories": categories}
+
+
+@app.get("/api/checkpoints/resolve", status_code=status.HTTP_200_OK)
+def resolve_checkpoint(
+    b: int = Query(...),
+    cp: str = Query(...),
+):
+    """Acha o checkpoint do QR ``cp`` (slug) no prédio ``b``."""
+    slug = cp.strip()
+    if not slug:
+        raise HTTPException(status_code=422, detail="Informe o slug do checkpoint (cp).")
+    try:
+        found = map_db_manager.resolve_checkpoint(b, slug)
+    except CheckpointLookupError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível resolver o checkpoint. Execute a migração 003.",
+        ) from exc
+    if found is None:
+        raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
+    return {"status": "success", "checkpoint": found}
+
+
+@app.patch("/api/checkpoints/{name}", status_code=status.HTTP_200_OK)
+def update_checkpoint_category(
+    name: str,
+    body: CheckpointCategorySchema,
+    _editor: None = Depends(require_editor_password),
+):
+    """Define ou limpa a categoria. ``category_code`` null remove. Slug não entra no corpo."""
+    node_name = name.strip()
+    if not node_name:
+        raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
+    try:
+        saved = map_db_manager.update_checkpoint_category(node_name, body.category_code)
+    except UnknownCategoryError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Categoria '{exc.code}' não existe.",
+        ) from exc
+    except CheckpointLookupError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível atualizar a categoria. Execute a migração 003.",
+        ) from exc
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
+    return {"status": "success", "checkpoint": saved}
 
 
 @app.patch("/api/checkpoints/{name}/position", status_code=status.HTTP_200_OK)

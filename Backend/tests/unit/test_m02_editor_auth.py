@@ -24,9 +24,12 @@ PROTECTED = {
     "put_map_config",
     "create_route",
     "reset_session",
+    "update_checkpoint_category",
 }
 PUBLIC = {
     "get_map_layout",
+    "list_categories",
+    "resolve_checkpoint",
     "get_connections",
     "get_connection_by_id",
     "get_map_config",
