@@ -24,7 +24,7 @@ from .schema import (
     RouteCreateSchema,
     MapConfigSchema,
 )
-from pdr.steps import StepDetectorConfig
+from pdr.steps import StepDetectorConfig, pdr_config_payload
 
 # --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
 from filters.butterworth import ButterworthLowPassFilter
@@ -224,7 +224,10 @@ def get_all_routes():
     }
 
 @app.post("/api/routes", status_code=status.HTTP_201_CREATED)
-def create_route(route_data: RouteCreateSchema):
+def create_route(
+    route_data: RouteCreateSchema,
+    _editor: None = Depends(require_editor_password),
+):
     """Cria e salva uma nova rota calculando via Dijkstra."""
     start = route_data.start_node
     end = route_data.end_node
@@ -281,7 +284,10 @@ def delete_route(
 
 # Modificar reset para aceitar start_node dinâmico
 @app.post("/api/reset")
-def reset_session(start_node: str = Query(default="Recepcao")):
+def reset_session(
+    start_node: str = Query(default="Recepcao"),
+    _editor: None = Depends(require_editor_password),
+):
     """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
     global matcher, visited_path
     if start_node not in topo_map.nodes:
@@ -337,9 +343,22 @@ def update_checkpoint_position(
         raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
     return {
         "status": "success",
-        "name": node_name,
-        "pos_x_px": body.pos_x_px,
-        "pos_y_px": body.pos_y_px,
+        "checkpoint": {
+            "name": node_name,
+            "pos_x_px": body.pos_x_px,
+            "pos_y_px": body.pos_y_px,
+        },
+    }
+
+
+def _map_config_body(config: dict) -> dict:
+    return {
+        "status": "success",
+        "map_config": {
+            "plan_image": config.get("plan_image"),
+            "px_per_m": config.get("px_per_m"),
+            "rotation_rad": config.get("rotation_rad"),
+        },
     }
 
 
@@ -348,7 +367,7 @@ def get_map_config():
     config = map_db_manager.get_map_config()
     if config is None:
         raise HTTPException(status_code=500, detail="Não foi possível ler map_config. Execute a migração 002.")
-    return config
+    return _map_config_body(config)
 
 
 @app.put("/api/map-config", status_code=status.HTTP_200_OK)
@@ -356,41 +375,34 @@ def put_map_config(
     body: MapConfigSchema,
     _editor: None = Depends(require_editor_password),
 ):
-    if body.px_per_m is not None and body.px_per_m <= 0:
-        raise HTTPException(status_code=400, detail="px_per_m deve ser maior que zero.")
     saved = map_db_manager.save_map_config(body.plan_image, body.px_per_m, body.rotation_rad)
     if saved is None:
         raise HTTPException(status_code=500, detail="Não foi possível gravar map_config. Execute a migração 002.")
-    return saved
+    return _map_config_body(saved)
 
 
 @app.get("/api/connections", status_code=status.HTTP_200_OK)
-def get_connections(include_path: bool = Query(default=False)):
-    """Uma conexão por sentido. include_path=true traz a trajetória ativa."""
+def get_connections(include_path: bool = Query(default=True)):
+    """Um item por par físico. include_path default true; false omite path."""
     connections = map_db_manager.list_connections(include_path=include_path)
     if connections is None:
         raise HTTPException(status_code=500, detail="Não foi possível ler as conexões. Execute a migração 002.")
-    return {"status": "success", "connections": connections}
+    return {"status": "success", "frame": "edge_local", "connections": connections}
+
+
+@app.get("/api/connections/{edge_id}", status_code=status.HTTP_200_OK)
+def get_connection_by_id(edge_id: int):
+    """O sentido do id pedido, mais as trajetórias desse sentido."""
+    connection = map_db_manager.get_connection(edge_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="Conexão não encontrada.")
+    return {"status": "success", "frame": "edge_local", **connection}
 
 
 @app.get("/api/pdr/config", status_code=status.HTTP_200_OK)
 def get_pdr_config():
-    """Parâmetros do pipeline de gravação. Leitura pública."""
-    config = StepDetectorConfig()
-    return {
-        "weinberg_k": config.weinberg_k,
-        "step_min_m": config.step_length_min_m,
-        "step_max_m": config.step_length_max_m,
-        "min_step_interval_s": config.min_step_interval_s,
-        "madgwick_gain": config.madgwick_gain,
-        "lowpass_cutoff_hz": config.lowpass_cutoff_hz,
-        "lowpass_order": config.lowpass_order,
-        "min_samples": 20,
-        "heading_convention": "relative_ccw",
-        "heading_frame": "checkpoint",
-        "position_axes": {"x": "right", "y": "up", "unit": "m"},
-        "time": {"stored": "t_ms", "api_t": "epoch_s", "api_t_rel": "s"},
-    }
+    """Parâmetros do PDR no cliente. Leitura pública. min_samples é configurável."""
+    return pdr_config_payload(StepDetectorConfig())
     
 @app.get("/")
 @app.get("/index.html")

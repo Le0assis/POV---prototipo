@@ -22,17 +22,18 @@ PROTECTED = {
     "delete_route",
     "update_checkpoint_position",
     "put_map_config",
+    "create_route",
+    "reset_session",
 }
 PUBLIC = {
     "get_map_layout",
     "get_connections",
+    "get_connection_by_id",
     "get_map_config",
     "get_pdr_config",
     "get_all_routes",
-    "create_route",
     "download_sensor_log_csv",
     "localize_user",
-    "reset_session",
 }
 
 

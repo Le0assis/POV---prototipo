@@ -1,12 +1,17 @@
 """Trajetória de uma gravação: integração na escrita, projeção na leitura.
 
-O banco guarda ``t_ms`` relativo a ``started_at``. A API expõe ``t`` em
-segundos de epoch (``started_at + t_ms/1000``) e ``t_rel`` em segundos.
-Cadência (passos/minuto) e deslocamento (odômetro, soma dos comprimentos)
-não têm coluna: saem dos passos na hora de ler.
+O banco guarda ``t_ms`` relativo a ``started_at``. ``started_at`` é
+DATETIME(3) naive em UTC (o relógio de gravação é UTC; quem lê trata o
+valor sem fuso como UTC). A API expõe ``t`` em segundos de epoch
+(``started_at + t_ms/1000``).
+
+O ``path`` da API é só ``[{x, y, t}]``, com o ponto de origem na frente.
+``displacement_m`` é o módulo do último ponto, não a soma dos passos.
+Cadência (passos/minuto) não tem coluna: sai do Δt na resposta de
+``process-raw``.
 
 Eixos: x para a direita, y para cima, metros, heading anti-horário relativo
-à pose no checkpoint (já recalibrado ao gravar).
+à pose no checkpoint (já recalibrado ao gravar, uma vez por gravação).
 """
 
 from __future__ import annotations
@@ -94,6 +99,47 @@ def integrate_walk(events: list, t0: float) -> dict:
         "net_heading_rad": net_heading,
         "polyline": [[0.0, 0.0]] + [[step["x_m"], step["y_m"]] for step in steps],
     }
+
+
+def path_points(started_at: Any, steps: list[dict]) -> list[dict]:
+    """``[{x, y, t}]`` com a origem em (0, 0) no ``started_at``.
+
+    ``len`` é passos + 1. ``t`` é epoch em segundos, ou ``None`` se o
+    instante de origem não existir.
+    """
+    started_epoch = None if started_at is None else as_epoch_seconds(started_at)
+    ordered = sorted(steps, key=lambda step: int(step["step_index"]))
+    path: list[dict] = [{"x": 0.0, "y": 0.0, "t": started_epoch}]
+    for step in ordered:
+        t_rel = int(step["t_ms"]) / 1000.0
+        path.append({
+            "x": float(step["x_m"]),
+            "y": float(step["y_m"]),
+            "t": None if started_epoch is None else started_epoch + t_rel,
+        })
+    return path
+
+
+def straight_path(distance_m: float, heading_rad: float) -> list[dict]:
+    """Aresta sem trajetória: segmento reto no heading gravado. ``t`` é nulo."""
+    distance = float(distance_m)
+    heading = float(heading_rad)
+    return [
+        {"x": 0.0, "y": 0.0, "t": None},
+        {
+            "x": distance * math.cos(heading),
+            "y": distance * math.sin(heading),
+            "t": None,
+        },
+    ]
+
+
+def displacement_m(steps: list[dict]) -> float:
+    """Módulo de (x, y) do último passo. Sem passos, 0."""
+    if not steps:
+        return 0.0
+    last = max(steps, key=lambda step: int(step["step_index"]))
+    return math.hypot(float(last["x_m"]), float(last["y_m"]))
 
 
 def points_for_api(started_at: Any, steps: list[dict]) -> list[dict]:

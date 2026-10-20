@@ -164,19 +164,22 @@ O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, 
 | Header ausente ou senha diferente | **401** |
 | Senha correta | a escrita segue |
 
-Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `DELETE /api/routes/{id}`.
+Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `POST /api/routes`, `DELETE /api/routes/{id}`, `POST /api/reset`.
 
-Leituras públicas, entre elas `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/pdr/config` e o restante dos GET já existentes. `POST /api/localize` e `POST /api/reset` continuam abertos.
+Leituras públicas, entre elas `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/connections/{id}`, `GET /api/pdr/config` e o restante dos GET já existentes. `POST /api/localize` continua aberto.
 
 ### Mapa, arestas e trajetória
 
 - `edges` é a única fonte do grafo: uma linha por sentido (`UNIQUE (source_node, target_node)`). `saved_routes` é histórico e não entra no mapa.
-- `origin='manual'` conserva distância e heading. Sem manual, a distância é a mediana das `walk_traces` válidas daquele sentido e o heading é a média circular. `active_trace_id` aponta a válida mais recente.
+- `origin` no banco e na API é `manual` ou `recorded` (o exemplo do contrato do front usa a palavra `recording`; o valor gravado é `recorded`).
+- Aresta antiga: na migração, `origin='recorded'` só se já existir `sensors_log` com `is_valid=1` para aquele par source/target. Senão fica `manual`. É decisão provisória. Logs históricos nasceram com `is_valid` falso, então a maioria fica manual. A classificação roda só quando a coluna `origin` é criada; uma execução seguinte não reclassifica.
+- `origin='manual'` conserva distância e heading. Sem manual, a distância é a mediana das `walk_traces` válidas daquele sentido e o heading é a média circular. `active_trace_id` aponta a válida mais recente. `samples_count` é quantas trajetórias válidas aquele sentido tem, e sobe mesmo quando a distância manual permanece.
+- `started_at` e `ended_at` são `DATETIME(3)` sem fuso, gravados em UTC. Quem lê trata o valor naive como UTC.
 - `GET /api/map` devolve `pos_x_px` e `pos_y_px` em cada checkpoint (planta, origem no canto superior esquerdo, y para baixo) e as arestas do grafo carregado só de `edges`.
-- `GET /api/connections?include_path=true` devolve cada sentido e, se houver, a trajetória ativa.
-- `POST /api/edges/process-raw` grava `sensors_log` (`steps_detected`, `distance_m`, `is_valid`) e a trajetória (`walk_traces` + `walk_steps`) do sentido andado. O corpo antigo (`steps`, `distance_m`, `mean_yaw_rad`, …) permanece; `path` é a trajetória lida de `walk_steps`.
-- No `path`, cada ponto é `{x, y, t, t_rel, heading, step_length, cadence, displacement}`: metros relativos ao checkpoint de origem (x direita, y para cima); `t` em segundos de epoch (`started_at + t_ms/1000`); `t_rel` em segundos; heading em radianos, anti-horário, relativo à pose no checkpoint. Cadência (passos/minuto) e deslocamento (soma dos comprimentos até o passo) são calculados na leitura.
-- `GET`/`PUT /api/map-config`: uma linha (`id=1`) com `plan_image`, `px_per_m` e `rotation_rad`, para o front converter metros em pixels. `plan_image` é `VARCHAR(512)` porque o MySQL exige tamanho.
+- `GET /api/connections` agrupa o par físico: uma entrada, com `reverse_edge_id` para o front não desenhar duas vezes. `include_path` default é true; `false` omite `path`. Aresta sem trajetória devolve um segmento reto `[{x:0,y:0,t:null},{x:d·cos(h),y:d·sin(h),t:null}]`. `GET /api/connections/{id}` devolve aquele sentido (não troca pelo par) e `traces`.
+- `POST /api/edges/process-raw` grava `sensors_log` (`steps_detected`, `distance_m`, `is_valid`) e a trajetória (`walk_traces` + `walk_steps`) do sentido andado, numa transação. O corpo antigo (`steps`, `distance_m`, `mean_yaw_rad`, …) permanece. `path` é um array `[{x, y, t}]` com o ponto de origem; `t` é epoch (`started_at + t_ms/1000`). `trace_id` vem no topo. Cada step traz `step_index`, `x`, `y`, `heading_rad` e `length_m` (e os campos antigos `t`, `t_rel`, `cadence_spm`). `displacement_m` é o módulo do último ponto. Caminhada inválida grava o trace com `is_valid=0`, devolve `path` e `trace_id`, e não altera a aresta. O heading zera uma vez, na pose do checkpoint, não a cada buraco da amostragem.
+- `PUT /api/map-config` exige `px_per_m` maior que zero (422 se faltar ou for inválido). `GET` e `PUT` devolvem `{"status","map_config":{plan_image,px_per_m,rotation_rad}}`. `plan_image` é caminho relativo do front, `VARCHAR(512)` porque o MySQL exige tamanho. A linha é `id=1`.
+- `PATCH /api/checkpoints/{name}/position` exige `pos_x_px` e `pos_y_px` numéricos (422). A resposta traz `checkpoint`.
 
 Meta futura de localização (não há tabela nesta entrega): checkpoint correto em pelo menos 90% dos testes e erro de até 1,5 m.
 

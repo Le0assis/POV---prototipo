@@ -71,6 +71,58 @@ class ConexaoBD:
             print(f"Erro ao executar lote: {e}")
             return False
 
+    def begin_transaction(self):
+        """Abre uma transação. Os métodos ``*_within`` não dão commit."""
+        try:
+            if not self.connection:
+                return False
+            self.connection.start_transaction()
+            return True
+        except Error as e:
+            print(f"Erro ao abrir transação: {e}")
+            return False
+
+    def commit_transaction(self):
+        try:
+            self.connection.commit()
+            return True
+        except Error as e:
+            print(f"Erro ao confirmar transação: {e}")
+            return False
+
+    def rollback_transaction(self):
+        try:
+            if self.connection:
+                self.connection.rollback()
+            return True
+        except Error as e:
+            print(f"Erro ao reverter transação: {e}")
+            return False
+
+    def execute_within(self, sql, params=None):
+        try:
+            self.cursor.execute(sql, params)
+            return True
+        except Error as e:
+            print(f"Erro ao executar comando na transação: {e}")
+            return False
+
+    def insert_within(self, sql, params=None):
+        try:
+            self.cursor.execute(sql, params)
+            return self.cursor.lastrowid
+        except Error as e:
+            print(f"Erro ao executar insert na transação: {e}")
+            return None
+
+    def executemany_within(self, sql, seq):
+        try:
+            self.cursor.executemany(sql, list(seq))
+            return True
+        except Error as e:
+            print(f"Erro ao executar lote na transação: {e}")
+            return False
+
     def disconnect(self):
             if self.connection and self.connection.is_connected():
                 self.cursor.close()

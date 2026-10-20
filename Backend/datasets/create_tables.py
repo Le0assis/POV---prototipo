@@ -26,6 +26,7 @@ def criar_tabelas_sistema(db: ConexaoBD):
         distance_m FLOAT NOT NULL,
         heading_rad FLOAT NOT NULL,
         origin ENUM('manual','recorded') NOT NULL DEFAULT 'manual',
+        samples_count INT NOT NULL DEFAULT 0,
         active_trace_id INT NULL,
         updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_edges_direction (source_node, target_node),

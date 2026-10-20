@@ -7,7 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from pdr.trajectory import integrate_walk, points_for_api, trace_payload
+from pdr.trajectory import (
+    displacement_m,
+    integrate_walk,
+    path_points,
+    points_for_api,
+    straight_path,
+    trace_payload,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -28,6 +35,28 @@ def test_integrate_uses_right_and_up_axes():
     assert built["steps"][1]["t_ms"] == 1100
     assert built["total_distance_m"] == pytest.approx(4.0)
     assert built["net_heading_rad"] == pytest.approx(math.pi / 4)
+
+
+def test_path_is_xy_t_array_including_origin():
+    started = 1_700_000_000.0
+    steps = [
+        {"step_index": 0, "t_ms": 500, "heading_rad": 0.0, "step_length_m": 2.0, "x_m": 2.0, "y_m": 0.0},
+        {"step_index": 1, "t_ms": 1100, "heading_rad": math.pi / 2, "step_length_m": 2.0, "x_m": 2.0, "y_m": 2.0},
+    ]
+    path = path_points(started, steps)
+    assert len(path) == len(steps) + 1
+    assert path[0] == {"x": 0.0, "y": 0.0, "t": started}
+    assert set(path[1]) == {"x", "y", "t"}
+    assert path[1]["t"] == pytest.approx(started + 0.5)
+    assert path[2]["x"] == pytest.approx(2.0)
+    assert path[2]["y"] == pytest.approx(2.0)
+    assert path[2]["t"] == pytest.approx(started + 1.1)
+    assert displacement_m(steps) == pytest.approx(math.hypot(2.0, 2.0))
+    straight = straight_path(4.5, 0.0)
+    assert straight == [
+        {"x": 0.0, "y": 0.0, "t": None},
+        {"x": pytest.approx(4.5), "y": pytest.approx(0.0), "t": None},
+    ]
 
 
 def test_api_points_expose_epoch_t_and_read_time_cadence():

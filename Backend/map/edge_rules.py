@@ -28,6 +28,35 @@ def split_duplicate_edges(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     return kept, removed
 
 
+def group_edge_pairs(rows: list[dict]) -> list[tuple[dict, dict | None]]:
+    """Uma entrada por par físico. O menor id é o sentido listado.
+
+    O outro sentido, se existir, volta como reverso para o front não
+    desenhar a linha duas vezes. Ids repetidos do mesmo sentido não geram
+    uma segunda entrada.
+    """
+    buckets: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        key = tuple(sorted((row["source_node"], row["target_node"])))
+        buckets.setdefault(key, []).append(row)
+
+    grouped: list[tuple[dict, dict | None]] = []
+    ordered_keys = sorted(buckets, key=lambda key: min(int(item["id"]) for item in buckets[key]))
+    for key in ordered_keys:
+        ordered = sorted(buckets[key], key=lambda item: int(item["id"]))
+        primary = ordered[0]
+        reverse = None
+        for candidate in ordered[1:]:
+            if (
+                candidate["source_node"] != primary["source_node"]
+                or candidate["target_node"] != primary["target_node"]
+            ):
+                reverse = candidate
+                break
+        grouped.append((primary, reverse))
+    return grouped
+
+
 def median(values: list[float]) -> float:
     if not values:
         raise ValueError("mediana de lista vazia")

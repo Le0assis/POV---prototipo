@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from pdr.sampling import prepare_timeline
-from pdr.steps import PeakStepDetector, StepDetectorConfig
+from pdr.steps import PeakStepDetector, StepDetectorConfig, pdr_config_payload
 
 pytestmark = pytest.mark.unit
 
@@ -40,6 +40,24 @@ def test_step_detector_config_defaults_match_legacy_constants():
     assert config.step_length_max_m == 0.95
     assert config.lowpass_cutoff_hz == 2.2
     assert config.max_gap_s == 0.25
+
+
+def test_pdr_config_exposes_request_min_samples():
+    payload = pdr_config_payload()
+    assert payload["status"] == "success"
+    assert payload["version"] == "m02-1"
+    assert payload["min_samples"] == StepDetectorConfig().min_request_samples == 20
+    assert payload["step_length"]["model"] == "weinberg"
+    assert payload["step_length"]["k"] == 0.45
+    assert payload["step_length"]["exponent"] == 0.25
+    assert payload["step_length"]["default_m"] == 0.70
+    assert payload["step_detection"]["min_step_interval_s"] == 0.33
+    assert payload["step_detection"]["max_step_interval_s"] == 1.2
+    assert payload["step_detection"]["lowpass_cutoff_hz"] == 2.2
+    assert payload["heading"]["direction"] == "ccw"
+    assert payload["localization"]["snap_end_window_m"] == 1.5
+    custom = pdr_config_payload(replace(StepDetectorConfig(), min_request_samples=30))
+    assert custom["min_samples"] == 30
 
 
 def test_sanitize_rate_keeps_native_android_100hz():

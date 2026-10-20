@@ -70,6 +70,11 @@ def detect_steps_from_samples(
     events: list[StepEvent] = []
     yaw_chunks: list[np.ndarray] = []
     rates: list[float] = []
+    # Um Madgwick para a gravação inteira. O heading zera na pose do
+    # checkpoint (primeira amostra), não de novo a cada gap.
+    estimator = MadgwickAttitudeEstimator(gain=config.madgwick_gain)
+    recording_yaw0: float | None = None
+    previous_timestamp: float | None = None
 
     for segment in usable:
         rate = sanitize_rate_hz(estimate_sample_rate_hz(
@@ -85,11 +90,17 @@ def detect_steps_from_samples(
         rates.append(used_rate)
 
         dt = np.diff(timestamps)
-        dt_series = np.concatenate([dt[:1], dt])
-        estimator = MadgwickAttitudeEstimator(gain=config.madgwick_gain)
         vertical = np.empty(len(timestamps), dtype=np.float64)
         yaws = np.empty(len(timestamps), dtype=np.float64)
         for index in range(len(timestamps)):
+            if previous_timestamp is None:
+                sample_dt = float(dt[0])
+            else:
+                # O primeiro sample do segmento seguinte usa o dt do gap.
+                sample_dt = float(timestamps[index] - previous_timestamp)
+            if not np.isfinite(sample_dt) or sample_dt <= 0:
+                sample_dt = float(dt[0])
+            previous_timestamp = float(timestamps[index])
             quaternion = estimator.update_imu(
                 gx=float(channels["gyro_x"][index]),
                 gy=float(channels["gyro_y"][index]),
@@ -97,7 +108,7 @@ def detect_steps_from_samples(
                 ax=float(channels["accel_x"][index]),
                 ay=float(channels["accel_y"][index]),
                 az=float(channels["accel_z"][index]),
-                dt=float(dt_series[index]),
+                dt=sample_dt,
             )
             vertical[index] = quaternion.get_vertical_acceleration(
                 float(channels["accel_x"][index]),
@@ -106,6 +117,8 @@ def detect_steps_from_samples(
             )
             yaws[index] = quaternion.yaw
         yaw_chunks.append(yaws)
+        if recording_yaw0 is None and len(yaws):
+            recording_yaw0 = float(yaws[0])
 
         gyro_magnitude = np.sqrt(
             channels["gyro_x"] ** 2 + channels["gyro_y"] ** 2 + channels["gyro_z"] ** 2
@@ -121,9 +134,8 @@ def detect_steps_from_samples(
             filtered_magnitude=filtered,
             gyro_magnitude=gyro_magnitude,
         )
-        # Recalibra no início do segmento contínuo (a pose no checkpoint,
-        # quando a gravação não foi partida por um gap).
-        yaw0 = float(yaws[0]) if len(yaws) else 0.0
+        # Recalibra uma vez, na pose do checkpoint (primeira amostra da gravação).
+        yaw0 = recording_yaw0 if recording_yaw0 is not None else 0.0
         for event in segment_events:
             index = event.index
             yaw = float(yaws[index]) if 0 <= index < len(yaws) else yaw0

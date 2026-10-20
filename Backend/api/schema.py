@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List
 
 class CheckpointSchema(BaseModel):
@@ -73,12 +73,19 @@ class RouteResponseSchema(BaseModel):
 
 
 class CheckpointPositionSchema(BaseModel):
-    pos_x_px: float | None = None
-    pos_y_px: float | None = None
+    pos_x_px: float
+    pos_y_px: float
 
 
 class MapConfigSchema(BaseModel):
     plan_image: str | None = None
-    px_per_m: float | None = None
+    px_per_m: float
     rotation_rad: float = 0.0
+
+    @field_validator("px_per_m")
+    @classmethod
+    def px_per_m_positive(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("px_per_m deve ser maior que zero.")
+        return value
 
