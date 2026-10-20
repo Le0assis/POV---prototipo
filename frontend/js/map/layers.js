@@ -111,7 +111,7 @@ function connectionPopup(connection) {
     const distLabel = Number.isFinite(distance) ? `${distance.toFixed(2)} m` : '—';
     const samples = connection && connection.samples_count != null ? connection.samples_count : '—';
     const trace = connection && connection.active_trace_id != null ? connection.active_trace_id : '—';
-    const origin = connection && connection.origin === 'recording' ? 'gravação' : 'manual';
+    const origin = connection && connection.origin === 'recorded' ? 'gravação' : 'manual';
     return `
         <div class="map-popup">
             <strong>${escapeHtml(connection.source)} → ${escapeHtml(connection.target)}</strong>

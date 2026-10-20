@@ -16,7 +16,6 @@ import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels, createBlueDot } from '../map/layers.js';
 import { outgoingEdges } from '../route/model.js';
 import { nearestCheckpoint, projectWalk, readLocalization } from '../route/localize.js';
-import { normalizePdrConfig } from '../route/pdr-config.js';
 import { loadFloorModel } from './floor-model.js';
 
 const heading = new HeadingProvider();
@@ -51,7 +50,8 @@ async function init() {
     $('#loc-sim').addEventListener('click', simulateStep);
     state.model = await loadFloorModel({ toast });
     try {
-        state.pdr = normalizePdrConfig(await getPdrConfig());
+        const config = await getPdrConfig();
+        state.pdr = config && config.step_length ? config : null;
         state.localization = readLocalization(state.pdr);
         if (state.pdr) detector.setPdrConfig(state.pdr);
     } catch (err) {

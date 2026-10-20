@@ -320,8 +320,6 @@ export function processRaw({ source, target, samples }) {
 }
 
 export function getConnections({ includePath = true } = {}) {
-    // O contrato deixa include_path=true por omissão. Enviamos o parâmetro
-    // mesmo assim: um build que ainda omita o default não devolve a trajetória.
     return request('/api/connections', {
         query: { include_path: includePath }
     });

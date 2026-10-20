@@ -173,18 +173,17 @@ async function stopAndSend() {
         const data = await api.processRaw({ source, target, samples: taken });
         const valid = data.valid === true;
         const path = pathFromProcessResponse(data);
-        const trace = data.path && !Array.isArray(data.path) ? data.path : null;
         history.unshift({
             time: new Date().toLocaleTimeString(),
             source,
             target,
             liveSteps: stepsSeen,
-            processedSteps: data.steps_count || (trace && trace.steps_count) || 0,
-            distance: data.distance_m || (trace && trace.distance_m) || 0,
-            edgeDistance: data.edge_distance_m ?? (trace && trace.distance_m),
+            processedSteps: data.steps_count || 0,
+            distance: data.distance_m || 0,
+            edgeDistance: data.edge_distance_m,
             edgeOrigin: data.edge_origin,
             netHeading: data.net_heading_rad,
-            traceId: data.trace_id ?? (trace && trace.id),
+            traceId: data.trace_id,
             valid,
             path,
             message: data.message || (valid ? 'Gravado com sucesso' : 'Trecho descartado')
@@ -192,8 +191,8 @@ async function stopAndSend() {
         renderHistory();
         renderPathPreview($('#rec-path'), path);
         const duration = pathDurationSeconds(path);
-        const traceId = data.trace_id ?? (trace && trace.id);
-        const edgeDistance = data.edge_distance_m ?? (trace && trace.distance_m);
+        const traceId = data.trace_id;
+        const edgeDistance = data.edge_distance_m;
         const caption = [
             traceId != null ? `trace ${traceId}` : null,
             data.edge_origin ? `origem ${data.edge_origin}` : null,

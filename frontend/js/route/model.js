@@ -34,10 +34,10 @@ export function indexCheckpoints(nodes) {
     return { list, byName };
 }
 
-/** Aceita o corpo de GET /api/map-config, com ou sem o envelope `map_config`. */
+/** Corpo de GET /api/map-config: `{ map_config: { plan_image, px_per_m, rotation_rad } }`. */
 export function normalizeMapConfig(data) {
-    if (!data || typeof data !== 'object') return null;
-    const src = data.map_config && typeof data.map_config === 'object' ? data.map_config : data;
+    const src = data && data.map_config;
+    if (!src || typeof src !== 'object') return null;
     const px = Number(src.px_per_m);
     const rot = Number(src.rotation_rad);
     const plan = src.plan_image == null ? '' : String(src.plan_image);
@@ -49,14 +49,14 @@ export function normalizeMapConfig(data) {
     };
 }
 
-/**
- * Pontos reais da gravação.
- * O PR #2 manda `path` como objeto `{ points: [{x,y,t,...}] }` (sem a origem).
- * A spec antiga manda `path` como array, já com (0, 0).
- */
+/** `path` é `[{x, y, t}]` e o primeiro ponto é a origem (0, 0). */
 export function recordedPoints(connection) {
-    const raw = rawPointList(connection);
-    return withOrigin(raw);
+    if (!connection || !Array.isArray(connection.path)) return [];
+    return connection.path.map((point) => ({
+        x: Number(point && point.x),
+        y: Number(point && point.y),
+        t: point ? point.t : null
+    })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
 }
 
 /** Path para desenhar: a gravação, ou a reta da aresta manual. */
@@ -70,24 +70,20 @@ export function connectionPath(connection) {
 
 export function isRecordedConnection(connection) {
     return Boolean(connection)
-        && connection.origin === 'recording'
+        && connection.origin === 'recorded'
         && connection.active_trace_id != null
         && recordedPoints(connection).length >= 2;
 }
 
-/** Polilinha do process-raw, seja array ou o objeto `path.points` do PR #2. */
+/** Polilinha do process-raw. `trace_id` fica no topo da resposta, não dentro do path. */
 export function pathFromProcessResponse(data) {
-    if (!data) return [];
-    if (Array.isArray(data.path)) return withOrigin(data.path);
-    if (data.path && Array.isArray(data.path.points)) return withOrigin(data.path.points);
-    return [];
+    if (!data || !Array.isArray(data.path)) return [];
+    return recordedPoints(data);
 }
 
 export function edgeIdOf(connection) {
-    if (!connection) return null;
-    if (connection.edge_id != null) return connection.edge_id;
-    if (connection.id != null) return connection.id;
-    return null;
+    if (!connection || connection.edge_id == null) return null;
+    return connection.edge_id;
 }
 
 /**
@@ -129,7 +125,7 @@ export function buildPolylines(connections, byName, mapConfig) {
             recorded,
             points,
             path,
-            connection: displayConnection(connection, recorded)
+            connection: displayConnection(connection)
         });
     });
     return { polylines, missingAnchor };
@@ -173,53 +169,11 @@ export function outgoingEdges(connections, name) {
     return list.filter((edge) => edge.path.length >= 2 && Number.isFinite(edge.headingRad));
 }
 
-function displayConnection(connection, recorded) {
-    const trace = traceObject(connection);
+function displayConnection(connection) {
     return {
         ...connection,
-        edge_id: edgeIdOf(connection),
-        origin: recorded ? 'recording' : (connection.origin || 'manual'),
-        steps_count: connection.steps_count ?? (trace && trace.steps_count) ?? null,
-        recorded_at: connection.recorded_at
-            || (trace && (trace.created_at || trace.started_at))
-            || connection.updated_at
-            || null,
-        active_trace_id: connection.active_trace_id ?? (trace && trace.id) ?? null
+        edge_id: edgeIdOf(connection)
     };
-}
-
-function traceObject(connection) {
-    const path = connection && connection.path;
-    if (path && !Array.isArray(path) && typeof path === 'object') return path;
-    return null;
-}
-
-function rawPointList(connection) {
-    if (!connection) return [];
-    if (Array.isArray(connection.path)) return connection.path;
-    const trace = traceObject(connection);
-    if (trace && Array.isArray(trace.points)) return trace.points;
-    const traces = Array.isArray(connection.traces) ? connection.traces : [];
-    const active = traces.find((item) => item && (
-        item.trace_id === connection.active_trace_id || item.id === connection.active_trace_id
-    ));
-    if (active && Array.isArray(active.path)) return active.path;
-    if (active && Array.isArray(active.points)) return active.points;
-    return [];
-}
-
-function withOrigin(points) {
-    const clean = (Array.isArray(points) ? points : []).map((point) => ({
-        x: Number(point && (point.x ?? point.x_m)),
-        y: Number(point && (point.y ?? point.y_m)),
-        t: point ? point.t : null
-    })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-    if (clean.length === 0) return [];
-    const first = clean[0];
-    if (Math.abs(first.x) > 1e-6 || Math.abs(first.y) > 1e-6) {
-        clean.unshift({ x: 0, y: 0, t: null });
-    }
-    return clean;
 }
 
 function syntheticStraight(connection) {
