@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 import api.app as app_module
 from api.app import app
-from map.MapDatabaseManager import UnknownCategoryError
+from map.MapDatabaseManager import CheckpointConflictError, CheckpointLookupError, UnknownCategoryError
 
 pytestmark = pytest.mark.integration
 
@@ -194,3 +194,25 @@ def test_create_checkpoint_accepts_optional_category_code(monkeypatch):
         headers=OK,
     )
     assert invalid.status_code == 422
+
+
+def test_map_returns_503_when_the_checkpoint_query_fails(monkeypatch):
+    def fail():
+        raise CheckpointLookupError("Falha ao ler checkpoints. Execute a migração 003.")
+
+    monkeypatch.setattr(app_module.map_db_manager, "get_checkpoint_positions", fail)
+    response = TestClient(app).get("/api/map")
+    assert response.status_code == 503
+    assert "migração 003" in response.json()["detail"]
+
+
+def test_create_checkpoint_conflict_is_409(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+
+    def save(name, category_code=None):
+        raise CheckpointConflictError("sala")
+
+    monkeypatch.setattr(app_module.map_db_manager, "save_checkpoint", save)
+    response = TestClient(app).post("/api/checkpoints", json={"name": "Sala"}, headers=OK)
+    assert response.status_code == 409
+    assert response.status_code != 500

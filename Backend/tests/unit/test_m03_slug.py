@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from map.MapDatabaseManager import MapDatabaseManager, UnknownCategoryError
+from mysql.connector import IntegrityError
+
+from map.MapDatabaseManager import (
+    CheckpointConflictError,
+    CheckpointLookupError,
+    MapDatabaseManager,
+    UnknownCategoryError,
+)
 from map.checkpoint_slug import allocate_slug, slugify
 
 pytestmark = pytest.mark.unit
@@ -184,6 +191,78 @@ def test_null_category_clears_and_categories_come_sorted():
         "alimentacao",
         "saidas",
     ]
+
+
+class _SlugRace(_Store):
+    """O slug escolhido só aparece depois que o INSERT perde a corrida."""
+
+    def __init__(self, failures: int) -> None:
+        super().__init__()
+        self.failures = failures
+        self.inserts = 0
+        self._hide_slugs = True
+
+    def execute_search(self, sql, params=None):
+        if "SELECT slug FROM checkpoints WHERE building_id" in sql and self._hide_slugs:
+            self.statements.append((sql, params or ()))
+            return []
+        return super().execute_search(sql, params)
+
+    def execute_query(self, sql, params=None):
+        if sql.startswith("INSERT INTO checkpoints"):
+            self.inserts += 1
+            if self.inserts <= self.failures:
+                self.statements.append((sql, params or ()))
+                self._hide_slugs = False
+                slug = params[2]
+                if not any(row["slug"] == slug for row in self.checkpoints):
+                    self.checkpoints.append({
+                        "id": self._next_id,
+                        "name": f"concorrente-{self.inserts}",
+                        "building_id": params[1],
+                        "slug": slug,
+                        "category_id": None,
+                        "pos_x_px": None,
+                        "pos_y_px": None,
+                    })
+                    self._next_id += 1
+                raise IntegrityError(
+                    "Duplicate entry for key 'uq_checkpoints_building_slug'"
+                )
+        return super().execute_query(sql, params)
+
+
+def test_slug_collision_retries_once_with_the_next_suffix():
+    store = _SlugRace(failures=1)
+    created = MapDatabaseManager(store).save_checkpoint("Sala")
+    assert store.inserts == 2
+    assert created["slug"] == "sala-2"
+    assert created["name"] == "Sala"
+
+
+def test_second_slug_collision_is_a_conflict():
+    store = _SlugRace(failures=2)
+    with pytest.raises(CheckpointConflictError) as exc:
+        MapDatabaseManager(store).save_checkpoint("Sala")
+    assert exc.value.slug == "sala-2"
+    assert store.inserts == 2
+    assert not any(row["name"] == "Sala" for row in store.checkpoints)
+
+
+def test_failed_position_query_is_not_an_empty_map(capsys):
+    class _Broken:
+        def execute_search(self, sql, params=None):
+            return None
+
+    with pytest.raises(CheckpointLookupError):
+        MapDatabaseManager(_Broken()).get_checkpoint_positions()
+    assert "migração 003" in capsys.readouterr().out
+
+    class _Empty:
+        def execute_search(self, sql, params=None):
+            return []
+
+    assert MapDatabaseManager(_Empty()).get_checkpoint_positions() == {}
 
 
 def test_resolve_finds_slug_in_the_building():

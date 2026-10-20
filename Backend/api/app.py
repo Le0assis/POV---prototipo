@@ -15,7 +15,11 @@ from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
 from .editor_auth import require_editor_password
-from map.MapDatabaseManager import CheckpointLookupError, UnknownCategoryError
+from map.MapDatabaseManager import (
+    CheckpointConflictError,
+    CheckpointLookupError,
+    UnknownCategoryError,
+)
 from .schema import (
     ProcessRawEdgeSchema,
     CheckpointSchema,
@@ -157,6 +161,11 @@ def create_checkpoint(
         raise HTTPException(
             status_code=500,
             detail="Não foi possível consultar as categorias. Execute a migração 003.",
+        ) from exc
+    except CheckpointConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="O slug gerado ainda está em uso neste prédio. Tente de novo.",
         ) from exc
     if success:
         if node_name not in topo_map.nodes:
@@ -385,7 +394,13 @@ def _checkpoint_meta(raw):
 def get_map_layout():
     """Nós com posição da planta e arestas só da tabela edges (já carregada sem espelho)."""
     layout = topo_map.get_map_layout()
-    positions = map_db_manager.get_checkpoint_positions()
+    try:
+        positions = map_db_manager.get_checkpoint_positions()
+    except CheckpointLookupError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível ler os checkpoints do mapa. Execute a migração 003.",
+        ) from exc
     nodes = []
     for node in layout["nodes"]:
         pos_x, pos_y, slug, building_id, category = _checkpoint_meta(positions.get(node["id"]))

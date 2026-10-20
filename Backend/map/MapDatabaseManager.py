@@ -2,6 +2,7 @@ import json
 import threading
 
 import numpy as np
+from mysql.connector import IntegrityError
 
 from datasets.ManagerDatabase import ConexaoBD, request_connection
 from map.checkpoint_slug import DEFAULT_BUILDING_ID, allocate_slug
@@ -24,6 +25,14 @@ class UnknownCategoryError(Exception):
 
 class CheckpointLookupError(Exception):
     """A consulta de checkpoint ou categoria falhou."""
+
+
+class CheckpointConflictError(Exception):
+    """UNIQUE(building_id, slug) ainda colidiu depois de gerar o slug de novo."""
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(slug)
+        self.slug = slug
 
 
 _CHECKPOINT_COLUMNS = """
@@ -52,15 +61,35 @@ class MapDatabaseManager:
         return self._database
     
     def save_checkpoint(self, name: str, category_code: str | None = None):
-        """Salva um novo nó. O slug nasce aqui e não é recalculado depois."""
+        """Salva um novo nó. O slug nasce aqui e não é recalculado depois.
+
+        Dois POST ao mesmo tempo podem escolher o mesmo slug. A primeira
+        colisão em UNIQUE(building_id, slug) gera o slug de novo, já vendo
+        a linha que ganhou a corrida. A segunda vira conflito.
+        """
         category_id = None
         if category_code is not None:
             category_id = int(self._require_category(category_code)["id"])
-        taken = self._slugs_for_building(DEFAULT_BUILDING_ID)
-        slug = allocate_slug(name, taken)
         sql = """INSERT INTO checkpoints (name, building_id, slug, category_id) VALUES (%s, %s, %s, %s)"""
-        success = self.db.execute_query(sql, (name, DEFAULT_BUILDING_ID, slug, category_id))
-        if success:
+        slug = ""
+        for attempt in range(2):
+            taken = self._slugs_for_building(DEFAULT_BUILDING_ID)
+            slug = allocate_slug(name, taken)
+            try:
+                success = self.db.execute_query(
+                    sql, (name, DEFAULT_BUILDING_ID, slug, category_id)
+                )
+            except IntegrityError:
+                print(
+                    f"[M03] Conflito ao gravar slug '{slug}' "
+                    f"(tentativa {attempt + 1} de 2)."
+                )
+                if attempt == 0:
+                    continue
+                raise CheckpointConflictError(slug)
+            if not success:
+                print(f"Erro ao adicionar checkpoint {name}")
+                return False
             print(f"Checkpoint {name} adicionado com sucesso")
             loaded = self.get_checkpoint_by_name(name)
             if loaded is not None:
@@ -74,8 +103,7 @@ class MapDatabaseManager:
                 "pos_x_px": None,
                 "pos_y_px": None,
             })
-        print(f"Erro ao adicionar checkpoint {name}")
-        return False
+        raise CheckpointConflictError(slug)
 
     def update_checkpoint_name(self, name: str, new_name: str) -> bool:
         """Troca o nome e mantém o slug gerado na criação."""
@@ -707,7 +735,20 @@ class MapDatabaseManager:
         return traces
 
     def get_checkpoint_positions(self) -> dict:
+        """Posições e slug. Consulta que falha não vira mapa sem posições.
+
+        ``execute_search`` devolve None quando o SQL quebra (migração 003
+        ainda não aplicada). Lista vazia continua sendo “não há checkpoints”.
+        """
         rows = self.db.execute_search(_CHECKPOINT_COLUMNS)
+        if rows is None:
+            print(
+                "[M03] Falha ao ler checkpoints para /api/map. "
+                "Execute a migração 003."
+            )
+            raise CheckpointLookupError(
+                "Falha ao ler checkpoints. Execute a migração 003."
+            )
         if not rows:
             return {}
         return {row["name"]: _public_checkpoint(row) for row in rows}
