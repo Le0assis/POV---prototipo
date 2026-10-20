@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from datasets.ManagerDatabase import ConexaoBD
+from datasets.ManagerDatabase import ConexaoBD, request_connection
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
@@ -68,7 +68,41 @@ db.connect()
 if not db.connection:
     print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
 
-map_db_manager = MapDatabaseManager(db)
+map_db_manager = MapDatabaseManager(db, per_request=True)
+
+
+def _shared_database_is_up() -> bool:
+    connection = getattr(db, "connection", None)
+    if connection is None:
+        return False
+    try:
+        return bool(connection.is_connected())
+    except Exception:
+        return False
+
+
+@app.middleware("http")
+async def db_connection_per_request(request, call_next):
+    """Uma conexão por requisição. O cursor global não atravessa GET e gravação."""
+    local = None
+    token = None
+    if _shared_database_is_up():
+        local = ConexaoBD(db.host, db.database, db.user, db.password)
+        local.connect(announce=False)
+        if local.connection:
+            token = request_connection.set(local)
+        else:
+            local.disconnect(announce=False)
+            local = None
+    try:
+        return await call_next(request)
+    finally:
+        if token is not None:
+            request_connection.reset(token)
+        if local is not None:
+            local.disconnect(announce=False)
+
+
 topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
@@ -366,7 +400,10 @@ def _map_config_body(config: dict) -> dict:
 def get_map_config():
     config = map_db_manager.get_map_config()
     if config is None:
-        raise HTTPException(status_code=500, detail="Não foi possível ler map_config. Execute a migração 002.")
+        raise HTTPException(
+            status_code=500,
+            detail="map_config indisponível. Rode a migração 002: python -m datasets.create_tables.",
+        )
     return _map_config_body(config)
 
 

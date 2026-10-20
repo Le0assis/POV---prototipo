@@ -15,9 +15,11 @@ do log bruto. ``source_node``/``target_node`` copiam o tipo exato de
 ``walk_traces.started_at`` e ``ended_at`` são DATETIME(3) naive em UTC:
 a gravação escreve o relógio UTC e a leitura trata o valor sem fuso como UTC.
 
-``edges.origin`` fica ``recorded`` só na criação da coluna, e só quando já
-existe ``sensors_log`` com ``is_valid=1`` para o par. Caso contrário,
-``manual``. Uma execução seguinte não reclassifica.
+``edges.origin`` fica ``recorded`` só na criação da coluna, e quando já
+existe qualquer ``sensors_log`` do par (o ``is_valid`` antigo vinha 0 porque
+o campo não era preenchido). Sem log, fica ``manual``. Uma execução seguinte
+não reclassifica. ``is_valid`` vale para gravações novas, não para esta
+classificação.
 """
 
 from __future__ import annotations
@@ -72,16 +74,15 @@ CREATE TABLE IF NOT EXISTS map_config (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
-# Decisão provisória: origin='recorded' só se já existir sensors_log válido
-# (is_valid=1) para o mesmo par. Logs antigos nasceram com is_valid falso,
-# então a maioria das arestas pré-existentes fica manual. Roda só quando a
-# coluna origin acaba de ser criada — uma edição manual posterior não é
-# reclassificada na próxima execução.
+# origin='recorded' se existir qualquer sensors_log do par, válido ou não.
+# Logs antigos ficaram com is_valid=0 porque o campo não era preenchido.
+# A regra de is_valid vale só para gravações novas (mediana, samples_count).
+# Roda só quando a coluna origin acaba de ser criada.
 SQL_CLASSIFY_RECORDED = (
     "UPDATE edges e SET origin = 'recorded' "
     "WHERE EXISTS ("
     "SELECT 1 FROM sensors_log s "
-    "WHERE s.source = e.source_node AND s.target = e.target_node AND s.is_valid = 1"
+    "WHERE s.source = e.source_node AND s.target = e.target_node"
     ")"
 )
 SQL_BACKFILL_SAMPLES = (
@@ -235,9 +236,8 @@ def apply(db) -> list[dict]:
     if origin_added:
         _exec(db, SQL_CLASSIFY_RECORDED)
         print(
-            "[M02] origin='recorded' só onde já havia sensors_log com is_valid=1 "
-            "para o par source/target. O restante fica manual. "
-            "Logs históricos nasceram inválidos, então a maioria fica manual. "
+            "[M02] origin='recorded' onde já havia qualquer sensors_log "
+            "do par source/target, mesmo com is_valid=0. Sem log, fica manual. "
             "Esta classificação não roda de novo."
         )
     _add_column(

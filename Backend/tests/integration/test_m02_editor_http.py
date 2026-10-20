@@ -136,6 +136,45 @@ def test_protected_writes_accept_the_password(monkeypatch):
         assert response.status_code == expected[path], (path, response.text)
 
 
+def test_each_http_request_uses_its_own_connection(monkeypatch):
+    from datasets.ManagerDatabase import ConexaoBD
+
+    previous = app_module.db.connection
+    opened: list = []
+
+    class _Live:
+        def is_connected(self):
+            return True
+
+    def connect(self, announce=True):
+        self.connection = _Live()
+        self.cursor = None
+        opened.append(self)
+
+    def disconnect(self, announce=True):
+        opened.append("closed")
+        self.connection = None
+
+    app_module.db.connection = _Live()
+    monkeypatch.setattr(ConexaoBD, "connect", connect)
+    monkeypatch.setattr(ConexaoBD, "disconnect", disconnect)
+    seen = {}
+
+    def get_map_config():
+        seen["db"] = app_module.map_db_manager.db
+        return {"plan_image": None, "px_per_m": None, "rotation_rad": 0.0}
+
+    monkeypatch.setattr(app_module.map_db_manager, "get_map_config", get_map_config)
+    try:
+        response = TestClient(app).get("/api/map-config")
+        assert response.status_code == 200
+        assert seen["db"] is not app_module.db
+        assert seen["db"] in opened
+        assert "closed" in opened
+    finally:
+        app_module.db.connection = previous
+
+
 def test_public_gets_do_not_need_the_header(monkeypatch):
     monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
     seen = {}
@@ -203,6 +242,34 @@ class _ProcessRawDB:
 
     def record_walk(self, **kwargs):
         return self.manager.record_walk(**kwargs)
+
+
+def test_process_raw_returns_500_when_the_walk_is_not_saved(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    app_module.topo_map.add_checkpoint("Quarto")
+    app_module.topo_map.add_checkpoint("Sala")
+
+    class _FailingWalk:
+        def save_sensor_log(self, source, target, csv_data):
+            return 3
+
+        def update_sensor_log(self, log_id, steps, distance, is_valid, message):
+            return True
+
+        def record_walk(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(app_module.edge_processor, "db_manager", _FailingWalk())
+    client = TestClient(app)
+    response = client.post(
+        "/api/edges/process-raw",
+        headers=OK,
+        json={"source": "Quarto", "target": "Sala", "samples": _samples(80)},
+    )
+    assert response.status_code == 500
+    assert response.status_code != 201
+    assert "trace_id" not in response.json()
+    assert "trajetória" in response.json()["detail"]
 
 
 def test_process_raw_path_is_an_array_with_origin(monkeypatch):

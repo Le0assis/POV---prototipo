@@ -134,24 +134,28 @@ class RawEdgeProcessor:
                 built=built,
                 is_valid=bool(result.valid),
             )
-            if saved:
-                if saved.get("path") is not None:
-                    body["path"] = saved["path"]
-                body["trace_id"] = saved.get("trace_id")
-                body["edge_id"] = saved.get("edge_id")
-                body["edge_distance_m"] = saved.get("edge_distance_m")
-                body["edge_origin"] = saved.get("edge_origin")
-                if saved.get("net_heading_rad") is not None:
-                    body["net_heading_rad"] = round(float(saved["net_heading_rad"]), 6)
-                if saved.get("displacement_m") is not None:
-                    body["displacement_m"] = round(float(saved["displacement_m"]), 6)
-                if result.valid and saved.get("edge_distance_m") is not None:
-                    self._remember_directed(
-                        source,
-                        target,
-                        float(saved["edge_distance_m"]),
-                        float(saved["edge_heading_rad"]),
-                    )
+            if not saved:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Falha ao gravar a trajetória. A transação foi revertida.",
+                )
+            if saved.get("path") is not None:
+                body["path"] = saved["path"]
+            body["trace_id"] = saved.get("trace_id")
+            body["edge_id"] = saved.get("edge_id")
+            body["edge_distance_m"] = saved.get("edge_distance_m")
+            body["edge_origin"] = saved.get("edge_origin")
+            if saved.get("net_heading_rad") is not None:
+                body["net_heading_rad"] = round(float(saved["net_heading_rad"]), 6)
+            if saved.get("displacement_m") is not None:
+                body["displacement_m"] = round(float(saved["displacement_m"]), 6)
+            if result.valid and saved.get("edge_distance_m") is not None:
+                self._remember_directed(
+                    source,
+                    target,
+                    float(saved["edge_distance_m"]),
+                    float(saved["edge_heading_rad"]),
+                )
             return body
 
         if not result.steps:

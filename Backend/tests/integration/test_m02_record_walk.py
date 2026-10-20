@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from fastapi import HTTPException
+
 from datasets.generate_sample_dataset import generate_walking_dataset
 from pdr.processor import RawEdgeProcessor
 
@@ -120,4 +122,25 @@ def test_invalid_walk_is_stored_without_updating_the_edge():
     assert database.walk["is_valid"] is False
     assert body["trace_id"] == 11
     assert body["path"][0]["x"] == 0.0
+    assert topo.directed == []
+
+
+def test_record_walk_failure_is_500_and_does_not_touch_the_edge():
+    database = _RecordingDB()
+    database.record_walk = lambda *args, **kwargs: None
+    topo = _DirectedMap()
+    samples = []
+    for index in range(80):
+        samples.append({
+            "timestamp": index / 50.0,
+            "accel_x": 0.0,
+            "accel_y": 0.0,
+            "accel_z": 9.81,
+            "gyro_x": 0.0,
+            "gyro_y": 0.0,
+            "gyro_z": 0.0,
+        })
+    with pytest.raises(HTTPException) as exc:
+        RawEdgeProcessor(database, topo).process_samples("Quarto", "Sala", samples)
+    assert exc.value.status_code == 500
     assert topo.directed == []

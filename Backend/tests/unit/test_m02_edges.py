@@ -219,7 +219,8 @@ def test_migration_backs_up_then_dedupes_and_is_idempotent():
 
     classify = [sql for sql, _params in db.statements if sql == module.SQL_CLASSIFY_RECORDED]
     assert classify == [module.SQL_CLASSIFY_RECORDED]
-    assert "is_valid = 1" in module.SQL_CLASSIFY_RECORDED
+    assert "is_valid" not in module.SQL_CLASSIFY_RECORDED
+    assert "s.source = e.source_node AND s.target = e.target_node" in module.SQL_CLASSIFY_RECORDED
     assert any(sql == module.SQL_BACKFILL_SAMPLES for sql, _params in db.statements)
     assert ("edges", "samples_count") in db.columns
 
@@ -290,3 +291,21 @@ def test_connections_group_keeps_smaller_id_and_reverse():
     assert len(collapsed) == 1
     assert collapsed[0][0]["id"] == 1
     assert collapsed[0][1]["id"] == 2
+
+
+def test_connections_group_prefers_the_direction_with_active_trace():
+    rows = [
+        {"id": 10, "source_node": "Quarto", "target_node": "Sala", "active_trace_id": None},
+        {"id": 11, "source_node": "Sala", "target_node": "Quarto", "active_trace_id": 99},
+    ]
+    primary, reverse = group_edge_pairs(rows)[0]
+    assert primary["id"] == 11
+    assert reverse["id"] == 10
+
+    both = [
+        {"id": 10, "source_node": "Quarto", "target_node": "Sala", "active_trace_id": 1},
+        {"id": 11, "source_node": "Sala", "target_node": "Quarto", "active_trace_id": 2},
+    ]
+    primary, reverse = group_edge_pairs(both)[0]
+    assert primary["id"] == 10
+    assert reverse["id"] == 11

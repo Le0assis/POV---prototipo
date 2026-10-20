@@ -1,8 +1,9 @@
 import json
+import threading
 
 import numpy as np
 
-from datasets.ManagerDatabase import ConexaoBD
+from datasets.ManagerDatabase import ConexaoBD, request_connection
 from map.edge_rules import group_edge_pairs, resolve_recorded_edge
 from pdr.trajectory import (
     displacement_m,
@@ -15,8 +16,19 @@ from pdr.trajectory import (
 class MapDatabaseManager:
     """Responsável por salvar e carregar o grafo diretamente do MySQL do XAMPP."""
 
-    def __init__(self, database: ConexaoBD):
-        self.db = database
+    def __init__(self, database: ConexaoBD, per_request: bool = False):
+        self._database = database
+        self._per_request = per_request
+        self._walk_lock = threading.Lock()
+
+    @property
+    def db(self):
+        """Na API, a conexão aberta para esta requisição. Fora dela, a de boot."""
+        if self._per_request:
+            current = request_connection.get()
+            if current is not None:
+                return current
+        return self._database
     
     def save_checkpoint(self, name: str):
         """Salva um novo nó semântico no banco de dados."""
@@ -220,20 +232,23 @@ class MapDatabaseManager:
         ``started_at``/``ended_at`` já vêm em UTC (DATETIME naive). Caminhada
         inválida persiste ``is_valid=0`` e não altera ``edges``.
         """
-        if not self.db.begin_transaction():
-            print("Erro ao abrir transação de walk_trace")
-            return None
-        try:
-            payload = self._write_walk(
-                source, target, sensors_log_id, started_at, ended_at, built, bool(is_valid),
-            )
-            if not self.db.commit_transaction():
-                raise RuntimeError("commit da trajetória falhou")
-            return payload
-        except Exception as exc:
-            print(f"Trajetória revertida: {exc}")
-            self.db.rollback_transaction()
-            return None
+        # Serializa o agregado da aresta. Cada requisição tem a própria
+        # conexão; o lock evita duas medianas lendo o mesmo par ao mesmo tempo.
+        with self._walk_lock:
+            if not self.db.begin_transaction():
+                print("Erro ao abrir transação de walk_trace")
+                return None
+            try:
+                payload = self._write_walk(
+                    source, target, sensors_log_id, started_at, ended_at, built, bool(is_valid),
+                )
+                if not self.db.commit_transaction():
+                    raise RuntimeError("commit da trajetória falhou")
+                return payload
+            except Exception as exc:
+                print(f"Trajetória revertida: {exc}")
+                self.db.rollback_transaction()
+                return None
 
     def _write_walk(
         self,
@@ -417,7 +432,7 @@ class MapDatabaseManager:
         return trace_payload(rows[0], steps)
 
     def list_connections(self, include_path: bool = True) -> list[dict] | None:
-        """Um item por par físico. O sentido de menor id carrega ``reverse_edge_id``."""
+        """Um item por par físico. O sentido com trajetória ativa é o listado."""
         rows = self.db.execute_search(
             """
             SELECT id, source_node, target_node, distance_m, heading_rad,

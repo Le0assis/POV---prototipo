@@ -28,12 +28,23 @@ def split_duplicate_edges(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     return kept, removed
 
 
-def group_edge_pairs(rows: list[dict]) -> list[tuple[dict, dict | None]]:
-    """Uma entrada por par físico. O menor id é o sentido listado.
+def _direction_of(row: dict) -> tuple[str, str]:
+    return (row["source_node"], row["target_node"])
 
-    O outro sentido, se existir, volta como reverso para o front não
-    desenhar a linha duas vezes. Ids repetidos do mesmo sentido não geram
-    uma segunda entrada.
+
+def _representative_edge(rows: list[dict]) -> dict:
+    """Uma linha por sentido: a que tem trajetória ativa, senão o menor id."""
+    traced = [row for row in rows if row.get("active_trace_id") is not None]
+    pool = traced or rows
+    return min(pool, key=lambda row: int(row["id"]))
+
+
+def group_edge_pairs(rows: list[dict]) -> list[tuple[dict, dict | None]]:
+    """Uma entrada por par físico.
+
+    O sentido listado é o que tem ``active_trace_id``. Se os dois tiverem,
+    ou se nenhum tiver, fica o de menor id. O outro sentido volta como
+    reverso para o front não desenhar a linha duas vezes.
     """
     buckets: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
@@ -43,16 +54,19 @@ def group_edge_pairs(rows: list[dict]) -> list[tuple[dict, dict | None]]:
     grouped: list[tuple[dict, dict | None]] = []
     ordered_keys = sorted(buckets, key=lambda key: min(int(item["id"]) for item in buckets[key]))
     for key in ordered_keys:
-        ordered = sorted(buckets[key], key=lambda item: int(item["id"]))
-        primary = ordered[0]
+        by_direction: dict[tuple[str, str], list[dict]] = {}
+        for row in buckets[key]:
+            by_direction.setdefault(_direction_of(row), []).append(row)
+        reps = [_representative_edge(group) for group in by_direction.values()]
+        traced = [row for row in reps if row.get("active_trace_id") is not None]
+        pool = traced or reps
+        primary = min(pool, key=lambda row: int(row["id"]))
         reverse = None
-        for candidate in ordered[1:]:
-            if (
-                candidate["source_node"] != primary["source_node"]
-                or candidate["target_node"] != primary["target_node"]
-            ):
+        for candidate in reps:
+            if _direction_of(candidate) == _direction_of(primary):
+                continue
+            if reverse is None or int(candidate["id"]) < int(reverse["id"]):
                 reverse = candidate
-                break
         grouped.append((primary, reverse))
     return grouped
 
