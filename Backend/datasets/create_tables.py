@@ -8,12 +8,16 @@ def criar_tabelas_sistema(db: ConexaoBD):
     sql_checkpoints = """
     CREATE TABLE IF NOT EXISTS checkpoints (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL UNIQUE
-    ) ENGINE=InnoDB;
+        name VARCHAR(100) NOT NULL UNIQUE,
+        pos_x_px DOUBLE NULL,
+        pos_y_px DOUBLE NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """
 
     # 2. TABELA DE EDGES (As Conexões / Corredores)
     # Guarda a relação de vizinhança entre os checkpoints, distância e orientação.
+    # Uma linha por sentido. active_trace_id ganha a FK na migração 002,
+    # depois que walk_traces existe. origin manual não é sobrescrito por gravação.
     sql_edges = """
     CREATE TABLE IF NOT EXISTS edges (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -21,13 +25,18 @@ def criar_tabelas_sistema(db: ConexaoBD):
         target_node VARCHAR(100) NOT NULL,
         distance_m FLOAT NOT NULL,
         heading_rad FLOAT NOT NULL,
+        origin ENUM('manual','recorded') NOT NULL DEFAULT 'manual',
+        active_trace_id INT NULL,
+        updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_edges_direction (source_node, target_node),
         FOREIGN KEY (source_node) REFERENCES checkpoints(name) ON DELETE CASCADE,
         FOREIGN KEY (target_node) REFERENCES checkpoints(name) ON DELETE CASCADE
-    ) ENGINE=InnoDB;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """
 
     # 3. TABELA DE SENSOR LOGS (Histórico de Sensores Brutos)
     # Útil se você quiser gravar a caminhada real para simulações futuras.
+    # InnoDB explícito: walk_traces.sensors_log_id referencia esta tabela.
     sql_sensor_logs = """
       CREATE TABLE IF NOT EXISTS sensors_log (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -39,7 +48,7 @@ def criar_tabelas_sistema(db: ConexaoBD):
         message VARCHAR(255),
         raw_csv LONGTEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """
 
     # Execução dos comandos utilizando a sua infraestrutura
@@ -74,7 +83,25 @@ def criar_tabelas_sistema(db: ConexaoBD):
     """
     print("Criando tabela 'saved_routes'...")
     db.execute_query(sql_saved_routes)
+
+    print("Aplicando migração 002 (dedupe de edges, trajetória, planta)...")
+    aplicar_migracao_002(db)
     print("[SETUP] Processo de criação de tabelas concluído.\n")
+
+
+def aplicar_migracao_002(db: ConexaoBD) -> None:
+    """Carrega datasets/migrations/002_walk_traces.py (o nome começa com dígito)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / "migrations" / "002_walk_traces.py"
+    spec = importlib.util.spec_from_file_location("migration_002_walk_traces", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Migração não encontrada: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    removed = module.apply(db)
+    print(f"[M02] Linhas de edges removidas nesta execução: {len(removed)}")
 
 if __name__ == "__main__":
     # Script para você rodar de forma isolada uma única vez e preparar o XAMPP

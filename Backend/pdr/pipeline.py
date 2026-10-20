@@ -17,6 +17,8 @@ import numpy as np
 from filters.butterworth import ButterworthLowPassFilter
 from filters.madgwick import MadgwickAttitudeEstimator
 
+from pdr.trajectory import wrap_pi
+
 from .sampling import (
     estimate_sample_rate_hz,
     prepare_timeline,
@@ -114,13 +116,18 @@ def detect_steps_from_samples(
             order=config.lowpass_order,
         )
         filtered = lowpass.apply(vertical, sample_rate_hz=used_rate)
-        events.extend(
-            detector.detect(
-                timestamps=timestamps,
-                filtered_magnitude=filtered,
-                gyro_magnitude=gyro_magnitude,
-            )
+        segment_events = detector.detect(
+            timestamps=timestamps,
+            filtered_magnitude=filtered,
+            gyro_magnitude=gyro_magnitude,
         )
+        # Recalibra no início do segmento contínuo (a pose no checkpoint,
+        # quando a gravação não foi partida por um gap).
+        yaw0 = float(yaws[0]) if len(yaws) else 0.0
+        for event in segment_events:
+            index = event.index
+            yaw = float(yaws[index]) if 0 <= index < len(yaws) else yaw0
+            events.append(replace(event, heading_rad=wrap_pi(yaw - yaw0)))
 
     events = _enforce_refractory(events, config.min_step_interval_s)
     events = _recompute_cadence(events)

@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from fastapi import FastAPI, HTTPException, status, Query
+from fastapi import Depends, FastAPI, HTTPException, status, Query
 from pydantic import BaseModel
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +14,17 @@ from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
-from .schema import ProcessRawEdgeSchema, CheckpointSchema, EdgeSchema, StepSensorSchema, RouteCreateSchema
+from .editor_auth import require_editor_password
+from .schema import (
+    ProcessRawEdgeSchema,
+    CheckpointSchema,
+    CheckpointPositionSchema,
+    EdgeSchema,
+    StepSensorSchema,
+    RouteCreateSchema,
+    MapConfigSchema,
+)
+from pdr.steps import StepDetectorConfig
 
 # --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
 from filters.butterworth import ButterworthLowPassFilter
@@ -77,12 +87,22 @@ visited_path = [starting_node]
 edge_processor = RawEdgeProcessor(map_db_manager, topo_map)
 
 @app.post("/api/edges/process-raw", status_code=status.HTTP_201_CREATED)
-def process_raw_edge(payload: ProcessRawEdgeSchema):
-    """Recebe amostras brutas e repassa o processamento para a classe RawEdgeProcessor."""
+def process_raw_edge(
+    payload: ProcessRawEdgeSchema,
+    _editor: None = Depends(require_editor_password),
+):
+    """Recebe amostras brutas, grava a trajetória e atualiza só o sentido andado."""
+    if payload.source not in topo_map.nodes or payload.target not in topo_map.nodes:
+        raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
+    if payload.source == payload.target:
+        raise HTTPException(status_code=400, detail="Origem e destino não podem ser o mesmo nó.")
     return edge_processor.process_samples(payload.source, payload.target, payload.samples)
 
 @app.post("/api/checkpoints", status_code=status.HTTP_201_CREATED)
-def create_checkpoint(checkpoint: CheckpointSchema):
+def create_checkpoint(
+    checkpoint: CheckpointSchema,
+    _editor: None = Depends(require_editor_password),
+):
     node_name = checkpoint.name.strip()
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
@@ -97,7 +117,10 @@ def create_checkpoint(checkpoint: CheckpointSchema):
 
 
 @app.post("/api/edges", status_code=status.HTTP_201_CREATED)
-def create_edge(edge: EdgeSchema):
+def create_edge(
+    edge: EdgeSchema,
+    _editor: None = Depends(require_editor_password),
+):
     """Cadastra manualmente uma conexão (ida e volta) entre dois checkpoints."""
     if edge.source not in topo_map.nodes or edge.target not in topo_map.nodes:
         raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
@@ -112,8 +135,10 @@ def create_edge(edge: EdgeSchema):
     if not success:
         raise HTTPException(status_code=500, detail="Falha interna ao persistir conexão no banco.")
 
-    # connect_checkpoints recebe GRAUS e já cria os sentidos de ida e volta
-    topo_map.connect_checkpoints(edge.source, edge.target, edge.distance_m, math.degrees(edge.heading_rad))
+    # Um registro por sentido, nos mesmos radianos gravados no banco.
+    inverse_heading = (edge.heading_rad + math.pi) % (2 * math.pi)
+    topo_map.upsert_directed_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
+    topo_map.upsert_directed_edge(edge.target, edge.source, edge.distance_m, inverse_heading)
 
     return {
         "status": "success",
@@ -243,7 +268,10 @@ def get_saved_route(route_id: int):
     }
 
 @app.delete("/api/routes/{route_id}", status_code=status.HTTP_200_OK)
-def delete_route(route_id: int):
+def delete_route(
+    route_id: int,
+    _editor: None = Depends(require_editor_password),
+):
     """Remove uma rota salva."""
     success = map_db_manager.delete_route(route_id)
     if not success:
@@ -276,11 +304,92 @@ def get_current_location():
 
 @app.get("/api/map", status_code=status.HTTP_200_OK)
 def get_map_layout():
+    """Nós com posição da planta e arestas só da tabela edges (já carregada sem espelho)."""
     layout = topo_map.get_map_layout()
+    positions = map_db_manager.get_checkpoint_positions()
+    nodes = []
+    for node in layout["nodes"]:
+        pos_x, pos_y = positions.get(node["id"], (None, None))
+        nodes.append({
+            **node,
+            "pos_x_px": pos_x,
+            "pos_y_px": pos_y,
+        })
     return {
         "status": "success",
-        "nodes": layout["nodes"],
+        "nodes": nodes,
         "edges": layout["edges"]
+    }
+
+
+@app.patch("/api/checkpoints/{name}/position", status_code=status.HTTP_200_OK)
+def update_checkpoint_position(
+    name: str,
+    body: CheckpointPositionSchema,
+    _editor: None = Depends(require_editor_password),
+):
+    """Posição do checkpoint na planta (origem no canto superior esquerdo, y para baixo)."""
+    node_name = name.strip()
+    if not node_name:
+        raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
+    saved = map_db_manager.update_checkpoint_position(node_name, body.pos_x_px, body.pos_y_px)
+    if not saved:
+        raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
+    return {
+        "status": "success",
+        "name": node_name,
+        "pos_x_px": body.pos_x_px,
+        "pos_y_px": body.pos_y_px,
+    }
+
+
+@app.get("/api/map-config", status_code=status.HTTP_200_OK)
+def get_map_config():
+    config = map_db_manager.get_map_config()
+    if config is None:
+        raise HTTPException(status_code=500, detail="Não foi possível ler map_config. Execute a migração 002.")
+    return config
+
+
+@app.put("/api/map-config", status_code=status.HTTP_200_OK)
+def put_map_config(
+    body: MapConfigSchema,
+    _editor: None = Depends(require_editor_password),
+):
+    if body.px_per_m is not None and body.px_per_m <= 0:
+        raise HTTPException(status_code=400, detail="px_per_m deve ser maior que zero.")
+    saved = map_db_manager.save_map_config(body.plan_image, body.px_per_m, body.rotation_rad)
+    if saved is None:
+        raise HTTPException(status_code=500, detail="Não foi possível gravar map_config. Execute a migração 002.")
+    return saved
+
+
+@app.get("/api/connections", status_code=status.HTTP_200_OK)
+def get_connections(include_path: bool = Query(default=False)):
+    """Uma conexão por sentido. include_path=true traz a trajetória ativa."""
+    connections = map_db_manager.list_connections(include_path=include_path)
+    if connections is None:
+        raise HTTPException(status_code=500, detail="Não foi possível ler as conexões. Execute a migração 002.")
+    return {"status": "success", "connections": connections}
+
+
+@app.get("/api/pdr/config", status_code=status.HTTP_200_OK)
+def get_pdr_config():
+    """Parâmetros do pipeline de gravação. Leitura pública."""
+    config = StepDetectorConfig()
+    return {
+        "weinberg_k": config.weinberg_k,
+        "step_min_m": config.step_length_min_m,
+        "step_max_m": config.step_length_max_m,
+        "min_step_interval_s": config.min_step_interval_s,
+        "madgwick_gain": config.madgwick_gain,
+        "lowpass_cutoff_hz": config.lowpass_cutoff_hz,
+        "lowpass_order": config.lowpass_order,
+        "min_samples": 20,
+        "heading_convention": "relative_ccw",
+        "heading_frame": "checkpoint",
+        "position_axes": {"x": "right", "y": "up", "unit": "m"},
+        "time": {"stored": "t_ms", "api_t": "epoch_s", "api_t_rel": "s"},
     }
     
 @app.get("/")

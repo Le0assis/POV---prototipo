@@ -144,11 +144,41 @@ Acesse o diretório `Backend` com o `venv` ativado:
 
 ```bash
 cd Backend
+# Senha do editor: só o ambiente do processo. Não usamos python-dotenv.
+export EDITOR_PASSWORD='defina-uma-senha'
 uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 
 ```
 
 > **Status de Sucesso:** API pronta em `[http://127.0.0.1:8000](http://127.0.0.1:8000)` e Swagger em `[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)`.
+
+`python -m datasets.create_tables` também aplica a migração idempotente `datasets/migrations/002_walk_traces.py` (dedupe de `edges`, trajetória e planta).
+
+### Senha do editor do mapa
+
+O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha. A API lê `EDITOR_PASSWORD` com `os.environ` e compara o header `X-Editor-Password` em tempo constante (SHA-256 + `hmac.compare_digest`).
+
+| Situação | Resposta |
+| --- | --- |
+| `EDITOR_PASSWORD` ausente ou vazia | **503** em toda escrita protegida |
+| Header ausente ou senha diferente | **401** |
+| Senha correta | a escrita segue |
+
+Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `DELETE /api/routes/{id}`.
+
+Leituras públicas, entre elas `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/pdr/config` e o restante dos GET já existentes. `POST /api/localize` e `POST /api/reset` continuam abertos.
+
+### Mapa, arestas e trajetória
+
+- `edges` é a única fonte do grafo: uma linha por sentido (`UNIQUE (source_node, target_node)`). `saved_routes` é histórico e não entra no mapa.
+- `origin='manual'` conserva distância e heading. Sem manual, a distância é a mediana das `walk_traces` válidas daquele sentido e o heading é a média circular. `active_trace_id` aponta a válida mais recente.
+- `GET /api/map` devolve `pos_x_px` e `pos_y_px` em cada checkpoint (planta, origem no canto superior esquerdo, y para baixo) e as arestas do grafo carregado só de `edges`.
+- `GET /api/connections?include_path=true` devolve cada sentido e, se houver, a trajetória ativa.
+- `POST /api/edges/process-raw` grava `sensors_log` (`steps_detected`, `distance_m`, `is_valid`) e a trajetória (`walk_traces` + `walk_steps`) do sentido andado. O corpo antigo (`steps`, `distance_m`, `mean_yaw_rad`, …) permanece; `path` é a trajetória lida de `walk_steps`.
+- No `path`, cada ponto é `{x, y, t, t_rel, heading, step_length, cadence, displacement}`: metros relativos ao checkpoint de origem (x direita, y para cima); `t` em segundos de epoch (`started_at + t_ms/1000`); `t_rel` em segundos; heading em radianos, anti-horário, relativo à pose no checkpoint. Cadência (passos/minuto) e deslocamento (soma dos comprimentos até o passo) são calculados na leitura.
+- `GET`/`PUT /api/map-config`: uma linha (`id=1`) com `plan_image`, `px_per_m` e `rotation_rad`, para o front converter metros em pixels. `plan_image` é `VARCHAR(512)` porque o MySQL exige tamanho.
+
+Meta futura de localização (não há tabela nesta entrega): checkpoint correto em pelo menos 90% dos testes e erro de até 1,5 m.
 
 ---
 

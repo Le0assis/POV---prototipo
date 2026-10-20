@@ -71,3 +71,14 @@ class RouteResponseSchema(BaseModel):
     path_sequence: list
     created_at: str
 
+
+class CheckpointPositionSchema(BaseModel):
+    pos_x_px: float | None = None
+    pos_y_px: float | None = None
+
+
+class MapConfigSchema(BaseModel):
+    plan_image: str | None = None
+    px_per_m: float | None = None
+    rotation_rad: float = 0.0
+

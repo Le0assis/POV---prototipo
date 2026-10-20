@@ -48,6 +48,29 @@ class ConexaoBD:
             print(f"Erro ao executar comando: {e}")
             return False
 
+    def execute_insert(self, sql, params=None):
+        """INSERT (ou upsert com LAST_INSERT_ID). Devolve o id, ou None se falhar."""
+        try:
+            self.cursor.execute(sql, params)
+            self.connection.commit()
+            return self.cursor.lastrowid
+        except Error as e:
+            if self.connection:
+                self.connection.rollback()
+            print(f"Erro ao executar insert: {e}")
+            return None
+
+    def execute_many(self, sql, seq):
+        try:
+            self.cursor.executemany(sql, list(seq))
+            self.connection.commit()
+            return True
+        except Error as e:
+            if self.connection:
+                self.connection.rollback()
+            print(f"Erro ao executar lote: {e}")
+            return False
+
     def disconnect(self):
             if self.connection and self.connection.is_connected():
                 self.cursor.close()

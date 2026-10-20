@@ -103,6 +103,9 @@ class StepEvent:
     index: int
     cadence_spm: float
     step_length_m: float
+    # Heading anti-horário relativo à pose no início do trecho. O detector
+    # deixa 0; o pipeline preenche com o yaw do Madgwick menos o yaw inicial.
+    heading_rad: float = 0.0
 
 
 class StepDetector(ABC):
