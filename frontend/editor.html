@@ -5,15 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POV — Editor</title>
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#22d3ee">
+    <meta name="theme-color" content="#2563EB">
     <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="css/tokens.css">
     <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/components.css">
     <link rel="stylesheet" href="css/map.css">
 </head>
 <body>
     <main class="map-page">
         <section class="card hidden" id="editor-locked">
-            <h1>Editor bloqueado</h1>
+            <div class="title-row">
+                <h1>Editor bloqueado</h1>
+                <span class="badge-homolog">HOMOLOGAÇÃO</span>
+            </div>
             <p class="hint">A senha fica só nesta aba. Sem ela não dá para gravar checkpoint, conexão ou posição.</p>
             <button type="button" class="btn btn-primary" id="editor-retry">Informar senha</button>
         </section>
@@ -22,7 +27,10 @@
             <div class="map-layout">
                 <section>
                     <div class="map-toolbar">
-                        <h1>Editor da planta</h1>
+                        <div class="title-row">
+                            <h1>Editor da planta</h1>
+                            <span class="badge-homolog">HOMOLOGAÇÃO</span>
+                        </div>
                         <p class="hint">Arraste um checkpoint para salvar a posição em pixels. Clique no mapa quando estiver posicionando um nó novo.</p>
                     </div>
                     <div class="map-stage" id="floor-map" role="application" aria-label="Editor da planta"></div>

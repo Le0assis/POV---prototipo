@@ -5,15 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POV — Mapa</title>
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#22d3ee">
+    <meta name="theme-color" content="#2563EB">
     <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="css/tokens.css">
     <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/components.css">
     <link rel="stylesheet" href="css/map.css">
 </head>
 <body>
     <main class="map-page">
         <div class="map-toolbar">
-            <h1>Mapa</h1>
+            <div class="title-row">
+                <h1>Mapa</h1>
+                <span class="badge-homolog">HOMOLOGAÇÃO</span>
+            </div>
             <p class="hint">Somente leitura. A linha contínua é a trajetória gravada; o tracejado é conexão sem gravação.</p>
         </div>
         <div class="map-stage" id="floor-map" role="application" aria-label="Planta e trajetórias"></div>
