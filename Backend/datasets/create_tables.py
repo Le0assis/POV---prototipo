@@ -10,7 +10,11 @@ def criar_tabelas_sistema(db: ConexaoBD):
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL UNIQUE,
         pos_x_px DOUBLE NULL,
-        pos_y_px DOUBLE NULL
+        pos_y_px DOUBLE NULL,
+        category_id INT NULL,
+        building_id INT NOT NULL DEFAULT 1,
+        slug VARCHAR(64) NULL,
+        INDEX idx_checkpoints_category_id (category_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """
 
@@ -87,6 +91,8 @@ def criar_tabelas_sistema(db: ConexaoBD):
 
     print("Aplicando migração 002 (dedupe de edges, trajetória, planta)...")
     aplicar_migracao_002(db)
+    print("Aplicando migração 003 (prédio, categoria, slug)...")
+    aplicar_migracao_003(db)
     print("[SETUP] Processo de criação de tabelas concluído.\n")
 
 
@@ -103,6 +109,20 @@ def aplicar_migracao_002(db: ConexaoBD) -> None:
     spec.loader.exec_module(module)
     removed = module.apply(db)
     print(f"[M02] Linhas de edges removidas nesta execução: {len(removed)}")
+
+
+def aplicar_migracao_003(db: ConexaoBD) -> None:
+    """Carrega datasets/migrations/003_checkpoint_slug.py (o nome começa com dígito)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / "migrations" / "003_checkpoint_slug.py"
+    spec = importlib.util.spec_from_file_location("migration_003_checkpoint_slug", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Migração não encontrada: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.apply(db)
 
 if __name__ == "__main__":
     # Script para você rodar de forma isolada uma única vez e preparar o XAMPP
