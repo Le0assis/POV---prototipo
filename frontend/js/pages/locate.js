@@ -5,7 +5,7 @@
  */
 
 import { insertTopNav } from '../components/nav.js';
-import * as api from '../core/api.js';
+import { getPdrConfig } from '../core/api.js';
 import { $, fillSelect, formatNum } from '../core/dom.js';
 import { toast } from '../ui/toast.js';
 import { HeadingProvider } from '../sensors/heading.js';
@@ -51,7 +51,7 @@ async function init() {
     $('#loc-sim').addEventListener('click', simulateStep);
     state.model = await loadFloorModel({ toast });
     try {
-        state.pdr = normalizePdrConfig(await api.getPdrConfig());
+        state.pdr = normalizePdrConfig(await getPdrConfig());
         state.localization = readLocalization(state.pdr);
         if (state.pdr) detector.setPdrConfig(state.pdr);
     } catch (err) {
@@ -130,16 +130,14 @@ async function start() {
     if (!motionOk || !orientOk) {
         toast('Permissão de sensor negada. No desktop, use simular passo.', 'warn');
     }
-    detector.reset();
     state.running = true;
-    state.steps = 0;
     $('#loc-start-btn').disabled = true;
     $('#loc-stop').disabled = false;
     $('#loc-recal').disabled = false;
     $('#loc-sim').disabled = !Number.isFinite(Number(state.pdr.step_length && state.pdr.step_length.default_m));
     state.offStep = detector.onStep((step) => acceptStep(step.length));
     state.offHeading = heading.onHeading(() => paint());
-    applyCalibration(edge);
+    restartClient(edge);
     toast('Calibrado neste checkpoint, na direção da aresta seguinte.', 'ok');
 }
 
@@ -154,15 +152,30 @@ function recalibrate() {
         toast('Escolha o checkpoint e a aresta seguinte.', 'warn');
         return;
     }
-    applyCalibration(edge);
+    restartClient(edge);
     toast(`Posição zerada em ${anchor.name}. Referência: heading da aresta seguinte.`, 'ok');
 }
 
-function applyCalibration(edge) {
+/** Reinício só no aparelho: passos, posição e heading de referência voltam ao checkpoint. */
+function restartClient(edge) {
+    detector.reset();
     state.edge = edge;
+    state.steps = 0;
     state.walkedM = 0;
     state.calibBearing = heading.correctedHeadingDeg ?? heading.headingDeg ?? 0;
+    snapToChosenCheckpoint(edge);
     paint();
+}
+
+function snapToChosenCheckpoint(edge) {
+    const node = currentAnchor();
+    const anchor = node && node.anchor;
+    if (!state.dot || !anchor || !state.model.config || !state.model.config.ready) return;
+    const px = metersToPixels({ x: 0, y: 0 }, anchor, state.model.config);
+    if (!px) return;
+    state.dot.setPixel(px.x, px.y);
+    const screen = plantHeadingToScreenDeg(edge.headingRad, state.model.config.rotation_rad);
+    if (screen !== null) state.dot.setHeading(screen);
 }
 
 function acceptStep(lengthM) {

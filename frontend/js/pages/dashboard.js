@@ -194,17 +194,7 @@ async function onReset(event) {
         toast('Escolha o nó inicial.', 'warn');
         return;
     }
-    try {
-        const data = await api.reset(start);
-        state.currentNode = data.start_node || start;
-        state.visited = [state.currentNode];
-        $('#kpi-node').textContent = state.currentNode;
-        toast(`Sessão reiniciada em ${state.currentNode}.`, 'ok');
-        if (state.destination) await planRoute();
-        draw();
-    } catch (err) {
-        toast(err.message || 'Falha ao resetar a sessão.', 'erro');
-    }
+    toast('Reinicie a sessão do servidor no editor.', 'warn');
 }
 
 async function planRoute({ quiet = false } = {}) {

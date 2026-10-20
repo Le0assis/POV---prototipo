@@ -58,14 +58,6 @@ export class RouteSimulator extends EventTarget {
             this._publish(bearing);
         }
 
-        if (this.sync) {
-            try {
-                await api.reset(this.session.route.start_node);
-            } catch (err) {
-                this._fail(err);
-            }
-        }
-
         if (!this._running) return;
         this._tick();
     }
