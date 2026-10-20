@@ -1,0 +1,13 @@
+{
+  "steps_real": 0,
+  "scenario": "chacoalho",
+  "position": "mao",
+  "device": "Poco 6 Pro",
+  "date": "2026-10-20",
+  "sample_rate_hz": 100.673,
+  "dt_median_ms": 9.933,
+  "dt_p95_ms": 9.934,
+  "step_times_s": null,
+  "time_base": null,
+  "notes": "Sensor Logger 1.68 (Android, nativo, não Chrome), ~100 Hz; gravação 'chacoalho'; ~30 s chacoalhando o celular sem andar; convertido com tools/convert_sensor_logger.py"
+}

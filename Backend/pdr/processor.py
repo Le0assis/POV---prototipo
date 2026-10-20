@@ -1,15 +1,33 @@
-"""Classe que declara se a caminhada relizada e um movimento humano ou nao"""
+"""Orquestra a gravação de uma aresta: persiste o CSV e delega a contagem.
 
-# pdr/processor.py
-import numpy as np
-from fastapi import HTTPException, status
-from scipy.interpolate import interp1d
+A detecção em si está em ``pdr.pipeline.detect_steps_from_samples``, que não
+abre banco e não lança HTTP. Dá para testar o mesmo caminho do
+``POST /api/edges/process-raw`` sem MySQL.
+"""
+
 import csv
 import io
+import math
 
-from filters.butterworth import ButterworthLowPassFilter
-from .steps import PeakStepDetector
-from filters.madgwick import MadgwickAttitudeEstimator
+from fastapi import HTTPException
+
+from pdr.trajectory import (
+    displacement_m,
+    epoch_to_sql_datetime,
+    integrate_walk,
+    path_points,
+)
+
+from .pipeline import detect_steps_from_samples
+from .steps import StepDetectorConfig, StepEvent
+
+
+def _sample_dict(sample) -> dict:
+    if isinstance(sample, dict):
+        return sample
+    if hasattr(sample, "model_dump"):
+        return sample.model_dump()
+    return sample.dict()
 
 
 def generate_sensors_csv(samples: list) -> str:
@@ -17,169 +35,166 @@ def generate_sensors_csv(samples: list) -> str:
     output = io.StringIO()
     if not samples:
         return ""
-    
-    # Extrai as chaves do primeiro elemento para o cabeçalho
-    fieldnames = samples[0].keys() if isinstance(samples[0], dict) else ['timestamp', 'mag_y', 'accel_x', 'mag_x', 'mag_z', 'accel_y', 'gyro_y', 'accel_z', 'gyro_z', 'gyro_x']
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
-    
+
+    rows = [_sample_dict(sample) for sample in samples]
+    writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
     writer.writeheader()
-    for sample in samples:
-        if isinstance(sample, dict):
-            writer.writerow(sample)
-        else:
-            # Caso os objetos cheguem como modelo Pydantic
-            writer.writerow(sample.dict())
-            
+    writer.writerows(rows)
     return output.getvalue()
 
 
-def resample_sensor_data(samples, target_hz=30.0):
+def steps_payload(events: list[StepEvent], t0: float, positions: list[dict] | None = None) -> list[dict]:
+    """Passos da API. ``t`` está na mesma base dos samples de entrada.
+
+    Além de ``t``, ``t_rel``, ``length_m`` e ``cadence_spm``, cada item traz
+    ``step_index``, ``x``, ``y`` e ``heading_rad``.
     """
-    Interpola os dados dos sensores para garantir um intervalo de tempo 
-    rigorosamente constante (dt = 1/30s), eliminando a oscilação do navegador.
-    """
-    if len(samples) < 15:
-        return None, None, None, None, None, None, None
+    payload = []
+    for index, event in enumerate(events):
+        position = positions[index] if positions and index < len(positions) else None
+        payload.append({
+            "step_index": index,
+            "t": float(event.timestamp),
+            "t_rel": float(event.timestamp - t0),
+            "length_m": float(event.step_length_m),
+            "cadence_spm": float(event.cadence_spm),
+            "heading_rad": float(event.heading_rad),
+            "x": 0.0 if position is None else float(position["x_m"]),
+            "y": 0.0 if position is None else float(position["y_m"]),
+        })
+    return payload
 
-    t_orig = np.array([s.timestamp for s in samples], dtype=np.float64)
-    duration = t_orig[-1] - t_orig[0]
-
-    if duration <= 0:
-        return None, None, None, None, None, None, None
-
-    # Define a quantidade exata de pontos para manter 30 Hz fixos
-    num_points = int(np.round(duration * target_hz))
-    if num_points < 10:
-        return None, None, None, None, None, None, None
-
-    # Grade temporal perfeitamente uniforme
-    t_uniform = np.linspace(t_orig[0], t_orig[-1], num_points)
-
-    # Vetores originais
-    ax = np.array([s.accel_x for s in samples])
-    ay = np.array([s.accel_y for s in samples])
-    az = np.array([s.accel_z for s in samples])
-    gx = np.array([s.gyro_x for s in samples])
-    gy = np.array([s.gyro_y for s in samples])
-    gz = np.array([s.gyro_z for s in samples])
-
-    # Interpolação linear para alinhar os eixos no tempo uniforme
-    ax_u = interp1d(t_orig, ax, kind='linear', fill_value='extrapolate')(t_uniform)
-    ay_u = interp1d(t_orig, ay, kind='linear', fill_value='extrapolate')(t_uniform)
-    az_u = interp1d(t_orig, az, kind='linear', fill_value='extrapolate')(t_uniform)
-    gx_u = interp1d(t_orig, gx, kind='linear', fill_value='extrapolate')(t_uniform)
-    gy_u = interp1d(t_orig, gy, kind='linear', fill_value='extrapolate')(t_uniform)
-    gz_u = interp1d(t_orig, gz, kind='linear', fill_value='extrapolate')(t_uniform)
-
-    return t_uniform, ax_u, ay_u, az_u, gx_u, gy_u, gz_u
 
 class RawEdgeProcessor:
-    def __init__(self, db_manager, topo_map):
+    def __init__(self, db_manager, topo_map, config: StepDetectorConfig | None = None):
         self.db_manager = db_manager
         self.topo_map = topo_map
+        self.config = config or StepDetectorConfig()
 
     def process_samples(self, source: str, target: str, samples: list):
-        
-        TARGET_HZ = 30.0
-        
-        if not samples or len(samples) < 20:
-            raise HTTPException(status_code=400, detail="Amostras insuficientes (mínimo 20).")
+        minimum = int(self.config.min_request_samples)
+        if not samples or len(samples) < minimum:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Amostras insuficientes (mínimo {minimum}).",
+            )
 
-        # GERAR CSV DOS DADOS BRUTOS
         csv_string = generate_sensors_csv(samples)
-        
-        # SALVAR LOG BRUTO NO BANCO
-        self.db_manager.save_sensor_log(
-            source=source, 
-            target=target, 
-            csv_data=csv_string
-        )        
+        log_result = self.db_manager.save_sensor_log(
+            source=source,
+            target=target,
+            csv_data=csv_string,
+        )
+        log_id = log_result if type(log_result) is int else None
 
-        # REAMOSTRAGEM DOS DADOS (Cria sinais perfeitamente alinhados no tempo)
-        t_u, ax, ay, az, gx, gy, gz = resample_sensor_data(samples, target_hz=TARGET_HZ)
-
-        if t_u is None:
+        result = detect_steps_from_samples(samples, config=self.config)
+        if log_id is not None and hasattr(self.db_manager, "update_sensor_log"):
+            self.db_manager.update_sensor_log(
+                log_id,
+                result.steps_count if result.time_valid else 0,
+                result.distance_m if result.time_valid else 0.0,
+                bool(result.valid and result.time_valid),
+                result.message,
+            )
+        if not result.time_valid:
             raise HTTPException(status_code=400, detail="Tempo de amostragem inválido.")
 
-        estimator = MadgwickAttitudeEstimator(gain=0.033)
-        dt = 1.0 / TARGET_HZ
-        quaternions = []
-
-        for i in range(len(t_u)):
-            q = estimator.update(
-                gx=gx[i], gy=gy[i], gz=gz[i],
-                ax=ax[i], ay=ay[i], az=az[i],
-                mx=0.0, my=0.0, mz=0.0,
-                dt=dt
-            )
-            quaternions.append(q)
-        
-        vertical_acc = np.array([
-            q.get_vertical_acceleration(ax[i], ay[i], az[i]) 
-            for i, q in enumerate(quaternions)
-        ])
-        
-        gyro_magnitude = np.sqrt(gx**2 + gy**2 + gz**2)
-        max_gyro = np.max(gyro_magnitude)
-        mean_gyro = np.mean(gyro_magnitude)
-
-        # Só descarta a gravação inteira se ultrapassar 5.5 rad/s sustentados ou pico de 7.5 rad/s
-        if max_gyro > 7.5 or mean_gyro > 4.0:
-            return {
-                "status": "warning",
-                "valid": False,
-                "source": source,
-                "target": target,
-                "message": f"Movimento descartado como chacoalhado (Giroscópio pico: {round(max_gyro, 1)} rad/s).",
-                "steps_count": 0,
-                "distance_m": 0.0,
-                "mean_yaw_rad": 0.0
-            }
-
-        # FILTRAGEM ADAPTATIVA
- 
-        bw_filter = ButterworthLowPassFilter(cutoff_hz=2.2, sample_rate_hz=TARGET_HZ, order=2)
-        filtered_magnitude = bw_filter.apply(vertical_acc, sample_rate_hz=TARGET_HZ)
-
-        # DETECÇÃO DE PASSOS
-        detector = PeakStepDetector(sample_rate_hz=TARGET_HZ, weinberg_k=0.45)
-        
-        step_events = detector.detect(
-            timestamps=t_u,
-            filtered_magnitude=filtered_magnitude,
-            gyro_magnitude=gyro_magnitude,
-            sample_rate_hz=TARGET_HZ
-        )
-
-        if not step_events:
-            return {
-                "status": "warning",
-                "valid": False,
-                "source": source,
-                "target": target,
-                "message": "Nenhum passo identificado.",
-                "steps_count": 0,
-                "distance_m": 0.0,
-                "mean_yaw_rad": 0.0
-            }
-
-        # CÁLCULO DE DISTÂNCIA E ORIENTAÇÃO
-        total_distance_m = sum(s.step_length_m for s in step_events)
-        
-        mean_yaw_rad = float(np.mean([q.yaw for q in quaternions]))
-
-        # PERSISTÊNCIA NO BANCO E GRAFO
-        self.db_manager.save_edge(source, target, total_distance_m, mean_yaw_rad)
-        angle_deg = float(np.degrees(mean_yaw_rad))
-        self.topo_map.connect_checkpoints(source, target, distance=total_distance_m, angle_deg=angle_deg)
-
-        return {
-            "status": "success",
-            "valid": True,
+        t0 = _first_timestamp(samples)
+        built = integrate_walk(result.steps, t0)
+        body = {
+            "status": "success" if result.valid else "warning",
+            "valid": result.valid,
             "source": source,
             "target": target,
-            "message": f"Trecho validado com sucesso!",
-            "steps_count": len(step_events),
-            "distance_m": round(total_distance_m, 2),
-            "mean_yaw_rad": round(mean_yaw_rad, 4)
+            "message": result.message,
+            "steps_count": result.steps_count,
+            "distance_m": round(result.distance_m, 2),
+            "mean_yaw_rad": round(result.mean_yaw_rad, 4),
+            "steps": steps_payload(result.steps, t0, built["steps"]),
+            "trace_id": None,
+            "edge_id": None,
+            "frame": "edge_local",
+            "net_heading_rad": round(float(built["net_heading_rad"]), 6),
+            "displacement_m": round(displacement_m(built["steps"]), 6),
+            "edge_distance_m": None,
+            "edge_origin": None,
+            "path": path_points(t0, built["steps"]),
         }
+
+        # Gravação real: trace mesmo sem passo (is_valid=0) e, se válida,
+        # atualiza só o sentido andado. Gerenciadores antigos não têm
+        # record_walk e seguem o save_edge de antes.
+        if log_id is not None and hasattr(self.db_manager, "record_walk"):
+            saved = self.db_manager.record_walk(
+                source=source,
+                target=target,
+                sensors_log_id=log_id,
+                started_at=epoch_to_sql_datetime(t0),
+                ended_at=epoch_to_sql_datetime(_last_timestamp(samples)),
+                built=built,
+                is_valid=bool(result.valid),
+            )
+            if not saved:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Falha ao gravar a trajetória. A transação foi revertida.",
+                )
+            if saved.get("path") is not None:
+                body["path"] = saved["path"]
+            body["trace_id"] = saved.get("trace_id")
+            body["edge_id"] = saved.get("edge_id")
+            body["edge_distance_m"] = saved.get("edge_distance_m")
+            body["edge_origin"] = saved.get("edge_origin")
+            if saved.get("net_heading_rad") is not None:
+                body["net_heading_rad"] = round(float(saved["net_heading_rad"]), 6)
+            if saved.get("displacement_m") is not None:
+                body["displacement_m"] = round(float(saved["displacement_m"]), 6)
+            if result.valid and saved.get("edge_distance_m") is not None:
+                self._remember_directed(
+                    source,
+                    target,
+                    float(saved["edge_distance_m"]),
+                    float(saved["edge_heading_rad"]),
+                )
+            return body
+
+        if not result.steps:
+            return body
+
+        self.db_manager.save_edge(source, target, result.distance_m, result.mean_yaw_rad)
+        angle_deg = float(math.degrees(result.mean_yaw_rad))
+        self.topo_map.connect_checkpoints(source, target, distance=result.distance_m, angle_deg=angle_deg)
+        return body
+
+    def _remember_directed(self, source: str, target: str, distance_m: float, heading_rad: float) -> None:
+        """Atualiza só o sentido andado. Não espelha a volta."""
+        if not hasattr(self.topo_map, "upsert_directed_edge"):
+            return
+        nodes = getattr(self.topo_map, "nodes", None)
+        if isinstance(nodes, dict) and hasattr(self.topo_map, "add_checkpoint"):
+            if source not in nodes:
+                self.topo_map.add_checkpoint(source)
+            if target not in nodes:
+                self.topo_map.add_checkpoint(target)
+        self.topo_map.upsert_directed_edge(source, target, distance_m, heading_rad)
+
+
+def _timestamps(samples: list) -> list[float]:
+    stamps = []
+    for sample in samples:
+        if isinstance(sample, dict):
+            stamps.append(float(sample["timestamp"]))
+        else:
+            stamps.append(float(sample.timestamp))
+    return stamps
+
+
+def _first_timestamp(samples: list) -> float:
+    stamps = _timestamps(samples)
+    return min(stamps) if stamps else 0.0
+
+
+def _last_timestamp(samples: list) -> float:
+    stamps = _timestamps(samples)
+    return max(stamps) if stamps else 0.0
+

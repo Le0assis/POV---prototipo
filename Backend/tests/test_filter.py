@@ -24,17 +24,31 @@ class TestButterworthFilter(unittest.TestCase):
         self.cutoff = 3.0         # 3 Hz (caminhada)
         self.filter = ButterworthLowPassFilter(self.cutoff, self.sample_rate, order=4)
 
-    def test_rejects_cutoff_above_nyquist(self) -> None:
-        """O filtro deve estourar erro se a frequência de corte violar Nyquist."""
-        invalid_cutoff = self.sample_rate / 2.0  # Igual ou maior que Nyquist (50Hz)
-        with self.assertRaises(ValueError):
-            ButterworthLowPassFilter(invalid_cutoff, self.sample_rate)
+    def test_cutoff_at_nyquist_is_clamped_not_raised(self) -> None:
+        """Corte na frequência de Nyquist não levanta ValueError.
 
-    def test_rejects_short_signal(self) -> None:
-        """O filtfilt exige um tamanho mínimo de sinal baseado na ordem do filtro."""
+        Estes dois testes (corte inválido e sinal curto) esperavam
+        ``ValueError``. O Butterworth de produção não aborta o lote: em
+        ``apply`` o corte é limitado a 90% de Nyquist. Um ``ValueError``
+        aqui derrubaria uma gravação inteira por um trecho curto ou uma
+        taxa baixa.
+        """
+        invalid_cutoff = self.sample_rate / 2.0  # Igual a Nyquist (50 Hz)
+        filt = ButterworthLowPassFilter(invalid_cutoff, self.sample_rate)
+        signal = np.sin(2 * np.pi * np.linspace(0, 1, 200, endpoint=False))
+        filtered = filt.apply(signal)
+        self.assertEqual(len(filtered), len(signal))
+        self.assertTrue(np.all(np.isfinite(filtered)))
+
+    def test_short_signal_is_returned_unchanged(self) -> None:
+        """Sinal mais curto que o ``filtfilt`` exige volta igual, sem exceção.
+
+        O ``filtfilt`` precisa de mais amostras do que a ordem do filtro.
+        ``apply`` devolve o bruto para o pipeline seguir no trecho seguinte.
+        """
         short_signal = np.array([1.0, 2.0, 3.0])
-        with self.assertRaises(ValueError):
-            self.filter.apply(short_signal)
+        filtered = self.filter.apply(short_signal)
+        np.testing.assert_array_equal(filtered, short_signal)
 
     def test_attenuates_high_frequency_noise(self) -> None:
         """Garante que o ruído de alta frequência seja severamente atenuado."""

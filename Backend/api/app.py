@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from fastapi import FastAPI, HTTPException, status, Query
+from fastapi import Depends, FastAPI, HTTPException, status, Query
 from pydantic import BaseModel
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,13 +8,23 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from datasets.ManagerDatabase import ConexaoBD
+from datasets.ManagerDatabase import ConexaoBD, request_connection
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
-from .schema import ProcessRawEdgeSchema, CheckpointSchema, EdgeSchema, StepSensorSchema, RouteCreateSchema
+from .editor_auth import require_editor_password
+from .schema import (
+    ProcessRawEdgeSchema,
+    CheckpointSchema,
+    CheckpointPositionSchema,
+    EdgeSchema,
+    StepSensorSchema,
+    RouteCreateSchema,
+    MapConfigSchema,
+)
+from pdr.steps import StepDetectorConfig, pdr_config_payload
 
 # --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
 from filters.butterworth import ButterworthLowPassFilter
@@ -58,7 +68,41 @@ db.connect()
 if not db.connection:
     print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
 
-map_db_manager = MapDatabaseManager(db)
+map_db_manager = MapDatabaseManager(db, per_request=True)
+
+
+def _shared_database_is_up() -> bool:
+    connection = getattr(db, "connection", None)
+    if connection is None:
+        return False
+    try:
+        return bool(connection.is_connected())
+    except Exception:
+        return False
+
+
+@app.middleware("http")
+async def db_connection_per_request(request, call_next):
+    """Uma conexão por requisição. O cursor global não atravessa GET e gravação."""
+    local = None
+    token = None
+    if _shared_database_is_up():
+        local = ConexaoBD(db.host, db.database, db.user, db.password)
+        local.connect(announce=False)
+        if local.connection:
+            token = request_connection.set(local)
+        else:
+            local.disconnect(announce=False)
+            local = None
+    try:
+        return await call_next(request)
+    finally:
+        if token is not None:
+            request_connection.reset(token)
+        if local is not None:
+            local.disconnect(announce=False)
+
+
 topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
@@ -77,12 +121,22 @@ visited_path = [starting_node]
 edge_processor = RawEdgeProcessor(map_db_manager, topo_map)
 
 @app.post("/api/edges/process-raw", status_code=status.HTTP_201_CREATED)
-def process_raw_edge(payload: ProcessRawEdgeSchema):
-    """Recebe amostras brutas e repassa o processamento para a classe RawEdgeProcessor."""
+def process_raw_edge(
+    payload: ProcessRawEdgeSchema,
+    _editor: None = Depends(require_editor_password),
+):
+    """Recebe amostras brutas, grava a trajetória e atualiza só o sentido andado."""
+    if payload.source not in topo_map.nodes or payload.target not in topo_map.nodes:
+        raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
+    if payload.source == payload.target:
+        raise HTTPException(status_code=400, detail="Origem e destino não podem ser o mesmo nó.")
     return edge_processor.process_samples(payload.source, payload.target, payload.samples)
 
 @app.post("/api/checkpoints", status_code=status.HTTP_201_CREATED)
-def create_checkpoint(checkpoint: CheckpointSchema):
+def create_checkpoint(
+    checkpoint: CheckpointSchema,
+    _editor: None = Depends(require_editor_password),
+):
     node_name = checkpoint.name.strip()
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
@@ -97,7 +151,10 @@ def create_checkpoint(checkpoint: CheckpointSchema):
 
 
 @app.post("/api/edges", status_code=status.HTTP_201_CREATED)
-def create_edge(edge: EdgeSchema):
+def create_edge(
+    edge: EdgeSchema,
+    _editor: None = Depends(require_editor_password),
+):
     """Cadastra manualmente uma conexão (ida e volta) entre dois checkpoints."""
     if edge.source not in topo_map.nodes or edge.target not in topo_map.nodes:
         raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
@@ -112,8 +169,10 @@ def create_edge(edge: EdgeSchema):
     if not success:
         raise HTTPException(status_code=500, detail="Falha interna ao persistir conexão no banco.")
 
-    # connect_checkpoints recebe GRAUS e já cria os sentidos de ida e volta
-    topo_map.connect_checkpoints(edge.source, edge.target, edge.distance_m, math.degrees(edge.heading_rad))
+    # Um registro por sentido, nos mesmos radianos gravados no banco.
+    inverse_heading = (edge.heading_rad + math.pi) % (2 * math.pi)
+    topo_map.upsert_directed_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
+    topo_map.upsert_directed_edge(edge.target, edge.source, edge.distance_m, inverse_heading)
 
     return {
         "status": "success",
@@ -199,7 +258,10 @@ def get_all_routes():
     }
 
 @app.post("/api/routes", status_code=status.HTTP_201_CREATED)
-def create_route(route_data: RouteCreateSchema):
+def create_route(
+    route_data: RouteCreateSchema,
+    _editor: None = Depends(require_editor_password),
+):
     """Cria e salva uma nova rota calculando via Dijkstra."""
     start = route_data.start_node
     end = route_data.end_node
@@ -243,7 +305,10 @@ def get_saved_route(route_id: int):
     }
 
 @app.delete("/api/routes/{route_id}", status_code=status.HTTP_200_OK)
-def delete_route(route_id: int):
+def delete_route(
+    route_id: int,
+    _editor: None = Depends(require_editor_password),
+):
     """Remove uma rota salva."""
     success = map_db_manager.delete_route(route_id)
     if not success:
@@ -253,7 +318,10 @@ def delete_route(route_id: int):
 
 # Modificar reset para aceitar start_node dinâmico
 @app.post("/api/reset")
-def reset_session(start_node: str = Query(default="Recepcao")):
+def reset_session(
+    start_node: str = Query(default="Recepcao"),
+    _editor: None = Depends(require_editor_password),
+):
     """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
     global matcher, visited_path
     if start_node not in topo_map.nodes:
@@ -262,7 +330,6 @@ def reset_session(start_node: str = Query(default="Recepcao")):
     visited_path = [start_node]
     return {"status": "success", "message": "Estado do PDR e sensores resetados.", "start_node": start_node}
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
 app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
 app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
@@ -279,12 +346,102 @@ def get_current_location():
 
 @app.get("/api/map", status_code=status.HTTP_200_OK)
 def get_map_layout():
+    """Nós com posição da planta e arestas só da tabela edges (já carregada sem espelho)."""
     layout = topo_map.get_map_layout()
+    positions = map_db_manager.get_checkpoint_positions()
+    nodes = []
+    for node in layout["nodes"]:
+        pos_x, pos_y = positions.get(node["id"], (None, None))
+        nodes.append({
+            **node,
+            "pos_x_px": pos_x,
+            "pos_y_px": pos_y,
+        })
     return {
         "status": "success",
-        "nodes": layout["nodes"],
+        "nodes": nodes,
         "edges": layout["edges"]
     }
+
+
+@app.patch("/api/checkpoints/{name}/position", status_code=status.HTTP_200_OK)
+def update_checkpoint_position(
+    name: str,
+    body: CheckpointPositionSchema,
+    _editor: None = Depends(require_editor_password),
+):
+    """Posição do checkpoint na planta (origem no canto superior esquerdo, y para baixo)."""
+    node_name = name.strip()
+    if not node_name:
+        raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
+    saved = map_db_manager.update_checkpoint_position(node_name, body.pos_x_px, body.pos_y_px)
+    if not saved:
+        raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
+    return {
+        "status": "success",
+        "checkpoint": {
+            "name": node_name,
+            "pos_x_px": body.pos_x_px,
+            "pos_y_px": body.pos_y_px,
+        },
+    }
+
+
+def _map_config_body(config: dict) -> dict:
+    return {
+        "status": "success",
+        "map_config": {
+            "plan_image": config.get("plan_image"),
+            "px_per_m": config.get("px_per_m"),
+            "rotation_rad": config.get("rotation_rad"),
+        },
+    }
+
+
+@app.get("/api/map-config", status_code=status.HTTP_200_OK)
+def get_map_config():
+    config = map_db_manager.get_map_config()
+    if config is None:
+        raise HTTPException(
+            status_code=500,
+            detail="map_config indisponível. Rode a migração 002: python -m datasets.create_tables.",
+        )
+    return _map_config_body(config)
+
+
+@app.put("/api/map-config", status_code=status.HTTP_200_OK)
+def put_map_config(
+    body: MapConfigSchema,
+    _editor: None = Depends(require_editor_password),
+):
+    saved = map_db_manager.save_map_config(body.plan_image, body.px_per_m, body.rotation_rad)
+    if saved is None:
+        raise HTTPException(status_code=500, detail="Não foi possível gravar map_config. Execute a migração 002.")
+    return _map_config_body(saved)
+
+
+@app.get("/api/connections", status_code=status.HTTP_200_OK)
+def get_connections(include_path: bool = Query(default=True)):
+    """Um item por par físico. include_path default true; false omite path."""
+    connections = map_db_manager.list_connections(include_path=include_path)
+    if connections is None:
+        raise HTTPException(status_code=500, detail="Não foi possível ler as conexões. Execute a migração 002.")
+    return {"status": "success", "frame": "edge_local", "connections": connections}
+
+
+@app.get("/api/connections/{edge_id}", status_code=status.HTTP_200_OK)
+def get_connection_by_id(edge_id: int):
+    """O sentido do id pedido, mais as trajetórias desse sentido."""
+    connection = map_db_manager.get_connection(edge_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="Conexão não encontrada.")
+    return {"status": "success", "frame": "edge_local", **connection}
+
+
+@app.get("/api/pdr/config", status_code=status.HTTP_200_OK)
+def get_pdr_config():
+    """Parâmetros do PDR no cliente. Leitura pública. min_samples é configurável."""
+    return pdr_config_payload(StepDetectorConfig())
     
 @app.get("/")
 @app.get("/index.html")

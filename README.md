@@ -73,9 +73,11 @@ POV---prototipo/
 ## 3. Pré-requisitos
 
 * **Git**
-* **Python 3.10+**
+* **Python 3.11+**
 * **XAMPP** (Apache e MySQL)
 * **Cloudflare CLI (`cloudflared`)** *(Opcional: Apenas se for expor para rede externa)*
+
+A detecção corta a gravação onde o intervalo entre timestamps passa de `StepDetectorConfig.max_gap_s` (padrão **0,25 s**) e não interpola esse vão. O valor é da config, não uma constante solta: `StepDetectorConfig(max_gap_s=0.5)` ou `python others/evaluate_steps.py arquivo.csv --max-gap-s 0.5` (a partir de `Backend/`). Se o Chrome no MIUI engasgar e o `devicemotion` furar cerca de **0,5 s**, o padrão de 0,25 s parte uma passada contínua em dois trechos; nesse caso suba o limite para ~0,5 s.
 
 ---
 
@@ -142,11 +144,44 @@ Acesse o diretório `Backend` com o `venv` ativado:
 
 ```bash
 cd Backend
+# Senha do editor: só o ambiente do processo. Não usamos python-dotenv.
+export EDITOR_PASSWORD='defina-uma-senha'
 uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 
 ```
 
 > **Status de Sucesso:** API pronta em `[http://127.0.0.1:8000](http://127.0.0.1:8000)` e Swagger em `[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)`.
+
+`python -m datasets.create_tables` também aplica a migração idempotente `datasets/migrations/002_walk_traces.py` (dedupe de `edges`, trajetória e planta). Se `edges_backup_m02` já existe, ela não é recriada. `GET /api/map-config` responde **500** com a mensagem pedindo essa migração quando a tabela ainda não existe.
+
+### Senha do editor do mapa
+
+O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha. A API lê `EDITOR_PASSWORD` com `os.environ` e compara o header `X-Editor-Password` em tempo constante (SHA-256 + `hmac.compare_digest`).
+
+| Situação | Resposta |
+| --- | --- |
+| `EDITOR_PASSWORD` ausente ou vazia | **503** em toda escrita protegida |
+| Header ausente ou senha diferente | **401** |
+| Senha correta | a escrita segue |
+
+Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `POST /api/routes`, `DELETE /api/routes/{id}`, `POST /api/reset`.
+
+Leituras públicas, entre elas `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/connections/{id}`, `GET /api/pdr/config` e o restante dos GET já existentes. `POST /api/localize` continua aberto.
+
+### Mapa, arestas e trajetória
+
+- `edges` é a única fonte do grafo: uma linha por sentido (`UNIQUE (source_node, target_node)`). `saved_routes` é histórico e não entra no mapa.
+- `origin` no banco e na API é `manual` ou `recorded` (o exemplo do contrato do front usa a palavra `recording`; o valor gravado é `recorded`).
+- Aresta antiga: ao criar a coluna, `origin='recorded'` se existir qualquer `sensors_log` do par source/target, mesmo com `is_valid=0` (logs antigos não preenchiam o campo). Sem log, fica `manual`. A classificação não roda de novo. `is_valid` vale só para gravações novas: mediana, `samples_count` e `active_trace_id`.
+- `origin='manual'` conserva distância e heading. Sem manual, a distância é a mediana das `walk_traces` válidas daquele sentido e o heading é a média circular. `active_trace_id` aponta a válida mais recente. `samples_count` é quantas trajetórias válidas aquele sentido tem, e sobe mesmo quando a distância manual permanece.
+- `started_at` e `ended_at` são `DATETIME(3)` sem fuso, gravados em UTC. Quem lê trata o valor naive como UTC.
+- `GET /api/map` devolve `pos_x_px` e `pos_y_px` em cada checkpoint (planta, origem no canto superior esquerdo, y para baixo) e as arestas do grafo carregado só de `edges`.
+- `GET /api/connections` agrupa o par físico: uma entrada, com `reverse_edge_id` para o front não desenhar duas vezes. O sentido listado é o que tem `active_trace_id`; se nenhum tiver, o de menor id. `include_path` default é true; `false` omite `path`. Aresta sem trajetória devolve um segmento reto `[{x:0,y:0,t:null},{x:d·cos(h),y:d·sin(h),t:null}]`. `GET /api/connections/{id}` devolve aquele sentido (não troca pelo par) e `traces`.
+- `POST /api/edges/process-raw` grava `sensors_log` (`steps_detected`, `distance_m`, `is_valid`) e a trajetória (`walk_traces` + `walk_steps`) do sentido andado, numa transação. Cada requisição abre a própria conexão MySQL, para um GET não deixar transação implícita no cursor da gravação. O corpo antigo (`steps`, `distance_m`, `mean_yaw_rad`, …) permanece. `path` é um array `[{x, y, t}]` com o ponto de origem; `t` é epoch (`started_at + t_ms/1000`). `trace_id` vem no topo. Cada step traz `step_index`, `x`, `y`, `heading_rad` e `length_m` (e os campos antigos `t`, `t_rel`, `cadence_spm`). `displacement_m` é o módulo do último ponto. Caminhada inválida grava o trace com `is_valid=0`, devolve `path` e `trace_id`, e não altera a aresta. Se a transação da trajetória falhar, a resposta é **500** e nada do trace fica commitado. O heading zera uma vez, na pose do checkpoint, não a cada buraco da amostragem.
+- `PUT /api/map-config` exige `px_per_m` maior que zero (422 se faltar ou for inválido). `GET` e `PUT` devolvem `{"status","map_config":{plan_image,px_per_m,rotation_rad}}`. `plan_image` é caminho relativo do front, `VARCHAR(512)` porque o MySQL exige tamanho. A linha é `id=1`.
+- `PATCH /api/checkpoints/{name}/position` exige `pos_x_px` e `pos_y_px` numéricos (422). A resposta traz `checkpoint`.
+
+Meta futura de localização (não há tabela nesta entrega): checkpoint correto em pelo menos 90% dos testes e erro de até 1,5 m.
 
 ---
 

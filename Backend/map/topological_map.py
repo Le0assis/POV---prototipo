@@ -37,33 +37,44 @@ class TopologicalMap:
         print(f"Checkpoint {name} ")
         
 
+    def upsert_directed_edge(self, source: str, target: str, distance_m: float, heading_rad: float) -> None:
+        """Uma aresta em memória por sentido. Não cria a volta."""
+        if source not in self.nodes or target not in self.nodes:
+            raise ValueError(f"Erro: Ambos os nós '{source}' e '{target}' devem existir antes de os conectar.")
+
+        for edge in self.edges:
+            if edge.source == source and edge.target == target:
+                edge.distance_m = float(distance_m)
+                edge.heading_rad = float(heading_rad)
+                return
+
+        self.edges.append(TopologicalEdge(
+            source=source,
+            target=target,
+            distance_m=float(distance_m),
+            heading_rad=float(heading_rad),
+        ))
+
+    def load_directed_edges(self, rows: list) -> None:
+        """Carrega linhas de ``edges`` sem espelhar. O maior id do sentido prevalece."""
+        ordered = sorted(rows, key=lambda row: int(row.get("id", 0)))
+        for row in ordered:
+            self.upsert_directed_edge(
+                row["source_node"],
+                row["target_node"],
+                float(row["distance_m"]),
+                float(row["heading_rad"]),
+            )
+
     def connect_checkpoints(self, from_node: str, to_node: str, distance: float, angle_deg: float) -> None:
-        """Cria uma conexão de ida e volta entre dois checkpoints, salvando a distância 
-            e calculando os ângulos absolutos de orientação para ambos os sentidos.
-        """
-        # 1. Validação de segurança
+        """Cria ou atualiza ida e volta. Chamar de novo não duplica o sentido."""
         if from_node not in self.nodes or to_node not in self.nodes:
             raise ValueError(f"Erro: Ambos os nós '{from_node}' e '{to_node}' devem existir antes de os conectar.")
-        
-        # 2. Sentido de Ida (From -> To)
-        heading_ida = np.radians(angle_deg)
-        edge_ida = TopologicalEdge(
-            source=from_node,
-            target=to_node,
-            distance_m=distance,
-            heading_rad=heading_ida
-        )
-        self.edges.append(edge_ida) 
-        
-        # 3. Sentido de Volta (To -> From) - Ângulo espelhado (+ 180 graus / + Pi radianos)
-        heading_volta = (heading_ida + np.pi) % (2 * np.pi)
-        edge_volta = TopologicalEdge(
-            source=to_node,
-            target=from_node,
-            distance_m=distance,
-            heading_rad=heading_volta
-        )
-        self.edges.append(edge_volta)
+
+        heading_ida = float(np.radians(angle_deg))
+        self.upsert_directed_edge(from_node, to_node, distance, heading_ida)
+        heading_volta = float((heading_ida + np.pi) % (2 * np.pi))
+        self.upsert_directed_edge(to_node, from_node, distance, heading_volta)
 
     def get_outgoing_edges(self, node_name: str) -> list[TopologicalEdge]:
         """Retorna todas as arestas/caminhos possíveis a partir de um nó específico."""
