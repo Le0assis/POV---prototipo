@@ -482,6 +482,27 @@ def read_viewer():
 def read_locate():
     return _frontend_page("locate.html")
 
+@app.get("/admin")
+@app.get("/admin/")
+@app.get("/admin/index.html")
+def read_admin_index():
+    return _frontend_page("admin/index.html")
+
+@app.get("/admin/editor")
+@app.get("/admin/editor.html")
+def read_admin_editor():
+    return _frontend_page("admin/editor.html")
+
+@app.get("/admin/recorder")
+@app.get("/admin/recorder.html")
+def read_admin_recorder():
+    return _frontend_page("admin/recorder.html")
+
+@app.get("/admin/map-config")
+@app.get("/admin/map-config.html")
+def read_admin_map_config():
+    return _frontend_page("admin/map-config.html")
+
 def _frontend_page(name: str):
     path = FRONTEND_DIR / name
     if path.exists():

@@ -85,14 +85,30 @@ export function createFloorMap(element) {
     };
 }
 
-/** Caminho relativo servido pelo próprio frontend (GitHub Pages / pasta frontend). */
-export function resolvePlanImage(planImage) {
+/**
+ * Caminho relativo servido na raiz do frontend (GitHub Pages / pasta frontend).
+ * Páginas em /admin/ não podem resolver assets/ a partir da própria URL.
+ */
+export function resolvePlanImage(planImage, pageHref) {
     if (!planImage) return '';
     const value = String(planImage).trim();
     if (!value) return '';
     if (/^https?:\/\//i.test(value)) return value;
-    if (typeof window === 'undefined') return value;
-    return new URL(value, window.location.href).href;
+    const href = pageHref || (typeof window === 'undefined' ? '' : window.location.href);
+    if (!href) return value;
+    return new URL(value, planImageBase(href)).href;
+}
+
+export function planImageBase(pageHref) {
+    const url = new URL(pageHref);
+    url.hash = '';
+    url.search = '';
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length && parts[parts.length - 1].includes('.')) parts.pop();
+    if (parts.length && parts[parts.length - 1] === 'admin') parts.pop();
+    url.pathname = `/${parts.join('/')}${parts.length ? '/' : ''}`;
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    return url.href;
 }
 
 function loadImageSize(url) {

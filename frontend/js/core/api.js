@@ -125,6 +125,33 @@ export function clearEditorPassword() {
     }
 }
 
+/**
+ * Confere a senha sem gravar nada: DELETE de uma rota com id que não existe.
+ * 404 significa que a senha passou e nenhuma linha foi removida.
+ * 401 limpa a sessão. 503 avisa que EDITOR_PASSWORD não está no servidor.
+ */
+const EDITOR_PASSWORD_PROBE = '/api/routes/2147483647';
+
+export async function verifyEditorPassword(password) {
+    const given = password || getEditorPassword();
+    if (!given) throw new ApiError('Senha do editor necessária.', 401);
+    try {
+        await request(EDITOR_PASSWORD_PROBE, { method: 'DELETE', password: given });
+    } catch (err) {
+        if (err.status === 404) return true;
+        if (err.status === 503) {
+            clearEditorPassword();
+            throw new ApiError('A senha do editor não está configurada no servidor.', 503);
+        }
+        if (err.status === 401) {
+            clearEditorPassword();
+            throw new ApiError('Senha incorreta.', 401);
+        }
+        throw err;
+    }
+    return true;
+}
+
 let pendingPrompt = null;
 
 /**
@@ -198,7 +225,8 @@ function promptEditorPassword(message) {
         const hint = document.createElement('p');
         hint.className = 'hint';
         hint.textContent = message
-            || 'Vale para o editor e para o gravador, só nesta aba.';
+            || 'Vale para a administração, só nesta aba.';
+        if (message) hint.setAttribute('role', 'alert');
 
         const label = document.createElement('label');
         label.className = 'form-group';
@@ -227,12 +255,21 @@ function promptEditorPassword(message) {
         overlay.appendChild(content);
 
         let settled = false;
+        let onKey = null;
         const close = (value) => {
             if (settled) return;
             settled = true;
+            if (onKey) document.removeEventListener('keydown', onKey);
             overlay.remove();
             if (previous && typeof previous.focus === 'function') previous.focus();
             resolve(value);
+        };
+
+        onKey = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                close(null);
+            }
         };
 
         content.addEventListener('submit', (event) => {
@@ -246,6 +283,7 @@ function promptEditorPassword(message) {
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) close(null);
         });
+        document.addEventListener('keydown', onKey);
 
         document.body.appendChild(overlay);
         input.focus();

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV — Configurar planta</title>
+    <link rel="manifest" href="../manifest.json">
+    <meta name="theme-color" content="#2563EB">
+    <link rel="stylesheet" href="../css/tokens.css">
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/home.css">
+</head>
+<body>
+    <header class="admin-header" id="admin-header">
+        <a class="admin-menu-link" href="index.html">Menu da administração</a>
+    </header>
+    <main class="home hidden" id="map-config-app">
+        <h1>Configurar planta</h1>
+        <form class="card" id="form-map-config" novalidate>
+            <label class="form-group" for="plan-image">
+                Caminho da imagem
+                <input id="plan-image" name="plan_image" type="text" placeholder="assets/planta.png" autocomplete="off">
+            </label>
+            <p class="hint">Caminho relativo ao frontend, servido junto com as páginas. Sem upload.</p>
+            <label class="form-group" for="px-per-m">
+                Pixels por metro
+                <input id="px-per-m" name="px_per_m" type="number" step="0.01" inputmode="decimal">
+            </label>
+            <label class="form-group" for="rotation-deg">
+                Rotação da planta (graus, anti-horário)
+                <input id="rotation-deg" name="rotation_deg" type="number" step="0.1" value="0">
+            </label>
+            <p class="hint">rotation_rad: <span class="mono" id="rotation-rad">0.0000</span></p>
+            <p class="hint" id="map-config-error" role="alert"></p>
+            <button type="submit" class="btn btn-primary">Salvar planta</button>
+        </form>
+    </main>
+    <script type="module" src="../js/boot.js"></script>
+    <script type="module" src="../js/pages/map-config.js"></script>
+</body>
+</html>

@@ -6,8 +6,9 @@
 import { insertTopNav } from '../components/nav.js';
 import * as api from '../core/api.js';
 import { $, fillSelect } from '../core/dom.js';
+import { whenAdminGranted } from '../core/role-toggle.js';
 import { toast } from '../ui/toast.js';
-import { degToRad, radToDeg } from '../sensors/angles.js';
+import { degToRad } from '../sensors/angles.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels } from '../map/layers.js';
 import { loadFloorModel } from './floor-model.js';
@@ -21,32 +22,25 @@ const state = {
 
 document.addEventListener('DOMContentLoaded', init);
 
-async function init() {
+function init() {
     insertTopNav('editor');
-    $('#editor-retry').addEventListener('click', () => { window.location.reload(); });
-    const password = await api.ensureEditorPassword();
-    if (!password) {
-        $('#editor-app').classList.add('hidden');
-        $('#editor-locked').classList.remove('hidden');
-        return;
-    }
+    whenAdminGranted(start);
+}
 
+async function start() {
+    $('#editor-app').classList.remove('hidden');
     state.floor = createFloorMap($('#floor-map'));
     state.floor.map.on('click', onMapClick);
-    $('#form-map-config').addEventListener('submit', onMapConfig);
     $('#form-checkpoint').addEventListener('submit', onCheckpoint);
     $('#form-edge').addEventListener('submit', onEdge);
     $('#form-reset').addEventListener('submit', onReset);
-    $('#rotation-deg').addEventListener('input', paintRotation);
     $('#edge-heading').addEventListener('input', paintHeading);
-    paintRotation();
     paintHeading();
     await reload();
 }
 
 async function reload() {
     state.model = await loadFloorModel({ toast });
-    paintConfigForm();
     const options = state.model.checkpoints.map((cp) => ({ id: cp.name, label: cp.name }));
     fillSelect($('#edge-source'), options, 'Origem');
     fillSelect($('#edge-target'), options, 'Destino');
@@ -70,21 +64,6 @@ async function reload() {
         state.floor.fitToContent(contentPixels(state.model));
         state.fitted = true;
     }
-}
-
-function paintConfigForm() {
-    const config = state.model && state.model.config;
-    if (!config) return;
-    if (config.plan_image) $('#plan-image').value = config.plan_image;
-    if (config.px_per_m != null) $('#px-per-m').value = String(config.px_per_m);
-    if (config.rotation_rad != null) $('#rotation-deg').value = radToDeg(config.rotation_rad).toFixed(2);
-    paintRotation();
-}
-
-function paintRotation() {
-    const deg = Number($('#rotation-deg').value);
-    const rad = Number.isFinite(deg) ? degToRad(deg) : 0;
-    $('#rotation-rad').textContent = rad.toFixed(4);
 }
 
 function paintHeading() {
@@ -141,40 +120,6 @@ async function onMove(name, pixel) {
     } catch (err) {
         toast(err.message || 'Falha ao salvar a posição.', 'erro');
         await reload();
-    }
-}
-
-async function onMapConfig(event) {
-    event.preventDefault();
-    const plan = $('#plan-image').value.trim();
-    const rawPx = $('#px-per-m').value.trim();
-    const deg = Number($('#rotation-deg').value);
-    if (rawPx === '') {
-        toast('Falta px_per_m. Sem esse campo o servidor responde 422.', 'warn');
-        return;
-    }
-    const px = Number(rawPx);
-    if (!Number.isFinite(px) || px <= 0) {
-        toast('px_per_m deve ser um número maior que zero.', 'warn');
-        return;
-    }
-    if (!Number.isFinite(deg)) {
-        toast('Informe a rotação.', 'warn');
-        return;
-    }
-    try {
-        await api.saveMapConfig({
-            plan_image: plan,
-            px_per_m: px,
-            rotation_rad: degToRad(deg)
-        });
-        toast('Planta salva.', 'ok');
-        state.fitted = false;
-        await reload();
-    } catch (err) {
-        const status = err && err.status;
-        const detail = err && err.message ? err.message : 'Falha ao salvar a planta.';
-        toast(status === 422 ? `Planta recusada (422): ${detail}` : detail, 'erro');
     }
 }
 

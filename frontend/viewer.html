@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POV — Mapa</title>
+    <title>POV — Mapa do prédio</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563EB">
     <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
@@ -16,8 +16,7 @@
     <main class="map-page">
         <div class="map-toolbar">
             <div class="title-row">
-                <h1>Mapa</h1>
-                <span class="badge-homolog">HOMOLOGAÇÃO</span>
+                <h1>Mapa do prédio</h1>
             </div>
             <p class="hint">Somente leitura. A linha contínua é a trajetória gravada; o tracejado é conexão sem gravação.</p>
         </div>
@@ -25,6 +24,7 @@
         <p class="hint" id="viewer-note"></p>
     </main>
     <script src="vendor/leaflet/leaflet.js"></script>
+    <script type="module" src="js/boot.js"></script>
     <script type="module" src="js/pages/viewer.js"></script>
 </body>
 </html>

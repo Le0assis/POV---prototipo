@@ -21,8 +21,14 @@
     color: inherit;
 }
 
-.home-card strong { color: var(--text); font-size: 1.05rem; }
-.home-card span { color: var(--muted); font-size: .88rem; }
+.home-card strong { color: var(--text); font-size: max(16px, var(--font-size-body)); }
+.home-card span { color: var(--muted); font-size: max(16px, var(--font-size-body)); }
+
+.home-card.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+}
 
 @media (max-width: 640px) {
     .home-grid { grid-template-columns: 1fr; }

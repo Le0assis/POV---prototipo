@@ -14,24 +14,16 @@
 <body>
     <main class="home">
         <h1>POV</h1>
-        <p class="hint">Mapa da planta, gravação do caminho real e teste de localização no celular.</p>
+        <p class="hint">Mapa do prédio, navegação e rotas salvas.</p>
         <p class="hint">API: <span id="home-api">verificando…</span></p>
         <nav class="home-grid" aria-label="Páginas">
             <a class="card home-card" href="viewer.html">
-                <strong>Mapa</strong>
+                <strong>Mapa do prédio</strong>
                 <span>Trajetórias gravadas, só leitura.</span>
             </a>
-            <a class="card home-card" href="editor.html">
-                <strong>Editor</strong>
-                <span>Checkpoints, conexões e posição na planta. Pede senha.</span>
-            </a>
-            <a class="card home-card" href="recorder.html">
-                <strong>Gravador</strong>
-                <span>Envia a caminhada e mostra a polilinha devolvida.</span>
-            </a>
             <a class="card home-card" href="locate.html">
-                <strong>Localizar</strong>
-                <span>PDR no aparelho, blue dot e erro até o checkpoint.</span>
+                <strong>Navegar</strong>
+                <span>PDR no aparelho, ponto azul e erro até o checkpoint.</span>
             </a>
             <a class="card home-card" href="routes.html">
                 <strong>Rotas</strong>
@@ -39,6 +31,7 @@
             </a>
         </nav>
     </main>
+    <script type="module" src="js/boot.js"></script>
     <script type="module" src="js/pages/home.js"></script>
 </body>
 </html>

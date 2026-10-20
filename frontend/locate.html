@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POV — Localizar</title>
+    <title>POV — Navegar</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563EB">
     <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
@@ -18,8 +18,7 @@
             <section>
                 <div class="map-toolbar">
                     <div class="title-row">
-                        <h1>Localização</h1>
-                        <span class="badge-homolog">HOMOLOGAÇÃO</span>
+                        <h1>Navegar</h1>
                     </div>
                     <p class="hint">O ponto segue a polilinha da aresta calibrada. O heading é relativo e zera no checkpoint.</p>
                 </div>
@@ -73,6 +72,7 @@
         </div>
     </main>
     <script src="vendor/leaflet/leaflet.js"></script>
+    <script type="module" src="js/boot.js"></script>
     <script type="module" src="js/pages/locate.js"></script>
 </body>
 </html>

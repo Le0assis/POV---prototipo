@@ -4,74 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POV — Gravador</title>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#2563EB">
-    <link rel="stylesheet" href="css/tokens.css">
-    <link rel="stylesheet" href="css/base.css">
-    <link rel="stylesheet" href="css/components.css">
-    <link rel="stylesheet" href="css/recorder.css">
-    <link rel="stylesheet" href="css/map.css">
+    <meta http-equiv="refresh" content="0;url=admin/recorder.html">
+    <script>
+        location.replace('admin/recorder.html' + location.search + location.hash);
+    </script>
 </head>
 <body>
-    <main class="rec">
-        <header>
-            <div class="title-row">
-                <h1>Gravador</h1>
-                <span class="badge-homolog">HOMOLOGAÇÃO</span>
-            </div>
-            <p class="hint">Caminhe da origem ao destino. O envio usa as amostras brutas do aparelho.</p>
-        </header>
-
-        <section class="card">
-            <label class="form-group" for="rec-source">
-                Origem
-                <select id="rec-source"></select>
-            </label>
-            <label class="form-group" for="rec-target">
-                Destino
-                <select id="rec-target"></select>
-            </label>
-            <button type="button" class="btn btn-success rec-go" id="rec-go">Gravar caminhada</button>
-            <p class="chrono mono" id="rec-chrono">00:00</p>
-        </section>
-
-        <section class="card">
-            <h2>Telemetria</h2>
-            <div class="telemetry">
-                <div>
-                    <span class="kpi-label">Aceleração</span>
-                    <p class="mono" id="rec-acc">—</p>
-                </div>
-                <div>
-                    <span class="kpi-label">Giroscópio</span>
-                    <p class="mono" id="rec-gyro">—</p>
-                </div>
-                <div>
-                    <span class="kpi-label">Orientação</span>
-                    <p class="mono" id="rec-ori">—</p>
-                </div>
-                <div>
-                    <span class="kpi-label" id="gyro-badge">Giroscópio em espera</span>
-                </div>
-            </div>
-            <canvas id="rec-spark" width="320" height="72" aria-label="Magnitude da aceleração"></canvas>
-            <div class="counters">
-                <span>Amostras <strong class="mono" id="sample-count">0</strong></span>
-                <span>Passos ao vivo <strong class="mono" id="live-steps">0</strong></span>
-            </div>
-        </section>
-
-        <section class="card">
-            <h2>Prévia do caminho</h2>
-            <p class="hint" id="rec-path-caption">Depois do envio, a polilinha devolvida pelo processamento aparece aqui.</p>
-            <canvas id="rec-path" class="path-preview" width="320" height="140" aria-label="Prévia da polilinha gravada"></canvas>
-        </section>
-
-        <section>
-            <h2>Histórico desta sessão</h2>
-            <div id="rec-history" class="history"></div>
-        </section>
-    </main>
-    <script type="module" src="js/pages/recorder.js"></script>
+    <p><a href="admin/recorder.html">Abrir o gravador</a></p>
 </body>
 </html>
