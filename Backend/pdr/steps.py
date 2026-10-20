@@ -90,11 +90,51 @@ class StepDetectorConfig:
     # 0,5 — senão um soluço parte a passada e a série de cadência pode cair.
     # Ex.: StepDetectorConfig(max_gap_s=0.5) ou evaluate_steps.py --max-gap-s 0.5.
     max_gap_s: float = 0.25
+    # Mínimo de amostras de um segmento contínuo. Não é a trava do POST.
     min_samples: int = 15
+    # Trava do POST /api/edges/process-raw. Exposta como min_samples na API.
+    min_request_samples: int = 20
+    weinberg_exponent: float = 0.25
+    step_length_default_m: float = 0.70
+    snap_end_window_m: float = 1.5
+    edge_match_tolerance_rad: float = 0.524
 
     # Abaixo disso o sinal já não traz a gravidade (foi high-pass). O teto
     # absoluto de 10,3 m/s² só faz sentido com a gravidade dentro.
     gravity_present_above: float = 8.0
+
+
+def pdr_config_payload(config: StepDetectorConfig | None = None) -> dict:
+    """Contrato de ``GET /api/pdr/config``. Valores saem de ``StepDetectorConfig``."""
+    config = config or StepDetectorConfig()
+    return {
+        "status": "success",
+        "version": "m02-1",
+        "min_samples": config.min_request_samples,
+        "step_length": {
+            "model": "weinberg",
+            "k": config.weinberg_k,
+            "exponent": config.weinberg_exponent,
+            "min_m": config.step_length_min_m,
+            "max_m": config.step_length_max_m,
+            "default_m": config.step_length_default_m,
+        },
+        "step_detection": {
+            "min_step_interval_s": config.min_step_interval_s,
+            "max_step_interval_s": config.max_step_interval_s,
+            "lowpass_cutoff_hz": config.lowpass_cutoff_hz,
+        },
+        "heading": {
+            "unit": "rad",
+            "direction": "ccw",
+            "reference": "relativo; recalibrar a cada checkpoint",
+        },
+        "localization": {
+            "method": "projecao_por_distancia_acumulada",
+            "snap_end_window_m": config.snap_end_window_m,
+            "edge_match_tolerance_rad": config.edge_match_tolerance_rad,
+        },
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +143,9 @@ class StepEvent:
     index: int
     cadence_spm: float
     step_length_m: float
+    # Heading anti-horário relativo à pose no início da gravação. O detector
+    # deixa 0; o pipeline preenche com o yaw do Madgwick menos o yaw inicial.
+    heading_rad: float = 0.0
 
 
 class StepDetector(ABC):
