@@ -74,6 +74,15 @@ test('process-raw devolve path.points', () => {
     assert.equal(path[1].x, 1);
 });
 
+test('process-raw com path array e origem não duplica o (0, 0)', () => {
+    const path = pathFromProcessResponse({
+        path: [{ x: 0, y: 0, t: 1 }, { x: 2, y: 0, t: 2 }]
+    });
+    assert.equal(path.length, 2);
+    assert.equal(path[0].x, 0);
+    assert.equal(path[1].x, 2);
+});
+
 test('aresta manual sem path vira reta pelo heading', () => {
     const path = connectionPath({
         origin: 'manual',
@@ -98,4 +107,16 @@ test('pdr config plano do PR #2 vira step_length', () => {
     assert.equal(cfg.step_length.min_m, 0.4);
     assert.equal(cfg.step_length.default_m, 0.5);
     assert.equal(cfg.step_detection.lowpass_cutoff_hz, 2.2);
+});
+
+test('pdr config agrupado da spec permanece intacto', () => {
+    const raw = {
+        step_length: { k: 0.4, min_m: 0.3, max_m: 0.9, default_m: 0.7 },
+        step_detection: { lowpass_cutoff_hz: 2 },
+        localization: { snap_end_window_m: 1.5 }
+    };
+    const cfg = normalizePdrConfig(raw);
+    assert.equal(cfg, raw);
+    assert.equal(cfg.step_length.default_m, 0.7);
+    assert.equal(cfg.localization.snap_end_window_m, 1.5);
 });

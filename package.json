@@ -1,0 +1,7 @@
+{
+  "name": "pov-prototipo",
+  "private": true,
+  "scripts": {
+    "test": "node --test frontend/tests/*.test.js"
+  }
+}
