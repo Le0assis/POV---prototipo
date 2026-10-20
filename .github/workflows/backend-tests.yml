@@ -1,8 +1,7 @@
 name: backend-tests
 
 # PRs para main e dev, e push nessas branches.
-# numpy 2.4 e scipy 1.17 não publicam wheel para CPython 3.10;
-# o job usa 3.11, que é a versão mínima em que o requirements.txt instala.
+# Python 3.11+ (numpy 2.4 e scipy 1.17 não publicam wheel para 3.10).
 on:
   pull_request:
     branches: [main, dev]

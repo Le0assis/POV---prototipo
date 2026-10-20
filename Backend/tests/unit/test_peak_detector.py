@@ -86,7 +86,10 @@ def test_peak_detector_pause_does_not_discard_the_walk(detector):
     walk = time >= 20.0
     signal[walk] += 1.6 * np.sin(2 * np.pi * 1.8 * (time[walk] - 20.0))
     steps = detector.detect(time, signal, np.full(n, 0.05))
-    assert len(steps) >= 14, f"pausa zerou a caminhada: N_det={len(steps)}"
+    expected = 18  # 1,8 Hz × 10 s
+    assert abs(len(steps) - expected) <= 1, (
+        f"pausa+caminhada: N_det={len(steps)} N_real={expected} (meta ±1)"
+    )
 
 
 def test_peak_detector_events_share_input_time_base(detector):

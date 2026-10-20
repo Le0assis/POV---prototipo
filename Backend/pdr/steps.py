@@ -82,6 +82,11 @@ class StepDetectorConfig:
     lowpass_cutoff_hz: float = 2.2
     lowpass_order: int = 2
     madgwick_gain: float = 0.033
+    # Vão entre timestamps, em segundos, acima do qual a gravação vira outro
+    # segmento (não se interpola por cima). 0,25 s absorve um dt perdido.
+    # Se o Chrome no MIUI engasgar e o devicemotion furar ~0,5 s, suba para
+    # 0,5 — senão um soluço parte a passada e a série de cadência pode cair.
+    # Ex.: StepDetectorConfig(max_gap_s=0.5) ou evaluate_steps.py --max-gap-s 0.5.
     max_gap_s: float = 0.25
     min_samples: int = 15
 

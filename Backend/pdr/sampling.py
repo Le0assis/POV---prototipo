@@ -97,9 +97,11 @@ def prepare_timeline(
 ) -> list[list[ImuSample]]:
     """Ordena, remove timestamps duplicados/não finitos e corta gaps longos.
 
-    Um gap maior que ``max_gap_s`` vira outro segmento. Interpolar por cima
-    inventaria aceleração no meio de uma pausa de captura (Chrome agrupa
-    eventos, e a tela bloqueada pode furar o ``devicemotion``).
+    Um vão maior que ``max_gap_s`` (padrão 0,25 s, vindo de
+    ``StepDetectorConfig``) vira outro segmento. Interpolar por cima
+    inventaria aceleração no meio de uma pausa. Se o Chrome no MIUI
+    engasgar e o ``devicemotion`` furar cerca de 0,5 s, suba ``max_gap_s``
+    para ~0,5 s; o padrão parte essa passada em dois trechos.
     """
     cleaned: list[ImuSample] = []
     for sample in coerce_samples(samples):

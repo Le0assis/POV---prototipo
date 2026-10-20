@@ -123,8 +123,8 @@ def test_pipeline_gyro_spike_does_not_discard_the_walk():
     samples[10]["gyro_x"] = 8.0
     result = detect_steps_from_samples(samples)
     expected = TARGETS["A3_sample_walk_steps"]
-    assert result.steps_count >= expected - 2, (
-        f"pico de giro descartou a caminhada: N_det={result.steps_count}"
+    assert abs(result.steps_count - expected) <= 1, (
+        f"pico de giro: N_det={result.steps_count} N_real={expected} (meta ±1)"
     )
 
 
@@ -143,5 +143,8 @@ def test_pipeline_gap_does_not_invent_steps_across_the_hole():
         moved["timestamp"] = sample["timestamp"] + shift
         second.append(moved)
     result = detect_steps_from_samples(first + second)
-    # 2 Hz * 5 s de cada lado. A emenda não pode virar uma rampa de passos.
-    assert 16 <= result.steps_count <= 22, f"N_det={result.steps_count}"
+    # 2 Hz × 5 s de cada lado = 20. A emenda não pode inventar nem perder passada.
+    expected = 20
+    assert abs(result.steps_count - expected) <= 1, (
+        f"vão de 2 s: N_det={result.steps_count} N_real={expected} (meta ±1)"
+    )

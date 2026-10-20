@@ -73,9 +73,11 @@ POV---prototipo/
 ## 3. Pré-requisitos
 
 * **Git**
-* **Python 3.10+**
+* **Python 3.11+**
 * **XAMPP** (Apache e MySQL)
 * **Cloudflare CLI (`cloudflared`)** *(Opcional: Apenas se for expor para rede externa)*
+
+A detecção corta a gravação onde o intervalo entre timestamps passa de `StepDetectorConfig.max_gap_s` (padrão **0,25 s**) e não interpola esse vão. O valor é da config, não uma constante solta: `StepDetectorConfig(max_gap_s=0.5)` ou `python others/evaluate_steps.py arquivo.csv --max-gap-s 0.5` (a partir de `Backend/`). Se o Chrome no MIUI engasgar e o `devicemotion` furar cerca de **0,5 s**, o padrão de 0,25 s parte uma passada contínua em dois trechos; nesse caso suba o limite para ~0,5 s.
 
 ---
 

@@ -4,12 +4,14 @@ A partir de Backend/:
 
     python others/evaluate_steps.py datasets/sample_walk.csv --steps-real 20
     python others/evaluate_steps.py tests/fixtures/walks/20261020_normal_mao_01.csv
+    python others/evaluate_steps.py arquivo.csv --max-gap-s 0.5
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +19,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from pdr.pipeline import detect_steps_from_samples  # noqa: E402
+from pdr.steps import StepDetectorConfig  # noqa: E402
 from tests.utils.step_metrics import count_error_pct  # noqa: E402
 from tests.utils.walk_loader import frame_to_samples, load_sensor_csv, load_walk, rate_stats  # noqa: E402
 
@@ -25,7 +28,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Conta passos de um CSV com o pipeline do backend.")
     parser.add_argument("csv", type=Path)
     parser.add_argument("--steps-real", type=int, default=None)
+    parser.add_argument(
+        "--max-gap-s",
+        type=float,
+        default=None,
+        help=(
+            "Substitui StepDetectorConfig.max_gap_s (padrão 0,25 s). "
+            "Suba para ~0,5 s se o Chrome/MIUI furar o devicemotion."
+        ),
+    )
     args = parser.parse_args()
+    config = None
+    if args.max_gap_s is not None:
+        config = replace(StepDetectorConfig(), max_gap_s=args.max_gap_s)
+        print(f"max_gap_s={config.max_gap_s:.3f} s")
 
     labels_path = args.csv.with_suffix(".labels.json")
     n_real = args.steps_real
@@ -48,7 +64,7 @@ def main() -> None:
             f"(dt mediano {stats['dt_median_ms']:.2f} ms, p95 {stats['dt_p95_ms']:.2f} ms)"
         )
 
-    result = detect_steps_from_samples(samples)
+    result = detect_steps_from_samples(samples, config=config)
     print(f"passos detectados: {result.steps_count}")
     print(f"taxa usada no pipeline: {result.sample_rate_hz:.2f} Hz")
     print(f"distância: {result.distance_m:.2f} m")
