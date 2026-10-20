@@ -1,0 +1,13 @@
+{
+  "steps_real": 0,
+  "scenario": "parado",
+  "position": "mao",
+  "device": "Poco 6 Pro",
+  "date": "2026-10-20",
+  "sample_rate_hz": 100.661,
+  "dt_median_ms": 9.934,
+  "dt_p95_ms": 9.935,
+  "step_times_s": null,
+  "time_base": null,
+  "notes": "Sensor Logger 1.68 (Android, nativo, não Chrome), ~100 Hz; gravação 'parado'; contagem à mão; convertido com tools/convert_sensor_logger.py"
+}

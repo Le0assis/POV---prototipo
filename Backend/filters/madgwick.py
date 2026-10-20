@@ -76,21 +76,51 @@ class MadgwickAttitudeEstimator(AttitudeEstimator):
         self._orientation = Quaternion.from_array(q_updated).normalized()
         return self._orientation
 
+    def update_imu(
+        self,
+        gx: float, gy: float, gz: float,
+        ax: float, ay: float, az: float,
+        dt: float,
+    ) -> Quaternion:
+        """Fusão só com giroscópio e acelerômetro.
+
+        O ``mag_*`` gravado pelo recorder é alpha/beta/gamma da orientação,
+        não o campo magnético. Passar zeros para o MARG (ou esses ângulos)
+        não estima heading absoluto e pode contaminar a vertical. O modo IMU
+        é o que os sensores realmente disponíveis sustentam.
+        """
+        if dt <= 0:
+            dt = 1e-3
+        madgwick = _AhrsMadgwick(gain=self._gain, Dt=dt)
+        q_updated = madgwick.updateIMU(
+            q=self._orientation.to_array(),
+            gyr=[gx, gy, gz],
+            acc=[ax, ay, az],
+        )
+        self._orientation = Quaternion.from_array(q_updated).normalized()
+        return self._orientation
+
     def update_series(self, samples: list) -> list[Quaternion]:
         """Processa uma série de amostras temporalmente e atualiza a orientação passo a passo."""
         quaternions: list[Quaternion] = []
-        
+        timestamps = np.array([s.timestamp for s in samples], dtype=np.float64)
+        positive_dt = np.diff(timestamps)
+        positive_dt = positive_dt[positive_dt > 0]
+        # Primeira amostra (e timestamps repetidos) reutilizam a mediana real.
+        # 0,02 s só entra se a série inteira não tiver um único dt válido.
+        fallback_dt = float(np.median(positive_dt)) if positive_dt.size else 0.02
+
         for i in range(len(samples)):
             s = samples[i]
-            
+
             # 1. Calcula o delta de tempo (dt) entre a amostra atual e a anterior
             if i == 0:
-                dt = 0.02  # Valor padrão inicial (ex: 50 Hz = 1/50 = 0.02s)
+                dt = fallback_dt
             else:
                 dt = s.timestamp - samples[i - 1].timestamp
                 # Proteção caso haja timestamps iguais ou com erro no CSV
                 if dt <= 0:
-                    dt = 0.02
+                    dt = fallback_dt
 
             q_current = self.update(
                 gx=s.gx, gy=s.gy, gz=s.gz,

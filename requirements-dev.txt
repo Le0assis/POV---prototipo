@@ -1,0 +1,4 @@
+httpx==0.28.1
+mypy==1.15.0
+pandas-stubs==3.0.3.260530
+pytest==8.4.2

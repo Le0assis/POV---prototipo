@@ -262,7 +262,6 @@ def reset_session(start_node: str = Query(default="Recepcao")):
     visited_path = [start_node]
     return {"status": "success", "message": "Estado do PDR e sensores resetados.", "start_node": start_node}
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
 app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
 
