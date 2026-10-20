@@ -7,6 +7,7 @@
  * posição, map-config, POST/DELETE /api/routes e POST /api/reset.
  * 401 pede a senha de novo e tenta outra vez. 503 avisa que a senha não está
  * configurada no servidor. Leitura (viewer, locate) não pede senha.
+ * A entrada na administração confere a senha com GET /api/auth/check.
  */
 
 import { API_BASE_URL } from './config.js';
@@ -126,19 +127,16 @@ export function clearEditorPassword() {
 }
 
 /**
- * Confere a senha sem gravar nada: DELETE de uma rota com id que não existe.
- * 404 significa que a senha passou e nenhuma linha foi removida.
- * 401 limpa a sessão. 503 avisa que EDITOR_PASSWORD não está no servidor.
+ * Confere a senha com GET /api/auth/check e o header X-Editor-Password.
+ * 204: senha válida. 401: ausente ou errada. 503: servidor sem senha.
+ * 401 e 503 limpam a sessão.
  */
-const EDITOR_PASSWORD_PROBE = '/api/routes/2147483647';
-
 export async function verifyEditorPassword(password) {
     const given = password || getEditorPassword();
     if (!given) throw new ApiError('Senha do editor necessária.', 401);
     try {
-        await request(EDITOR_PASSWORD_PROBE, { method: 'DELETE', password: given });
+        await request('/api/auth/check', { method: 'GET', password: given });
     } catch (err) {
-        if (err.status === 404) return true;
         if (err.status === 503) {
             clearEditorPassword();
             throw new ApiError('A senha do editor não está configurada no servidor.', 503);

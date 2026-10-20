@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -193,34 +193,81 @@ test('setas, Home e End movem o radiogroup', () => {
     assert.equal(nextRadioIndex(0, 'Enter'), null);
 });
 
-test('verifyEditorPassword aceita 404, rejeita 401 e envia o header', async () => {
+test('verifyEditorPassword usa GET /api/auth/check: 204 aceita, 401 e 503 rejeitam', async () => {
     memoryStorage();
     const original = globalThis.fetch;
     try {
         setEditorPassword('velha');
         globalThis.fetch = async (url, options) => {
-            assert.match(String(url), /\/api\/routes\/2147483647$/);
-            assert.equal(options.method, 'DELETE');
+            assert.match(String(url), /\/api\/auth\/check$/);
+            assert.equal(options.method, 'GET');
             assert.equal(options.headers['X-Editor-Password'], 'certa');
-            return { ok: false, status: 404, json: async () => ({ detail: 'Rota não encontrada.' }) };
+            assert.equal(options.method === 'DELETE', false);
+            return {
+                ok: true,
+                status: 204,
+                json: async () => {
+                    throw new Error('204 sem corpo');
+                }
+            };
         };
         assert.equal(await verifyEditorPassword('certa'), true);
+        assert.equal(getEditorPassword(), 'velha');
 
-        globalThis.fetch = async () => ({
-            ok: false,
-            status: 401,
-            json: async () => ({ detail: 'Senha do editor ausente ou inválida.' })
-        });
+        globalThis.fetch = async (url, options) => {
+            assert.match(String(url), /\/api\/auth\/check$/);
+            assert.equal(options.method, 'GET');
+            assert.equal(options.headers['X-Editor-Password'], 'errada');
+            return {
+                ok: false,
+                status: 401,
+                json: async () => ({ detail: 'Senha do editor ausente ou inválida.' })
+            };
+        };
         setEditorPassword('errada');
         await assert.rejects(
             () => verifyEditorPassword('errada'),
-            (err) => err.status === 401
+            (err) => err.status === 401 && /incorreta/.test(err.message)
+        );
+        assert.equal(getEditorPassword(), '');
+
+        globalThis.fetch = async () => ({
+            ok: false,
+            status: 503,
+            json: async () => ({ detail: 'EDITOR_PASSWORD não está definida no ambiente do servidor.' })
+        });
+        setEditorPassword('qualquer');
+        await assert.rejects(
+            () => verifyEditorPassword('qualquer'),
+            (err) => err.status === 503 && /não está configurada/.test(err.message)
         );
         assert.equal(getEditorPassword(), '');
     } finally {
         globalThis.fetch = original;
         clearEditorPassword();
     }
+});
+
+test('nenhum código valida a senha com DELETE', () => {
+    const skip = new Set(['node_modules', 'tests']);
+    const files = [];
+    const walk = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            if (skip.has(entry.name)) continue;
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) walk(full);
+            else if (/\.(js|html|css)$/.test(entry.name)) files.push(full);
+        }
+    };
+    walk(frontendRoot);
+    files.forEach((file) => {
+        const text = readFileSync(file, 'utf8');
+        assert.equal(text.includes('2147483647'), false, file);
+        assert.equal(/DELETE\s+\/api\/routes\/2147483647/.test(text), false, file);
+        assert.equal(/\/api\/routes\/2147483647/.test(text), false, file);
+    });
+    const api = readFileSync(path.join(frontendRoot, 'js/core/api.js'), 'utf8');
+    assert.match(api, /request\('\/api\/auth\/check',\s*\{\s*method:\s*'GET'/);
 });
 
 test('páginas de visitante e de admin carregam o seletor', () => {
