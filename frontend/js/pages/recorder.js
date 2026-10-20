@@ -24,6 +24,8 @@ let liveSteps = 0;
 let startedAt = 0;
 let clock = null;
 let motionHandler = null;
+let lastMotionTimestamp = null;
+let warnedNoGravity = false;
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -62,6 +64,8 @@ async function toggle() {
     samples.length = 0;
     spark.length = 0;
     liveSteps = 0;
+    lastMotionTimestamp = null;
+    warnedNoGravity = false;
     $('#sample-count').textContent = '0';
     $('#live-steps').textContent = '0';
     drawSpark();
@@ -94,25 +98,38 @@ async function toggle() {
 
 function capture(event) {
     if (!recording) return;
-    const acc = event.accelerationIncludingGravity || event.acceleration;
-    if (!acc || acc.x === null || acc.x === undefined) return;
+    // Chrome para Android entrega devicemotion com accelerationIncludingGravity
+    // em m/s². acceleration (sem gravidade) zeraria o pipeline, que espera ~9,8.
+    // Não há fallback silencioso: a amostra é ignorada e o aviso aparece uma vez.
+    const acc = event.accelerationIncludingGravity;
+    if (!acc || !axisFinite(acc.x) || !axisFinite(acc.y) || !axisFinite(acc.z)) {
+        if (!warnedNoGravity) {
+            warnedNoGravity = true;
+            toast('Acelerômetro com gravidade indisponível. Amostra ignorada (Chrome para Android).', 'warn');
+        }
+        return;
+    }
 
+    // W3C / Chrome Android: rotationRate em graus/s no mesmo eixo do acelerômetro.
+    // alpha gira em Z, beta em X, gamma em Y. O mapeamento antigo (alpha→x,
+    // beta→y, gamma→z) trocava os eixos e o Madgwick inclinava a vertical.
     const rot = event.rotationRate || {};
-    const gxDeg = numberOrZero(rot.alpha ?? rot.x);
-    const gyDeg = numberOrZero(rot.beta ?? rot.y);
-    const gzDeg = numberOrZero(rot.gamma ?? rot.z);
-    const gyroX = gxDeg * (Math.PI / 180);
-    const gyroY = gyDeg * (Math.PI / 180);
-    const gyroZ = gzDeg * (Math.PI / 180);
+    const gyroX = numberOrZero(rot.beta) * (Math.PI / 180);
+    const gyroY = numberOrZero(rot.gamma) * (Math.PI / 180);
+    const gyroZ = numberOrZero(rot.alpha) * (Math.PI / 180);
     const accelX = numberOrZero(acc.x);
     const accelY = numberOrZero(acc.y);
     const accelZ = numberOrZero(acc.z);
     const mag = Math.hypot(accelX, accelY, accelZ);
     const gyroMag = Math.hypot(gyroX, gyroY, gyroZ);
+    // mag_* continua sendo a orientação (alpha/beta/gamma), não o magnetômetro.
+    // No Chrome para Android o HeadingProvider prefere deviceorientationabsolute.
     const orientation = heading.orientation;
+    const timestamp = motionTimestampSeconds(event);
+    lastMotionTimestamp = timestamp;
 
     samples.push({
-        timestamp: Date.now() / 1000,
+        timestamp,
         accel_x: accelX,
         accel_y: accelY,
         accel_z: accelZ,
@@ -244,4 +261,34 @@ function renderHistory() {
 function numberOrZero(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
+}
+
+function axisFinite(value) {
+    return value !== null && value !== undefined && Number.isFinite(Number(value));
+}
+
+/**
+ * Chrome para Android: event.timeStamp é DOMHighResTimeStamp (ms desde
+ * performance.timeOrigin), com fração de ms. Date.now() no handler marca a
+ * hora de chegada e junta vários devicemotion no mesmo milissegundo.
+ * Epoch em segundos = (timeOrigin + timeStamp) / 1000, a mesma base que o
+ * backend já espera. Se o timestamp não avança (lote no mesmo task), usa
+ * event.interval (ms; no Chrome Android costuma ser ~16, 60 Hz).
+ */
+function motionTimestampSeconds(event) {
+    let timestamp = null;
+    const stamp = event && event.timeStamp;
+    if (typeof stamp === 'number' && Number.isFinite(stamp) && stamp > 0 && typeof performance !== 'undefined') {
+        const origin = Number.isFinite(performance.timeOrigin)
+            ? performance.timeOrigin
+            : Date.now() - performance.now();
+        timestamp = (origin + stamp) / 1000;
+    }
+    if (timestamp === null) timestamp = Date.now() / 1000;
+    if (lastMotionTimestamp !== null && timestamp <= lastMotionTimestamp) {
+        const intervalMs = Number(event && event.interval);
+        const dt = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs / 1000 : 1 / 60;
+        timestamp = lastMotionTimestamp + dt;
+    }
+    return timestamp;
 }
