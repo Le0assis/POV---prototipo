@@ -10,12 +10,12 @@ import { $, fillSelect, formatNum } from '../core/dom.js';
 import { toast } from '../ui/toast.js';
 import { HeadingProvider } from '../sensors/heading.js';
 import { StepDetector } from '../sensors/step-detector.js';
-import { relativeHeadingRad } from '../sensors/angles.js';
 import { metersToPixels, plantHeadingToScreenDeg } from '../map/coords.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels, createBlueDot } from '../map/layers.js';
+import { createPositionTracker } from '../nav/positioning.js';
 import { outgoingEdges } from '../route/model.js';
-import { nearestCheckpoint, projectWalk, readLocalization } from '../route/localize.js';
+import { nearestCheckpoint, readLocalization } from '../route/localize.js';
 import { loadFloorModel } from './floor-model.js';
 
 const heading = new HeadingProvider();
@@ -33,7 +33,8 @@ const state = {
     edge: null,
     calibBearing: 0,
     offStep: null,
-    offHeading: null
+    offHeading: null,
+    tracker: null
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -162,20 +163,16 @@ function restartClient(edge) {
     state.edge = edge;
     state.steps = 0;
     state.walkedM = 0;
-    state.calibBearing = heading.correctedHeadingDeg ?? heading.headingDeg ?? 0;
-    snapToChosenCheckpoint(edge);
+    state.calibBearing = heading.correctedHeadingDeg ?? heading.headingDeg;
+    const start = edge.path[0] || { x: 0, y: 0 };
+    state.tracker = createPositionTracker(edge.path);
+    state.tracker.anchor({
+        x: start.x,
+        y: start.y,
+        bearingDeg: Number.isFinite(state.calibBearing) ? state.calibBearing : null,
+        referenceRad: Number.isFinite(edge.headingRad) ? edge.headingRad : undefined
+    });
     paint();
-}
-
-function snapToChosenCheckpoint(edge) {
-    const node = currentAnchor();
-    const anchor = node && node.anchor;
-    if (!state.dot || !anchor || !state.model.config || !state.model.config.ready) return;
-    const px = metersToPixels({ x: 0, y: 0 }, anchor, state.model.config);
-    if (!px) return;
-    state.dot.setPixel(px.x, px.y);
-    const screen = plantHeadingToScreenDeg(edge.headingRad, state.model.config.rotation_rad);
-    if (screen !== null) state.dot.setHeading(screen);
 }
 
 function acceptStep(lengthM) {
@@ -184,6 +181,10 @@ function acceptStep(lengthM) {
     if (!Number.isFinite(length) || length <= 0) return;
     state.steps += 1;
     state.walkedM += length;
+    if (state.tracker) {
+        const bearing = heading.correctedHeadingDeg ?? heading.headingDeg;
+        state.tracker.applyStep(length, Number.isFinite(bearing) ? bearing : null);
+    }
     paint();
 }
 
@@ -206,13 +207,15 @@ function paint() {
     $('#loc-edge-label').textContent = edge.label;
     const anchorNode = state.model.byName.get(edge.source);
     const anchor = anchorNode && anchorNode.anchor;
-    const projected = projectWalk(edge.path, state.walkedM, edge.distanceM);
-    if (!projected || !anchor || !state.model.config.ready) return;
-    const px = metersToPixels(projected.point, anchor, state.model.config);
+    const bearing = heading.correctedHeadingDeg ?? heading.headingDeg;
+    const pose = state.tracker
+        ? state.tracker.poseAt(Number.isFinite(bearing) ? bearing : null)
+        : null;
+    if (!pose || !anchor || !state.model.config.ready) return;
+    const px = metersToPixels(pose.point, anchor, state.model.config);
     if (!px) return;
     state.dot.setPixel(px.x, px.y);
-    const plant = currentPlantHeading(edge);
-    const screen = plantHeadingToScreenDeg(plant, state.model.config.rotation_rad);
+    const screen = plantHeadingToScreenDeg(pose.headingRad, state.model.config.rotation_rad);
     if (screen !== null) state.dot.setHeading(screen);
 
     const nearest = nearestCheckpoint(px, state.model.checkpoints, state.model.config.px_per_m);
@@ -228,13 +231,6 @@ function paint() {
     const inside = windowM !== null && nearest.errorM <= windowM;
     errorEl.classList.toggle('goal-ok', inside);
     errorEl.classList.toggle('goal-bad', windowM !== null && !inside);
-}
-
-function currentPlantHeading(edge) {
-    const bearing = heading.correctedHeadingDeg ?? heading.headingDeg;
-    if (bearing === null) return edge.headingRad;
-    const relative = relativeHeadingRad(bearing, state.calibBearing, edge.headingRad);
-    return relative === null ? edge.headingRad : relative;
 }
 
 function currentAnchor() {

@@ -35,6 +35,8 @@ export class HeadingProvider {
         this._lastHeadingDeg = null;
         this._ema = null;
         this._started = false;
+        this._paused = false;
+        this._granted = false;
         this._sensorActive = false;
         this._absoluteSeen = false;
         this._orientation = { alpha: 0, beta: 0, gamma: 0 };
@@ -77,7 +79,10 @@ export class HeadingProvider {
      * permissão). Resolve `true` se a permissão foi concedida (ou não é necessária).
      */
     async start() {
-        if (this._started) return true;
+        if (this._started) {
+            if (this._paused) this.resume();
+            return this._granted !== false;
+        }
 
         let granted = true;
         if (typeof DeviceOrientationEvent !== 'undefined'
@@ -89,28 +94,53 @@ export class HeadingProvider {
             }
         }
 
+        this._granted = granted;
         this._started = true;
+        this._paused = false;
         if (typeof window === 'undefined') return granted;
 
-        if (granted) {
-            window.addEventListener('deviceorientationabsolute', this._onAbsolute);
-            window.addEventListener('deviceorientation', this._onOrientation);
-        }
+        if (granted) this._attachOrientation();
         window.addEventListener('keydown', this._onKeyDown);
         return granted;
     }
 
+    /** Tira a escuta de orientação sem perder a calibração nem pedir permissão de novo. */
+    pause() {
+        if (!this._started || this._paused || this._granted === false) return;
+        this._paused = true;
+        this._detachOrientation();
+    }
+
+    resume() {
+        if (!this._started || !this._paused) return;
+        this._paused = false;
+        if (this._granted) this._attachOrientation();
+    }
+
     /** Para a escuta e remove todos os listeners. */
     stop() {
+        this._detachOrientation();
         if (typeof window !== 'undefined') {
-            window.removeEventListener('deviceorientationabsolute', this._onAbsolute);
-            window.removeEventListener('deviceorientation', this._onOrientation);
             window.removeEventListener('keydown', this._onKeyDown);
         }
         this._started = false;
+        this._paused = false;
+        this._granted = false;
         this._sensorActive = false;
         this._absoluteSeen = false;
         this._ema = null;
+    }
+
+    _attachOrientation() {
+        if (typeof window === 'undefined') return;
+        window.addEventListener('deviceorientationabsolute', this._onAbsolute);
+        window.addEventListener('deviceorientation', this._onOrientation);
+    }
+
+    _detachOrientation() {
+        if (typeof window === 'undefined') return;
+        window.removeEventListener('deviceorientationabsolute', this._onAbsolute);
+        window.removeEventListener('deviceorientation', this._onOrientation);
     }
 
     /** Registra um callback `{headingDeg, source, accuracy}`. Devolve a função de cancelamento. */

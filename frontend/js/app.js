@@ -3,9 +3,10 @@
  * Máquina: E0 Inicial, E1 Câmera, E2 Busca, E3 Prévia, E4 Navegando,
  * E5 Chegada, e os erros de câmera, rota, mapa e rede.
  * E2 lista destinos na folha. E3 calcula a rota, desenha e libera "Iniciar rota".
- * E4 ainda é o stub da navegação (o passo a passo guiado entra na T7).
+ * E4 anda na polilinha da rota (passos + heading). E5 confirma a chegada.
  */
 
+import { getPdrConfig } from './core/api.js';
 import { loadDestinationCatalog } from './core/destination-catalog.js';
 import {
     RESOLVE_UNRECOGNIZED,
@@ -16,8 +17,23 @@ import { mountCameraOverlay } from './ui/camera-overlay.js';
 import { createQrButton } from './ui/qr-button.js';
 import { mountRouteBar } from './ui/route-bar.js';
 import { mountSearchSheet } from './ui/search-sheet.js';
+import { metersToPixels, plantHeadingToScreenDeg } from './map/units.js';
 import { mountMapView } from './map/map-view.js';
+import {
+    buildRouteFrame,
+    createPositionTracker,
+    nextManeuver,
+    outgoingHeading,
+    recalibrateRoute,
+    resolveSensorMode,
+    sensorsPresent
+} from './nav/positioning.js';
 import { planRoute } from './nav/routing.js';
+import { createWakeLock } from './nav/wake-lock.js';
+import { HeadingProvider } from './sensors/heading.js';
+import { StepDetector } from './sensors/step-detector.js';
+import { mountArrivalCard } from './ui/arrival-card.js';
+import { mountNavBanner } from './ui/nav-banner.js';
 import { parseQr, parseScanLocation } from './qr/qr-format.js';
 import {
     formatHash,
@@ -112,7 +128,7 @@ function overlayReturn(session) {
 
 /**
  * Transição pura. Não mexe no DOM nem no histórico.
- * E4 e E5 seguem stub. E3 já calcula a rota fora daqui.
+ * E3 já calcula a rota fora daqui. E4/E5 mudam o estado; o passo a passo mora no navegador.
  */
 export function transition(session, event) {
     const current = copySession(session);
@@ -191,6 +207,21 @@ export function transition(session, event) {
     if (type === 'finish') {
         if (current.state !== State.E5) return current;
         return { ...current, state: State.E0 };
+    }
+    if (type === 'new-destination') {
+        if (current.state !== State.E5) return current;
+        const origin = current.destination
+            ? { slug: current.destination.slug, label: current.destination.label || current.destination.slug }
+            : current.origin;
+        return {
+            ...current,
+            origin,
+            destination: null,
+            state: State.E2,
+            returnTo: State.E0,
+            cameraMessage: null,
+            announceOrigin: false
+        };
     }
     if (type === 'cancel-preview') {
         if (current.state !== State.E3) return current;
@@ -293,6 +324,23 @@ let scanToken = 0;
 let renderedState = null;
 let routeResult = null;
 let routeSignature = '';
+let navRoute = null;
+let navTracker = null;
+let navFrame = null;
+let sensorMode = 'fallback';
+let navOffStep = null;
+let navOffHeading = null;
+let navBanner = null;
+let arrivalCard = null;
+let wakeLock = null;
+let headingProvider = null;
+let stepDetector = null;
+let navStarting = false;
+let navEpoch = 0;
+let framedEpoch = 0;
+let arrivalBuzzed = false;
+let injectedBearing = null;
+let navParked = false;
 
 function routeKey() {
     const origin = session && session.origin && session.origin.slug;
@@ -301,7 +349,15 @@ function routeKey() {
     return `${origin}>${destination}`;
 }
 
+function isWalkingSession(current = session) {
+    if (!current) return false;
+    if (current.state === State.E4) return true;
+    return current.returnTo === State.E4
+        && (current.state === State.E1 || current.state === State.ERRO_CAMERA);
+}
+
 function computeRouteForSession() {
+    if (isWalkingSession(session) && navRoute && navRoute.ok) return navRoute;
     const key = routeKey();
     const drawing = Boolean(session) && showsRoute(session.state) && key;
     if (!drawing) {
@@ -372,9 +428,20 @@ function render() {
     const planned = computeRouteForSession();
     const summary = planned && planned.ok && showsRoute(session.state) ? planned.route.summary : null;
     if (instructions) {
-        instructions.setAttribute('aria-live', summary ? 'off' : 'polite');
-        const text = instructionFor(session, summary);
+        const walkingNow = session.state === State.E4;
+        instructions.setAttribute('aria-live', walkingNow || summary ? 'off' : 'polite');
+        const text = walkingNow ? '' : instructionFor(session, summary);
         if (instructions.textContent !== text) instructions.textContent = text;
+    }
+    const routeRoot = document.getElementById('route-bar');
+    if (routeRoot) routeRoot.hidden = isWalkingSession(session);
+    if (session.state === State.E5) {
+        if (!arrivalBuzzed) {
+            arrivalBuzzed = true;
+            vibrateArrival();
+        }
+    } else {
+        arrivalBuzzed = false;
     }
     const shell = document.getElementById('visitor-shell');
     if (shell) shell.dataset.state = session.state;
@@ -403,6 +470,7 @@ function render() {
     renderFlow(planned);
     renderBanner();
     paintRoute(planned);
+    syncNavigation();
     if (session.state === State.ERRO_CAMERA && focusCameraError) {
         focusCameraError = false;
         const code = document.getElementById('camera-error-code');
@@ -412,15 +480,18 @@ function render() {
 
 function paintRoute(planned) {
     if (!mapView) return;
-    const drawing = Boolean(planned && planned.ok && showsRoute(session.state));
+    const walking = isWalkingSession(session);
+    const arrived = Boolean(session && session.state === State.E5 && navRoute && navRoute.ok);
+    const plan = (walking || arrived) && navRoute && navRoute.ok ? navRoute : planned;
+    const drawing = Boolean(plan && plan.ok && (walking || arrived || showsRoute(session.state)));
     const destination = session.destination && session.destination.slug;
     if (typeof mapView.highlight === 'function') mapView.highlight(destination, { pan: !drawing });
     if (drawing) {
         mapView.showOrigin(null);
-        const signature = `${routeKey()}|${session.state}`;
-        const fit = routeSignature !== signature;
+        const signature = `${plan.key || routeKey()}|${session.state}|${walking ? 'walk' : arrived ? 'arrived' : 'preview'}`;
+        const fit = !walking && !arrived && routeSignature !== signature;
         routeSignature = signature;
-        mapView.showRoute(planned.route, { fit });
+        mapView.showRoute(plan.route, { fit, markOrigin: !walking && !arrived });
         return;
     }
     if (typeof mapView.clearRoute === 'function') mapView.clearRoute();
@@ -435,11 +506,25 @@ function renderFlow(planned) {
     if (session.state !== State.ERRO_CAMERA) flow.classList.remove('is-camera-error');
     flow.classList.remove('is-preview');
     flow.replaceChildren();
-    const stub = session.state === State.E4 || session.state === State.E5;
+    const navigating = session.state === State.E4;
+    const arriving = session.state === State.E5;
     const preview = session.state === State.E3;
     const error = ERRORS.has(session.state);
-    flow.hidden = !stub && !preview && !error;
-    if (!stub && !preview && !error) return;
+    flow.classList.toggle('is-navigating', navigating);
+    if (arriving) {
+        flow.hidden = true;
+        flow.replaceChildren();
+        if (arrivalCard) {
+            const name = session.destination && session.destination.label
+                ? session.destination.label
+                : 'o destino';
+            arrivalCard.show(name);
+        }
+        return;
+    }
+    if (arrivalCard) arrivalCard.hide();
+    flow.hidden = !navigating && !preview && !error;
+    if (!navigating && !preview && !error) return;
 
     const title = document.createElement('p');
     title.className = 'flow-title';
@@ -462,15 +547,10 @@ function renderFlow(planned) {
         return;
     }
     if (session.state === State.E4) {
-        // TODO: E4 Navegando — o passo a passo guiado entra na T7.
-        title.textContent = 'Navegando';
-        flow.append(title, flowButton('Cheguei ao destino', 'Cheguei', 'arrive'), flowButton('Encerrar navegação', 'Encerrar', 'stop-navigation'));
-        return;
-    }
-    if (session.state === State.E5) {
-        // TODO: E5 Chegada — encerrar a rota no destino.
-        title.textContent = 'Você chegou';
-        flow.append(title, flowButton('Concluir rota', 'Concluir', 'finish'));
+        const arrived = flowButton('Cheguei', 'Cheguei', 'arrive');
+        arrived.classList.remove('btn-secondary');
+        arrived.classList.add('btn-primary');
+        flow.append(arrived, flowButton('Encerrar', 'Encerrar', 'back'));
         return;
     }
     if (session.state === State.ERRO_CAMERA) {
@@ -662,6 +742,14 @@ function vibrateRead() {
     }
 }
 
+function vibrateArrival() {
+    try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(100);
+    } catch (_) {
+        /* o aparelho pode recusar a vibração */
+    }
+}
+
 function rememberPin(found) {
     if (!found) return;
     const anchor = checkpointAnchor(found);
@@ -749,6 +837,305 @@ async function applyDeepLink(parsed) {
     else showProblem('Este QR não é de um ponto.');
 }
 
+function ensureSensors() {
+    if (!headingProvider) headingProvider = new HeadingProvider();
+    if (!stepDetector) stepDetector = new StepDetector();
+    if (!wakeLock) wakeLock = createWakeLock();
+}
+
+function sensorsForcedOff() {
+    try {
+        return new URLSearchParams(location.search).get('sensors') === 'off';
+    } catch (_) {
+        return false;
+    }
+}
+
+function currentBearing() {
+    if (demoWalkRequested() && Number.isFinite(injectedBearing)) return injectedBearing;
+    if (headingProvider && sensorMode === 'live') {
+        const value = headingProvider.correctedHeadingDeg ?? headingProvider.headingDeg;
+        if (Number.isFinite(value)) return value;
+    }
+    return Number.isFinite(injectedBearing) ? injectedBearing : null;
+}
+
+function mapConfigOf() {
+    const config = mapView && mapView.model && mapView.model.config;
+    if (!config) return null;
+    const rotation = Number(config.rotation_rad);
+    return {
+        px_per_m: config.px_per_m,
+        rotation_rad: Number.isFinite(rotation) ? rotation : 0
+    };
+}
+
+function pixelOf(point) {
+    const config = mapConfigOf();
+    if (!config || !point) return null;
+    return metersToPixels(point, { pos_x_px: 0, pos_y_px: 0 }, config);
+}
+
+function navigationPose() {
+    if (!navTracker || !navFrame) return null;
+    const pose = navTracker.poseAt(currentBearing());
+    if (!pose) return null;
+    return { ...pose, maneuver: nextManeuver(navFrame, pose.alongM) };
+}
+
+function paintNavigation() {
+    const pose = navigationPose();
+    if (!pose) return;
+    if (navBanner && session && isWalkingSession(session)) {
+        navBanner.show();
+        navBanner.setSensors(sensorMode === 'fallback');
+        navBanner.syncRecalc(pose.alongM);
+        if (pose.maneuver.kind !== 'arrival') navBanner.setInstruction(pose.maneuver.text);
+    }
+    if (!mapView || typeof mapView.setWalker !== 'function') return;
+    const pixel = pixelOf(pose.point);
+    if (!pixel) return;
+    const config = mapConfigOf();
+    const screen = plantHeadingToScreenDeg(pose.headingRad, config.rotation_rad);
+    if (framedEpoch !== navEpoch && typeof mapView.frameWalker === 'function') {
+        mapView.frameWalker(pixel, config.px_per_m);
+        framedEpoch = navEpoch;
+    }
+    mapView.setWalker(pixel, screen);
+    if (pose.maneuver.kind === 'arrival' && session && session.state === State.E4) {
+        queueMicrotask(() => {
+            if (session && session.state === State.E4) dispatch({ type: 'arrive' });
+        });
+    }
+}
+
+function bindSensorCallbacks() {
+    unbindSensorCallbacks();
+    if (!stepDetector || !headingProvider) return;
+    navOffStep = stepDetector.onStep((step) => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (!navTracker) return;
+        navTracker.applyStep(step.length, currentBearing());
+        paintNavigation();
+    });
+    navOffHeading = headingProvider.onHeading(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        paintNavigation();
+    });
+}
+
+function unbindSensorCallbacks() {
+    if (navOffStep) navOffStep();
+    if (navOffHeading) navOffHeading();
+    navOffStep = null;
+    navOffHeading = null;
+}
+
+function anchorFrame(frame, bearing, referenceRad, point) {
+    navFrame = frame;
+    if (!navTracker) navTracker = createPositionTracker(frame.points);
+    else navTracker.setPath(frame.points);
+    const origin = point || (frame.stops[0] && frame.stops[0].point) || frame.points[0];
+    navTracker.anchor({
+        x: origin.x,
+        y: origin.y,
+        bearingDeg: Number.isFinite(bearing) ? bearing : null,
+        referenceRad
+    });
+    navEpoch += 1;
+}
+
+function parkAtDestination() {
+    if (navParked) return;
+    navParked = true;
+    unbindSensorCallbacks();
+    if (stepDetector) stepDetector.stop();
+    if (headingProvider) headingProvider.stop();
+    if (wakeLock) wakeLock.release();
+    sensorMode = 'fallback';
+    if (mapView && typeof mapView.holdWalker === 'function') mapView.holdWalker();
+    if (navBanner) navBanner.hide();
+}
+
+function startNavigation() {
+    navParked = false;
+    if (!mapView || !navRoute || !navRoute.ok) return;
+    const frame = buildRouteFrame(navRoute.route, mapView.model.config);
+    if (!frame) return;
+    const reference = frame.segments[0] ? frame.segments[0].headingRad : 0;
+    anchorFrame(frame, currentBearing(), reference);
+    if (typeof mapView.setNavActive === 'function') mapView.setNavActive(true);
+    if (sensorMode === 'live') bindSensorCallbacks();
+    paintNavigation();
+}
+
+function stopNavigation() {
+    navParked = false;
+    unbindSensorCallbacks();
+    if (stepDetector) stepDetector.stop();
+    if (headingProvider) headingProvider.stop();
+    if (wakeLock) wakeLock.release();
+    navTracker = null;
+    navFrame = null;
+    navRoute = null;
+    sensorMode = 'fallback';
+    injectedBearing = null;
+    if (mapView && typeof mapView.setNavActive === 'function') mapView.setNavActive(false);
+    if (mapView && typeof mapView.setWalker === 'function') mapView.setWalker(null);
+    if (navBanner) navBanner.hide();
+}
+
+function syncNavigation() {
+    if (!mapView) return;
+    if (isWalkingSession(session)) {
+        if (!navTracker) startNavigation();
+        else if (session.state === State.E4) paintNavigation();
+        return;
+    }
+    if (session && session.state === State.E5 && (navTracker || navRoute)) {
+        parkAtDestination();
+        return;
+    }
+    if (navTracker || navRoute) stopNavigation();
+}
+
+function onVisibility() {
+    if (!navTracker || sensorMode !== 'live' || !headingProvider || !stepDetector) return;
+    if (typeof document !== 'undefined' && document.hidden) {
+        headingProvider.pause();
+        stepDetector.pause();
+        return;
+    }
+    headingProvider.resume();
+    stepDetector.resume();
+    if (session && session.state === State.E4 && wakeLock) wakeLock.acquire();
+}
+
+function onRecalibrate(event) {
+    const origin = event && event.detail && event.detail.origin;
+    if (!origin || !origin.slug || !navRoute || !navRoute.ok || !mapView || !session) return;
+    const destination = session.destination && session.destination.slug;
+    const decision = recalibrateRoute({
+        route: navRoute.route,
+        checkpointSlug: origin.slug,
+        destinationSlug: destination,
+        plan: ({ origin: from, destination: to }) => planRoute({
+            origin: from,
+            destination: to,
+            checkpoints: mapView.model.checkpoints,
+            connections: mapView.model.connections || [],
+            mapConfig: mapView.model.config
+        })
+    });
+    if (!decision.ok) {
+        queueMicrotask(() => {
+            if (session && isWalkingSession(session)) dispatch({ type: 'route-error' });
+        });
+        return;
+    }
+    const bearing = currentBearing();
+    if (decision.recalculated) {
+        navRoute = { key: `${origin.slug}>${destination}`, ok: true, route: decision.route };
+        routeResult = navRoute;
+        const frame = buildRouteFrame(decision.route, mapView.model.config);
+        if (!frame) return;
+        const reference = frame.segments[0] ? frame.segments[0].headingRad : 0;
+        anchorFrame(frame, bearing, reference);
+        if (navBanner) navBanner.announceRecalculated(0);
+        paintNavigation();
+        return;
+    }
+    const stop = navFrame && navFrame.stops.find((item) => item.slug === origin.slug);
+    if (!stop || !stop.point || !navTracker) return;
+    navTracker.anchor({
+        x: stop.point.x,
+        y: stop.point.y,
+        bearingDeg: Number.isFinite(bearing) ? bearing : null,
+        referenceRad: outgoingHeading(navFrame, origin.slug)
+    });
+    paintNavigation();
+}
+
+function demoWalkRequested() {
+    try {
+        return new URLSearchParams(location.search).get('demo') === 'walk';
+    } catch (_) {
+        return false;
+    }
+}
+
+/** Passos sintéticos para o vídeo de bancada (`?demo=walk`). Não roda no celular. */
+function playDemoWalk() {
+    if (!demoWalkRequested() || playDemoWalk.started) return;
+    playDemoWalk.started = true;
+    let tick = 0;
+    const timer = setInterval(() => {
+        if (!navTracker || !session || session.state !== State.E4) {
+            if (!session || session.state === State.E5 || session.state === State.E0 || session.state === State.E3) {
+                clearInterval(timer);
+            }
+            return;
+        }
+        if (tick === 0) {
+            if (window.__povNav) window.__povNav.injectHeading(0);
+        } else if (tick <= 20) {
+            if (window.__povNav) window.__povNav.injectStep(1);
+        } else if (tick === 21) {
+            if (window.__povNav) window.__povNav.injectHeading(90);
+        } else if (window.__povNav) {
+            window.__povNav.injectStep(1);
+        }
+        tick += 1;
+        if (tick > 48) clearInterval(timer);
+    }, 420);
+}
+
+async function onStartRoute() {
+    if (navStarting || !session || session.state !== State.E3 || !canStartRoute(session)) return;
+    if (!routeResult || !routeResult.ok) return;
+    navStarting = true;
+    ensureSensors();
+    try {
+        let mode = 'fallback';
+        if (!sensorsForcedOff() && sensorsPresent()) {
+            const [motionOk, orientOk] = await Promise.all([
+                stepDetector.start(),
+                headingProvider.start()
+            ]);
+            mode = resolveSensorMode({
+                present: true,
+                motionGranted: motionOk,
+                orientationGranted: orientOk
+            });
+        }
+        if (mode === 'fallback') {
+            stepDetector.stop();
+            headingProvider.stop();
+        } else {
+            try {
+                const pdr = await getPdrConfig();
+                if (pdr) stepDetector.setPdrConfig(pdr);
+            } catch (_) {
+                /* o detector segue com o padrão local */
+            }
+        }
+        if (!session || session.state !== State.E3 || !routeResult || !routeResult.ok) {
+            stepDetector.stop();
+            headingProvider.stop();
+            return;
+        }
+        sensorMode = mode;
+        navRoute = routeResult;
+        dispatch({ type: 'start-route' });
+        if (session && session.state === State.E4 && mode === 'live' && wakeLock) {
+            await wakeLock.acquire();
+        }
+        if (session && session.state === State.E4) playDemoWalk();
+    } finally {
+        navStarting = false;
+    }
+}
+
 export function mountVisitorApp() {
     const shell = document.getElementById('visitor-shell');
     if (!shell || shell.dataset.mounted === 'true') return;
@@ -770,7 +1157,37 @@ export function mountVisitorApp() {
     banner.hidden = true;
     banner.setAttribute('role', 'alert');
     const top = document.querySelector('.visitor-top');
+    const navHost = document.createElement('div');
+    navHost.id = 'nav-banner';
+    navHost.hidden = true;
+    if (top) top.prepend(navHost);
+    navBanner = mountNavBanner(navHost);
     if (top) top.append(banner);
+    arrivalCard = mountArrivalCard(shell, {
+        onNewDestination: () => dispatch({ type: 'new-destination' }),
+        onFinish: () => dispatch({ type: 'finish' })
+    });
+    ensureSensors();
+    window.addEventListener('recalibrate', onRecalibrate);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.__povNav = {
+        injectStep(lengthM) {
+            if (!navTracker) return null;
+            const pose = navTracker.applyStep(Number(lengthM), currentBearing());
+            paintNavigation();
+            return pose;
+        },
+        injectHeading(deg) {
+            const value = Number(deg);
+            if (!Number.isFinite(value)) return;
+            injectedBearing = value;
+            if (sensorMode === 'live' && headingProvider) headingProvider.injectHeading(value);
+            else paintNavigation();
+        },
+        mode() {
+            return sensorMode;
+        }
+    };
 
     const slot = document.getElementById('visitor-chrome');
     if (slot && !slot.querySelector('.qr-button')) {
@@ -780,7 +1197,9 @@ export function mountVisitorApp() {
     routeBar = mountRouteBar(document.getElementById('route-bar'), {
         onOrigin: openCamera,
         onDestination: openSearch,
-        onStart: () => dispatch({ type: 'start-route' })
+        onStart: () => {
+            onStartRoute();
+        }
     });
     searchSheet = mountSearchSheet(document.getElementById('search-sheet-root'), {
         onClose: requestBack,
@@ -807,6 +1226,8 @@ export function mountVisitorApp() {
     if (pendingScan && (session.state === State.E1 || session.state === State.ERRO_CAMERA)) {
         session.state = session.destination && session.destination.slug ? State.E3 : State.E0;
     }
+    if (session.state === State.E5) session.state = State.E0;
+    else if (session.state === State.E4) session.state = State.E3;
     saveSession(toStored(session));
     if (OVERLAYS.has(session.state)) {
         session.returnTo = State.E0;

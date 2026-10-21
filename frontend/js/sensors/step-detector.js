@@ -22,6 +22,7 @@ export class StepDetector {
     constructor() {
         this._callbacks = new Set();
         this._running = false;
+        this._paused = false;
         this._k = WEINBERG_K;
         this._exponent = WEINBERG_EXPONENT;
         this._minM = STEP_MIN_M;
@@ -47,7 +48,10 @@ export class StepDetector {
      * Resolve `true` se a permissão foi concedida (ou não é necessária).
      */
     async start() {
-        if (this._running) return true;
+        if (this._running) {
+            if (this._paused) this.resume();
+            return true;
+        }
 
         let granted = true;
         if (typeof DeviceMotionEvent !== 'undefined'
@@ -61,8 +65,27 @@ export class StepDetector {
         if (!granted || typeof window === 'undefined') return granted;
 
         this._running = true;
+        this._paused = false;
         window.addEventListener('devicemotion', this._onMotion);
         return true;
+    }
+
+    /** Pausa o acelerômetro e limpa a janela, sem esquecer que a permissão já foi dada. */
+    pause() {
+        if (!this._running || this._paused) return;
+        this._paused = true;
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('devicemotion', this._onMotion);
+        }
+        this.reset();
+    }
+
+    resume() {
+        if (!this._running || !this._paused) return;
+        this._paused = false;
+        if (typeof window !== 'undefined') {
+            window.addEventListener('devicemotion', this._onMotion);
+        }
     }
 
     stop() {
@@ -70,6 +93,7 @@ export class StepDetector {
             window.removeEventListener('devicemotion', this._onMotion);
         }
         this._running = false;
+        this._paused = false;
     }
 
     /** Registra um callback `{length, ts, deltaA}`. Devolve a função de cancelamento. */

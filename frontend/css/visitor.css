@@ -697,3 +697,96 @@ body.visitor-app {
     flex: 1 1 auto;
     width: auto;
 }
+
+.nav-banner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: var(--space-12) var(--space-12) var(--space-4);
+}
+
+.nav-banner[hidden],
+.nav-notice[hidden],
+.nav-status[hidden],
+.arrival-card[hidden] {
+    display: none !important;
+}
+
+.nav-instruction {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--text);
+}
+
+.nav-status {
+    margin: 0;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.nav-notice {
+    margin: 0;
+    padding: var(--space-8) var(--space-12);
+    font-weight: 600;
+    color: var(--warning-ink);
+    background: var(--warning-soft);
+    border: 2px solid var(--warning);
+    border-radius: var(--radius);
+}
+
+#route-bar[hidden] {
+    display: none !important;
+}
+
+.visitor-shell[data-state="E4"] .map-recenter {
+    bottom: 96px;
+}
+
+.visitor-shell[data-state="E5"] .map-recenter {
+    bottom: 200px;
+}
+
+.map-recenter.needs-recenter {
+    background: var(--primary);
+    color: var(--on-primary);
+    border-color: var(--primary);
+}
+
+.visitor-flow.is-navigating {
+    align-items: stretch;
+}
+
+.arrival-card {
+    position: absolute;
+    left: var(--space-8);
+    right: var(--space-8);
+    bottom: 72px;
+    z-index: 700;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    padding: var(--space-16);
+    background: var(--surface);
+    border: 2px solid var(--success);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.arrival-title {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1.3;
+}
+
+.arrival-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+}
+
+.arrival-actions .btn {
+    flex: 1 1 calc(50% - 8px);
+    min-height: 48px;
+}
