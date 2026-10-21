@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from fastapi import Depends, FastAPI, HTTPException, status, Query
+from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
 from pydantic import BaseModel
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
@@ -125,6 +125,11 @@ visited_path = [starting_node]
 # --- ROTAS DA API ---
 
 edge_processor = RawEdgeProcessor(map_db_manager, topo_map)
+
+@app.get("/api/auth/check", status_code=status.HTTP_204_NO_CONTENT)
+def check_editor_auth(_editor: None = Depends(require_editor_password)):
+    """Confirma a senha do editor. 204 se confere; 401 ou 503 vêm da dependência."""
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @app.post("/api/edges/process-raw", status_code=status.HTTP_201_CREATED)
 def process_raw_edge(
