@@ -7,6 +7,7 @@
  * posição, map-config, POST/DELETE /api/routes e POST /api/reset.
  * 401 pede a senha de novo e tenta outra vez. 503 avisa que a senha não está
  * configurada no servidor. Leitura (viewer, locate) não pede senha.
+ * A entrada na administração confere a senha com GET /api/auth/check.
  */
 
 import { API_BASE_URL } from './config.js';
@@ -125,6 +126,30 @@ export function clearEditorPassword() {
     }
 }
 
+/**
+ * Confere a senha com GET /api/auth/check e o header X-Editor-Password.
+ * 204: senha válida. 401: ausente ou errada. 503: servidor sem senha.
+ * 401 e 503 limpam a sessão.
+ */
+export async function verifyEditorPassword(password) {
+    const given = password || getEditorPassword();
+    if (!given) throw new ApiError('Senha do editor necessária.', 401);
+    try {
+        await request('/api/auth/check', { method: 'GET', password: given });
+    } catch (err) {
+        if (err.status === 503) {
+            clearEditorPassword();
+            throw new ApiError('A senha do editor não está configurada no servidor.', 503);
+        }
+        if (err.status === 401) {
+            clearEditorPassword();
+            throw new ApiError('Senha incorreta.', 401);
+        }
+        throw err;
+    }
+    return true;
+}
+
 let pendingPrompt = null;
 
 /**
@@ -198,7 +223,8 @@ function promptEditorPassword(message) {
         const hint = document.createElement('p');
         hint.className = 'hint';
         hint.textContent = message
-            || 'Vale para o editor e para o gravador, só nesta aba.';
+            || 'Vale para a administração, só nesta aba.';
+        if (message) hint.setAttribute('role', 'alert');
 
         const label = document.createElement('label');
         label.className = 'form-group';
@@ -227,12 +253,21 @@ function promptEditorPassword(message) {
         overlay.appendChild(content);
 
         let settled = false;
+        let onKey = null;
         const close = (value) => {
             if (settled) return;
             settled = true;
+            if (onKey) document.removeEventListener('keydown', onKey);
             overlay.remove();
             if (previous && typeof previous.focus === 'function') previous.focus();
             resolve(value);
+        };
+
+        onKey = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                close(null);
+            }
         };
 
         content.addEventListener('submit', (event) => {
@@ -246,6 +281,7 @@ function promptEditorPassword(message) {
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) close(null);
         });
+        document.addEventListener('keydown', onKey);
 
         document.body.appendChild(overlay);
         input.focus();

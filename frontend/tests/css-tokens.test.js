@@ -83,11 +83,17 @@ test('toda var(--x) usada no CSS existe em tokens.css', () => {
     assert.deepEqual(missing, []);
 });
 
-test('as quatro páginas ligam tokens, base e components', () => {
-    ['editor.html', 'viewer.html', 'recorder.html', 'locate.html'].forEach((page) => {
+test('as páginas do mapa ligam tokens, base e components', () => {
+    const pages = [
+        ['viewer.html', ''],
+        ['locate.html', ''],
+        ['admin/editor.html', '../'],
+        ['admin/recorder.html', '../']
+    ];
+    pages.forEach(([page, prefix]) => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
         ['css/tokens.css', 'css/base.css', 'css/components.css'].forEach((href) => {
-            assert.equal(html.includes(`href="${href}"`), true, `${page} não liga ${href}`);
+            assert.equal(html.includes(`href="${prefix}${href}"`), true, `${page} não liga ${prefix}${href}`);
         });
     });
 });

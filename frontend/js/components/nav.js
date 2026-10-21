@@ -1,6 +1,7 @@
 /**
- * Navegação superior compartilhada (index, recorder, routes).
- * Links relativos para funcionar no FastAPI e no GitHub Pages.
+ * Navegação superior compartilhada.
+ * Links relativos à raiz do frontend, também a partir de /admin/.
+ * Editor e gravador ficam só no seletor Admin.
  */
 
 import { ping } from '../core/api.js';
@@ -9,12 +10,16 @@ const PING_INTERVAL_MS = 10000;
 
 const LINKS = [
     { key: 'home', aliases: ['index', 'dashboard', 'nav'], href: 'index.html', label: 'Início' },
-    { key: 'viewer', aliases: [], href: 'viewer.html', label: 'Mapa' },
-    { key: 'editor', aliases: [], href: 'editor.html', label: 'Editor' },
-    { key: 'map', aliases: ['recorder'], href: 'recorder.html', label: 'Gravador' },
-    { key: 'locate', aliases: [], href: 'locate.html', label: 'Localizar' },
+    { key: 'viewer', aliases: [], href: 'viewer.html', label: 'Mapa do prédio' },
+    { key: 'locate', aliases: [], href: 'locate.html', label: 'Navegar' },
     { key: 'routes', aliases: [], href: 'routes.html', label: 'Rotas' }
 ];
+
+function rootPrefix() {
+    if (typeof window === 'undefined') return '';
+    const path = window.location.pathname || '';
+    return /\/admin(?:\/|$)/.test(path) ? '../' : '';
+}
 
 function isActive(link, active) {
     return link.key === active || link.aliases.includes(active);
@@ -35,7 +40,7 @@ export function renderTopNav(active) {
 
     LINKS.forEach(link => {
         const a = document.createElement('a');
-        a.href = link.href;
+        a.href = rootPrefix() + link.href;
         a.className = 'nav-btn';
         a.textContent = link.label;
         if (isActive(link, active)) {
@@ -45,19 +50,15 @@ export function renderTopNav(active) {
         nav.appendChild(a);
     });
 
-    const badge = document.createElement('span');
-    badge.className = 'badge-admin';
-    badge.textContent = 'ADMIN';
-
     const dot = document.createElement('span');
     dot.className = 'status-dot';
     dot.setAttribute('role', 'status');
     dot.style.alignSelf = 'center';
-    dot.style.marginLeft = '8px';
+    dot.style.marginLeft = 'auto';
     dot.style.marginRight = '4px';
     setStatus(dot, false);
 
-    nav.append(badge, dot);
+    nav.append(dot);
     return nav;
 }
 

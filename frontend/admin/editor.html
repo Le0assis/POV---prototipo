@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV — Editor</title>
+    <link rel="manifest" href="../manifest.json">
+    <meta name="theme-color" content="#2563EB">
+    <link rel="stylesheet" href="../vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="../css/tokens.css">
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/map.css">
+</head>
+<body>
+    <header class="admin-header" id="admin-header">
+        <a class="admin-menu-link" href="index.html">Menu da administração</a>
+    </header>
+    <main class="map-page">
+        <div class="hidden" id="editor-app">
+            <div class="map-layout">
+                <section>
+                    <div class="map-toolbar">
+                        <div class="title-row">
+                            <h1>Editar mapa e pontos</h1>
+                        </div>
+                        <p class="hint">Arraste um checkpoint para salvar a posição em pixels. Clique no mapa quando estiver posicionando um nó novo.</p>
+                    </div>
+                    <div class="map-stage" id="floor-map" role="application" aria-label="Editor da planta"></div>
+                </section>
+
+                <div class="side-stack">
+                    <form class="card" id="form-checkpoint">
+                        <h2>Novo checkpoint</h2>
+                        <label class="form-group" for="checkpoint-name">
+                            Nome
+                            <input id="checkpoint-name" type="text" maxlength="80" required placeholder="Laboratório">
+                        </label>
+                        <button type="submit" class="btn btn-primary">Cadastrar nó</button>
+                    </form>
+
+                    <form class="card" id="form-edge">
+                        <h2>Nova conexão</h2>
+                        <label class="form-group" for="edge-source">
+                            Origem
+                            <select id="edge-source" required></select>
+                        </label>
+                        <label class="form-group" for="edge-target">
+                            Destino
+                            <select id="edge-target" required></select>
+                        </label>
+                        <label class="form-group" for="edge-distance">
+                            Distância (m)
+                            <input id="edge-distance" type="number" min="0.1" step="0.1" required>
+                        </label>
+                        <label class="form-group" for="edge-heading">
+                            Heading do grafo (graus, anti-horário)
+                            <input id="edge-heading" type="number" step="1" value="0" required>
+                        </label>
+                        <p class="hint">Em radianos: <span class="mono" id="edge-rad">0.000</span></p>
+                        <button type="submit" class="btn btn-primary">Gravar conexão</button>
+                    </form>
+
+                    <form class="card" id="form-reset">
+                        <h2>Sessão no servidor</h2>
+                        <label class="form-group" for="reset-node">
+                            Nó inicial
+                            <select id="reset-node" required></select>
+                        </label>
+                        <p class="hint">Reinicia o PDR do servidor neste checkpoint. Usa a senha do editor. O mapa e a localização não chamam este endpoint.</p>
+                        <button type="submit" class="btn btn-danger">Reiniciar sessão</button>
+                    </form>
+
+                    <section class="card" id="unplaced-card">
+                        <h2>Sem posição</h2>
+                        <p class="hint">Trajetórias desses nós não entram no mapa até haver pixels.</p>
+                        <ul class="warn-list" id="unplaced-list"></ul>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </main>
+    <script src="../vendor/leaflet/leaflet.js"></script>
+    <script type="module" src="../js/boot.js"></script>
+    <script type="module" src="../js/pages/editor.js"></script>
+</body>
+</html>

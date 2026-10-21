@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main", "dev" ]
+    branches: [ "main", "dev", "cursor/**" ]
 
 jobs:
   # JOB 1: Testes e validações do código Python (dev e main)
@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m compileall .
 
-  # JOB 2: Testes Node do frontend, só em pull request para main e dev
+  # JOB 2: Testes Node do frontend em pull request (main, dev e cursor/**)
   frontend-tests:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

@@ -4,6 +4,7 @@
  */
 
 import { insertTopNav } from '../components/nav.js';
+import { whenAdminGranted } from '../core/role-toggle.js';
 import { HeadingProvider } from '../sensors/heading.js';
 import { StepDetector } from '../sensors/step-detector.js';
 import * as api from '../core/api.js';
@@ -31,9 +32,13 @@ let warnedNoGravity = false;
 
 document.addEventListener('DOMContentLoaded', init);
 
-async function init() {
+function init() {
     insertTopNav('map');
-    await api.ensureEditorPassword();
+    whenAdminGranted(start);
+}
+
+async function start() {
+    $('#rec-app').classList.remove('hidden');
     $('#rec-go').addEventListener('click', toggle);
     detector.onStep(() => {
         if (!recording) return;
