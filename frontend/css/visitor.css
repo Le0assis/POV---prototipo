@@ -249,7 +249,8 @@ body.visitor-app {
     display: flex;
     flex-direction: column;
     gap: var(--space-8);
-    height: min(42dvh, 360px);
+    height: 90dvh;
+    max-height: 90dvh;
     overflow: hidden;
 }
 
@@ -258,7 +259,8 @@ body.visitor-app {
 .camera-overlay[hidden],
 .visitor-flow[hidden],
 .route-compact[hidden],
-.route-expanded[hidden] {
+.route-expanded[hidden],
+.category-chips[hidden] {
     display: none !important;
 }
 
@@ -290,9 +292,110 @@ body.visitor-app {
     width: auto;
 }
 
+.destination-query {
+    flex: 0 0 auto;
+}
+
+.category-chips {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--space-8);
+    overflow-x: auto;
+    flex: 0 0 auto;
+    padding-bottom: var(--space-4);
+}
+
+.visitor-sheet .chip {
+    flex: 0 0 auto;
+    cursor: pointer;
+}
+
+.visitor-sheet .chip[aria-pressed="true"] {
+    background: var(--primary);
+    color: var(--on-primary);
+}
+
+.destination-count {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
 .sheet-body {
     flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.sheet-message {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-12);
+    padding: var(--space-8) 0;
+}
+
+.sheet-message p {
+    font-weight: 600;
+}
+
+.destination-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.destination-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-12);
+    width: 100%;
     min-height: 48px;
+    padding: var(--space-8) var(--space-4);
+    text-align: left;
+    font: inherit;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    cursor: pointer;
+}
+
+.destination-option[aria-selected="true"] {
+    background: var(--primary-soft);
+}
+
+.destination-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+
+.destination-name {
+    font-weight: 600;
+}
+
+.destination-category {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-4);
+    color: var(--text-muted);
+}
+
+.destination-category svg {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+}
+
+.destination-distance {
+    margin-left: auto;
+    font-weight: 700;
+    color: var(--primary);
+    white-space: nowrap;
 }
 
 .camera-overlay {
@@ -361,9 +464,15 @@ body.visitor-app {
     box-shadow: var(--shadow);
 }
 
-.flow-title {
+.flow-title,
+.flow-notice {
     flex: 1 1 100%;
     font-weight: 600;
+}
+
+.visitor-map .leaflet-marker-icon.is-destination .cp-dot {
+    background: var(--primary);
+    box-shadow: 0 0 0 8px var(--primary-soft);
 }
 
 .visitor-flow .btn {

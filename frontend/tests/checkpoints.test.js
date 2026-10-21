@@ -67,6 +67,19 @@ test('lista, categorias e o resolve público', () => {
     ]);
     assert.equal(adaptCategories([{ code: 'hall', label: 'Hall', sort_order: 3 }])[0].code, 'hall');
 
+    const named = adaptCategories({
+        categories: [
+            { code: 'alimentacao', name: 'Alimentação', order: 3, icon: 'utensils' }
+        ]
+    });
+    assert.equal(named[0].label, 'Alimentação');
+    assert.equal(named[0].sort_order, 3);
+    assert.equal(named[0].icon, 'utensils');
+    assert.equal(
+        adaptCheckpoint({ name: 'Copa', category: { code: 'alimentacao', name: 'Alimentação', icon: 'utensils' } }).category.icon,
+        'utensils'
+    );
+
     const resolved = adaptResolve({
         status: 'success',
         checkpoint: {

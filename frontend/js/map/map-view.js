@@ -74,13 +74,36 @@ export async function mountMapView(element) {
     }
 
     renderFloorLayers(floor, model, { editable: false });
+    tagCheckpointMarkers(floor, model.checkpoints);
     fit();
     window.requestAnimationFrame(fit);
+
+    function highlight(slug) {
+        const wanted = slug ? String(slug) : '';
+        let target = null;
+        floor.checkpoints.eachLayer((marker) => {
+            const on = Boolean(wanted) && marker.checkpointSlug === wanted;
+            const el = marker.getElement();
+            if (el) el.classList.toggle('is-destination', on);
+            if (typeof marker.setZIndexOffset === 'function') marker.setZIndexOffset(on ? 700 : 0);
+            if (on) target = marker;
+        });
+        if (target) floor.map.panTo(target.getLatLng(), { animate: false });
+    }
 
     return {
         floor,
         model,
         pxPerM,
-        recenter: fit
+        recenter: fit,
+        highlight
     };
+}
+
+function tagCheckpointMarkers(floor, checkpoints) {
+    const placed = (Array.isArray(checkpoints) ? checkpoints : []).filter((cp) => cp && cp.anchor);
+    floor.checkpoints.getLayers().forEach((marker, index) => {
+        const cp = placed[index];
+        marker.checkpointSlug = cp ? String(cp.slug || cp.name || '') : '';
+    });
 }

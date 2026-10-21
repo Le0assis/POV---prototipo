@@ -23,8 +23,12 @@ function categoryOf(value) {
     if (typeof value !== 'object') return null;
     const code = value.code == null ? '' : String(value.code).trim();
     if (!code) return null;
-    const label = value.label == null ? code : String(value.label).trim();
-    return { code, label: label || code };
+    const labelSource = value.label != null ? value.label : value.name;
+    const label = labelSource == null ? code : String(labelSource).trim();
+    const category = { code, label: label || code };
+    const icon = value.icon == null ? '' : String(value.icon).trim();
+    if (icon) category.icon = icon;
+    return category;
 }
 
 function buildingIdOf(value) {
@@ -62,13 +66,18 @@ export function adaptCategories(payload) {
     return rows.map((row) => {
         const code = row && row.code != null ? String(row.code).trim() : '';
         if (!code) return null;
-        const label = row.label == null ? code : String(row.label).trim();
-        const order = Number(row.sort_order);
-        return {
+        const labelSource = row.label != null ? row.label : row.name;
+        const label = labelSource == null ? code : String(labelSource).trim();
+        const orderSource = row.sort_order != null ? row.sort_order : row.order;
+        const order = Number(orderSource);
+        const category = {
             code,
             label: label || code,
             sort_order: Number.isFinite(order) ? order : null
         };
+        const icon = row.icon == null ? '' : String(row.icon).trim();
+        if (icon) category.icon = icon;
+        return category;
     }).filter(Boolean);
 }
 
