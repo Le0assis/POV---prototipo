@@ -1,6 +1,6 @@
 /**
  * Botão flutuante do QR. O ícone é o `qr-code` do Lucide (ISC).
- * Nesta tarefa ele só abre o espaço reservado da câmera.
+ * Abre a câmera para ler o QR do ponto.
  */
 
 const QR_ICON = `

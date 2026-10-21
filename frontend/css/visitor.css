@@ -52,6 +52,11 @@ body.visitor-app {
 .sheet-handle,
 .sheet-close,
 .camera-close,
+.camera-torch,
+.camera-actions .btn,
+.camera-manual .btn,
+.camera-error-form .btn,
+.scan-banner .btn,
 .visitor-bottom .search-field {
     min-height: 48px;
     min-width: 48px;
@@ -402,49 +407,180 @@ body.visitor-app {
     position: fixed;
     inset: 0;
     z-index: 1600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-16);
+    display: block;
+    padding: 0;
+    background: #0e1520;
+    overflow: hidden;
 }
 
-.camera-card {
+.camera-stage {
     position: relative;
-    z-index: 1;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-12);
-    width: min(360px, 100%);
-    padding: var(--space-16);
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-soft);
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    overflow: hidden;
+    color: var(--on-primary);
+    background: #0e1520;
+}
+
+.camera-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: cover;
+    background:
+        radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--primary) 45%, transparent), transparent 46%),
+        repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 28px),
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 28px),
+        #0e1520;
 }
 
 .camera-frame {
-    height: 180px;
-    border: 3px dashed var(--primary);
-    border-radius: var(--radius);
-    background:
-        linear-gradient(var(--primary), var(--primary)) 12px 12px / 28px 3px no-repeat,
-        linear-gradient(var(--primary), var(--primary)) 12px 12px / 3px 28px no-repeat,
-        linear-gradient(var(--primary), var(--primary)) calc(100% - 12px) 12px / 28px 3px no-repeat,
-        linear-gradient(var(--primary), var(--primary)) calc(100% - 12px) 12px / 3px 28px no-repeat,
-        linear-gradient(var(--primary), var(--primary)) 12px calc(100% - 12px) / 28px 3px no-repeat,
-        linear-gradient(var(--primary), var(--primary)) 12px calc(100% - 12px) / 3px 28px no-repeat,
-        linear-gradient(var(--primary), var(--primary)) calc(100% - 12px) calc(100% - 12px) / 28px 3px no-repeat,
-        linear-gradient(var(--primary), var(--primary)) calc(100% - 12px) calc(100% - 12px) / 3px 28px no-repeat,
-        var(--bg);
+    position: absolute;
+    left: 50%;
+    top: 36%;
+    width: min(240px, 68vw);
+    height: min(240px, 68vw);
+    transform: translate(-50%, -50%);
+    border: 4px solid var(--on-primary);
+    border-radius: 24px;
+    box-shadow: 0 0 0 200vmax rgba(8, 12, 20, 0.55);
+    background: transparent;
 }
 
-.camera-placeholder {
-    color: var(--text-muted);
+.camera-hint {
+    position: absolute;
+    left: var(--space-16);
+    right: var(--space-16);
+    top: calc(36% + min(120px, 34vw) + 24px);
+    margin: 0;
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--on-primary);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.camera-dock {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: var(--space-16);
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.82) 36px);
+}
+
+.camera-status {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: var(--space-12);
+    text-align: center;
+    font-weight: 700;
+    color: var(--text);
+    background: var(--surface);
+    border: 2px solid var(--danger);
+    border-radius: var(--radius);
+}
+
+.camera-status[hidden] {
+    display: none !important;
+}
+
+.camera-status p {
+    margin: 0;
+}
+
+.camera-manual {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: var(--space-12);
+    color: var(--text);
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.camera-manual[hidden] {
+    display: none !important;
+}
+
+.camera-manual-label {
+    font-weight: 700;
+}
+
+.camera-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+}
+
+.camera-actions .btn {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 48px;
 }
 
 .camera-close {
+    flex: 1 1 100%;
+}
+
+.scan-banner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    margin: 0 var(--space-12) var(--space-12);
+    padding: var(--space-12);
+    background: var(--danger-soft);
+    border: 2px solid var(--danger);
+    border-radius: var(--radius);
+}
+
+.scan-banner[hidden] {
+    display: none !important;
+}
+
+.scan-banner p {
+    margin: 0;
+    font-weight: 700;
+}
+
+.camera-error-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
     width: 100%;
+}
+
+.camera-error-form label {
+    font-weight: 700;
+}
+
+.visitor-shell[data-state="ERRO_CAMERA"] .visitor-flow {
+    top: 10dvh;
+    bottom: auto;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.visitor-map .leaflet-tooltip.you-label {
+    background: var(--you-marker);
+    color: var(--on-primary);
+    border: 0;
+    border-radius: 999px;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+.visitor-map .leaflet-tooltip.you-label::before {
+    border-right-color: var(--you-marker);
 }
 
 .visitor-flow {

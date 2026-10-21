@@ -68,8 +68,9 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {}) {
         compact.hidden = !compactMode;
         expanded.hidden = compactMode;
 
-        const originLabel = hasOrigin ? current.origin.label : 'Toque para ler o QR';
+        const originLabel = hasOrigin ? `${current.origin.label} (QR)` : 'Toque para ler o QR';
         const destinationLabel = hasDestination ? current.destination.label : 'Toque para buscar';
+        originKicker.textContent = hasOrigin ? 'Origem:' : 'Origem';
         originValue.textContent = originLabel;
         destinationValue.textContent = destinationLabel;
         origin.classList.toggle('is-empty', !hasOrigin);
@@ -77,7 +78,7 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {}) {
         origin.setAttribute(
             'aria-label',
             hasOrigin
-                ? `Origem: ${current.origin.label}. Toque para ler o QR.`
+                ? `Origem: ${current.origin.label} (QR). Toque para ler o QR.`
                 : 'Origem. Toque para ler o QR.'
         );
         destination.setAttribute(

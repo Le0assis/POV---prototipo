@@ -5,7 +5,7 @@
 
 import { adaptCheckpoints } from '../core/checkpoints.js';
 import { createFloorMap, resolvePlanImage } from './floor-map.js';
-import { contentPixels, renderFloorLayers } from './layers.js';
+import { contentPixels, createBlueDot, renderFloorLayers } from './layers.js';
 import { loadFloorModel } from '../pages/floor-model.js';
 
 export async function mountMapView(element) {
@@ -91,12 +91,38 @@ export async function mountMapView(element) {
         if (target) floor.map.panTo(target.getLatLng(), { animate: false });
     }
 
+    let you = null;
+    let youSlug = '';
+    const pins = new Map();
+
+    function showOrigin(slug, anchor) {
+        const wanted = slug ? String(slug) : '';
+        if (!you) you = createBlueDot(floor, { label: 'você' });
+        if (wanted && anchor && Number.isFinite(Number(anchor.pos_x_px)) && Number.isFinite(Number(anchor.pos_y_px))) {
+            pins.set(wanted, { pos_x_px: Number(anchor.pos_x_px), pos_y_px: Number(anchor.pos_y_px) });
+        }
+        const placed = model.checkpoints.find((cp) => cp && (cp.slug === wanted || cp.name === wanted));
+        const point = (placed && placed.anchor) || pins.get(wanted) || null;
+        if (!wanted || !point) {
+            you.hide();
+            youSlug = '';
+            return;
+        }
+        you.setPixel(point.pos_x_px, point.pos_y_px);
+        if (youSlug !== wanted) {
+            const latlng = floor.pixelToLatLng(point.pos_x_px, point.pos_y_px);
+            map.setView(latlng, map.getZoom(), { animate: false });
+            youSlug = wanted;
+        }
+    }
+
     return {
         floor,
         model,
         pxPerM,
         recenter: fit,
-        highlight
+        highlight,
+        showOrigin
     };
 }
 

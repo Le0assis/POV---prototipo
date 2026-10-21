@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { State, canStartRoute, historyEffect, transition } from '../js/app.js';
+import {
+    State,
+    canStartRoute,
+    emitRecalibrate,
+    historyEffect,
+    shouldRecalibrate,
+    transition
+} from '../js/app.js';
 
 function session(partial = {}) {
     return {
@@ -138,6 +145,68 @@ test('escolher um destino na busca vai para a prévia e fecha a folha', () => {
 
     const walking = session({ origin, destination, state: State.E4 });
     assert.equal(transition(walking, { type: 'select-destination', destination: 'copa' }).state, State.E4);
+});
+
+test('ler o QR na câmera fecha em E0 sem destino e em E3 com destino', () => {
+    const camera = transition(session(), { type: 'open-camera' });
+    const located = transition(camera, {
+        type: 'qr-resolved',
+        origin: { slug: 'recepcao', label: 'Recepção' }
+    });
+    assert.equal(located.state, State.E0);
+    assert.deepEqual(located.origin, { slug: 'recepcao', label: 'Recepção' });
+    assert.equal(located.returnTo, null);
+    assert.equal(located.announceOrigin, true);
+    assert.equal(historyEffect(camera, located), 'back');
+    assert.equal(shouldRecalibrate(camera, { type: 'qr-resolved', origin: located.origin }), false);
+
+    const preview = transition(session({ destination, state: State.E1, returnTo: State.E0 }), {
+        type: 'qr-resolved',
+        origin
+    });
+    assert.equal(preview.state, State.E3);
+    assert.equal(preview.destination.slug, 'sala');
+    assert.equal(preview.origin.slug, 'recepcao');
+    assert.equal(canStartRoute(preview), true);
+    assert.equal(historyEffect(session({ state: State.E1 }), preview), 'back');
+});
+
+test('QR durante a navegação recalibra e não cancela a rota', () => {
+    const walking = session({ origin, destination, state: State.E4 });
+    const camera = transition(walking, { type: 'open-camera' });
+    assert.equal(camera.state, State.E1);
+    assert.equal(camera.returnTo, State.E4);
+    const event = { type: 'qr-resolved', origin: { slug: 'hall', label: 'Hall' } };
+    assert.equal(shouldRecalibrate(camera, event), true);
+    assert.equal(shouldRecalibrate(walking, event), true);
+    const next = transition(camera, event);
+    assert.equal(next.state, State.E4);
+    assert.deepEqual(next.origin, { slug: 'hall', label: 'Hall' });
+    assert.equal(next.destination.slug, 'sala');
+    assert.equal(historyEffect(camera, next), 'back');
+
+    const target = new EventTarget();
+    let detail = null;
+    target.addEventListener('recalibrate', (heard) => {
+        detail = heard.detail;
+    });
+    const emitted = emitRecalibrate(next.origin, target);
+    assert.equal(emitted.type, 'recalibrate');
+    assert.equal(detail.origin.slug, 'hall');
+});
+
+test('câmera negada durante a navegação volta para E4', () => {
+    const failed = transition(session({ origin, destination, state: State.E1, returnTo: State.E4 }), {
+        type: 'camera-error',
+        message: 'A permissão da câmera foi negada. Libere o acesso nas configurações do navegador ou digite o código do ponto.'
+    });
+    assert.equal(failed.state, State.ERRO_CAMERA);
+    assert.equal(failed.returnTo, State.E4);
+    assert.match(failed.cameraMessage, /negada/);
+    assert.equal(transition(failed, { type: 'retry' }).state, State.E1);
+    assert.equal(transition(failed, { type: 'retry' }).returnTo, State.E4);
+    assert.equal(transition(failed, { type: 'dismiss-error' }).state, State.E4);
+    assert.equal(transition(failed, { type: 'qr-resolved', origin: { slug: 'hall', label: 'Hall' } }).state, State.E4);
 });
 
 test('origem e destino entram por slug ou por objeto', () => {

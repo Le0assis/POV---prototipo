@@ -6,11 +6,17 @@
  */
 
 import { loadDestinationCatalog } from './core/destination-catalog.js';
+import {
+    RESOLVE_UNRECOGNIZED,
+    resolveScannedCheckpoint
+} from './core/checkpoints.js';
+import { checkpointAnchor } from './route/model.js';
 import { mountCameraOverlay } from './ui/camera-overlay.js';
 import { createQrButton } from './ui/qr-button.js';
 import { mountRouteBar } from './ui/route-bar.js';
 import { mountSearchSheet } from './ui/search-sheet.js';
 import { mountMapView } from './map/map-view.js';
+import { parseQr, parseScanLocation } from './qr/qr-format.js';
 import {
     formatHash,
     hydrateSession,
@@ -44,7 +50,7 @@ const ERROR_TEXT = {
 
 const INSTRUCTION = {
     [State.E0]: 'Leia um QR para saber onde você está.',
-    [State.E1]: 'Câmera aberta. A leitura do QR ainda é um espaço reservado.',
+    [State.E1]: 'Aponte para o QR code do ponto.',
     [State.E2]: 'Busca de destino aberta.',
     [State.E3]: 'Prévia da rota.',
     previewNotice: 'Leia um QR para saber onde você está',
@@ -80,8 +86,15 @@ function copySession(session) {
             ? { slug: source.destination.slug, label: source.destination.label || source.destination.slug }
             : null,
         state: source.state || State.E0,
-        returnTo: source.returnTo || null
+        returnTo: source.returnTo || null,
+        cameraMessage: source.cameraMessage || null,
+        announceOrigin: false
     };
+}
+
+function navigating(session) {
+    if (!session) return false;
+    return session.state === State.E4 || session.returnTo === State.E4;
 }
 
 function overlayReturn(session) {
@@ -118,12 +131,38 @@ export function transition(session, event) {
         if (current.state === State.E2) return current;
         return { ...current, state: State.E2, returnTo: overlayReturn(current) };
     }
+    if (type === 'qr-resolved') {
+        const origin = eventPoint(event.origin);
+        if (!origin) return current;
+        if (navigating(current)) {
+            return {
+                ...current,
+                origin,
+                state: State.E4,
+                returnTo: null,
+                cameraMessage: null,
+                announceOrigin: true
+            };
+        }
+        const hasDestination = Boolean(current.destination && current.destination.slug);
+        return {
+            ...current,
+            origin,
+            state: hasDestination ? State.E3 : State.E0,
+            returnTo: null,
+            cameraMessage: null,
+            announceOrigin: true
+        };
+    }
     if (type === 'back' || type === 'close-overlay') {
         if (OVERLAYS.has(current.state)) {
             return { ...current, state: current.returnTo || State.E0, returnTo: null };
         }
+        if (current.state === State.ERRO_CAMERA && current.returnTo === State.E4) {
+            return { ...current, state: State.E4, returnTo: null, cameraMessage: null };
+        }
         if (current.state === State.E3 || current.state === State.E5 || ERRORS.has(current.state)) {
-            return { ...current, state: State.E0, returnTo: null };
+            return { ...current, state: State.E0, returnTo: null, cameraMessage: null };
         }
         if (current.state === State.E4) return { ...current, state: State.E3, returnTo: null };
         return current;
@@ -153,17 +192,32 @@ export function transition(session, event) {
         if (current.state !== State.E4) return current;
         return { ...current, state: State.E0, returnTo: null };
     }
-    if (type === 'camera-error') return { ...current, state: State.ERRO_CAMERA, returnTo: null };
+    if (type === 'camera-error') {
+        return {
+            ...current,
+            state: State.ERRO_CAMERA,
+            returnTo: navigating(current) ? State.E4 : null,
+            cameraMessage: event.message || ERROR_TEXT[State.ERRO_CAMERA]
+        };
+    }
     if (type === 'route-error') return { ...current, state: State.ERRO_ROTA, returnTo: null };
     if (type === 'map-error') return { ...current, state: State.ERRO_MAPA, returnTo: null };
     if (type === 'network-error') return { ...current, state: State.ERRO_REDE, returnTo: null };
     if (type === 'dismiss-error') {
         if (!ERRORS.has(current.state)) return current;
-        return { ...current, state: State.E0, returnTo: null };
+        if (current.state === State.ERRO_CAMERA && current.returnTo === State.E4) {
+            return { ...current, state: State.E4, returnTo: null, cameraMessage: null };
+        }
+        return { ...current, state: State.E0, returnTo: null, cameraMessage: null };
     }
     if (type === 'retry') {
         if (current.state === State.ERRO_CAMERA) {
-            return { ...current, state: State.E1, returnTo: State.E0 };
+            return {
+                ...current,
+                state: State.E1,
+                returnTo: current.returnTo === State.E4 ? State.E4 : State.E0,
+                cameraMessage: null
+            };
         }
         if (current.state === State.ERRO_ROTA) {
             return canStartRoute(current)
@@ -176,6 +230,22 @@ export function transition(session, event) {
         return current;
     }
     return current;
+}
+
+/** QR lido em E4 (ou com a câmera aberta por cima da navegação) recalibra sem cancelar a rota. */
+export function shouldRecalibrate(session, event) {
+    if (!event || event.type !== 'qr-resolved') return false;
+    if (!eventPoint(event.origin)) return false;
+    return navigating(session || {});
+}
+
+/** Evento `recalibrate` para a T7. `target` é `window` na página. */
+export function emitRecalibrate(origin, target = globalThis) {
+    const EventCtor = (target && target.CustomEvent) || globalThis.CustomEvent;
+    if (!target || typeof target.dispatchEvent !== 'function' || typeof EventCtor !== 'function') return null;
+    const event = new EventCtor('recalibrate', { detail: { origin } });
+    target.dispatchEvent(event);
+    return event;
 }
 
 /** `push` ao abrir folha/câmera, `back` ao fechar, `none` no resto. */
@@ -203,10 +273,27 @@ let instructions = null;
 let flow = null;
 let searchField = null;
 let mapView = null;
+let mapReady = Promise.resolve(null);
 let background = [];
 let suppressPop = false;
+let restoreSearchFocus = false;
+let banner = null;
+let pendingPin = null;
+let scanRetry = null;
+let focusCameraError = false;
+let scanToken = 0;
+let renderedState = null;
 
 function instructionFor(current) {
+    if (current.announceOrigin && current.origin && current.origin.label) {
+        const where = `Você está em ${current.origin.label}`;
+        if (current.state === State.E0 || current.state === State.E4) return where;
+        const rest = INSTRUCTION[current.state];
+        return rest ? `${where}. ${rest}` : where;
+    }
+    if (current.state === State.ERRO_CAMERA) {
+        return current.cameraMessage || ERROR_TEXT[State.ERRO_CAMERA];
+    }
     if (current.state === State.E3 && !(current.origin && current.origin.slug)) {
         return `${INSTRUCTION[State.E3]} ${INSTRUCTION.previewNotice}`;
     }
@@ -226,6 +313,10 @@ function setInert(locked) {
 
 function render() {
     if (!routeBar) return;
+    if (session.state === State.ERRO_CAMERA && renderedState !== State.ERRO_CAMERA) {
+        focusCameraError = true;
+    }
+    renderedState = session.state;
     const shell = document.getElementById('visitor-shell');
     if (shell) shell.dataset.state = session.state;
     routeBar.update(session);
@@ -240,8 +331,26 @@ function render() {
     setInert(overlay);
     if (searchSheet) searchSheet.setOpen(session.state === State.E2);
     if (camera) camera.setOpen(session.state === State.E1);
-    if (mapView) mapView.highlight(session.destination && session.destination.slug);
+    if (mapView) {
+        mapView.highlight(session.destination && session.destination.slug);
+        const slug = session.origin && session.origin.slug;
+        const pin = pendingPin && pendingPin.slug === slug ? pendingPin.anchor : null;
+        mapView.showOrigin(slug, pin);
+    }
+    const mapHost = document.getElementById('visitor-map');
+    if (mapHost) {
+        const where = session.origin && session.origin.label
+            ? `Mapa do prédio. Você está em ${session.origin.label}`
+            : 'Mapa do prédio';
+        mapHost.setAttribute('aria-label', where);
+    }
     renderFlow();
+    renderBanner();
+    if (session.state === State.ERRO_CAMERA && focusCameraError) {
+        focusCameraError = false;
+        const code = document.getElementById('camera-error-code');
+        if (code && typeof code.focus === 'function') code.focus();
+    }
     if (instructions) {
         const text = instructionFor(session);
         if (instructions.textContent !== text) instructions.textContent = text;
@@ -250,6 +359,8 @@ function render() {
 
 function renderFlow() {
     if (!flow) return;
+    const keptCode = (flow.querySelector('#camera-error-code') || {}).value || '';
+    if (session.state !== State.ERRO_CAMERA) flow.classList.remove('is-camera-error');
     flow.replaceChildren();
     const stub = session.state === State.E3 || session.state === State.E4 || session.state === State.E5;
     const error = ERRORS.has(session.state);
@@ -288,8 +399,68 @@ function renderFlow() {
         flow.append(title, flowButton('Concluir rota', 'Concluir', 'finish'));
         return;
     }
+    if (session.state === State.ERRO_CAMERA) {
+        title.textContent = session.cameraMessage || ERROR_TEXT[State.ERRO_CAMERA];
+        flow.append(title, cameraErrorForm(keptCode), flowButton('Voltar ao mapa', 'Voltar', 'dismiss-error'), flowButton('Tentar de novo', 'Tentar de novo', 'retry'));
+        flow.classList.add('is-camera-error');
+        return;
+    }
+    flow.classList.remove('is-camera-error');
     title.textContent = ERROR_TEXT[session.state] || 'Algo deu errado.';
     flow.append(title, flowButton('Voltar ao mapa', 'Voltar', 'dismiss-error'), flowButton('Tentar de novo', 'Tentar de novo', 'retry'));
+}
+
+function cameraErrorForm(kept) {
+    const form = document.createElement('form');
+    form.className = 'camera-error-form';
+    const label = document.createElement('label');
+    label.setAttribute('for', 'camera-error-code');
+    label.textContent = 'Código do ponto';
+    const input = document.createElement('input');
+    input.id = 'camera-error-code';
+    input.className = 'text-field';
+    input.type = 'text';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    input.placeholder = 'Código do ponto';
+    input.setAttribute('aria-label', 'Código do ponto');
+    input.value = kept;
+    const submit = document.createElement('button');
+    submit.type = 'submit';
+    submit.className = 'btn btn-primary';
+    submit.textContent = 'Usar este código';
+    submit.setAttribute('aria-label', 'Usar este código');
+    form.append(label, input, submit);
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        submitManual(input.value);
+    });
+    return form;
+}
+
+function renderBanner() {
+    if (!banner) return;
+    if (session.state === State.E1 || !scanRetry) {
+        banner.hidden = true;
+        banner.replaceChildren();
+        return;
+    }
+    banner.hidden = false;
+    banner.replaceChildren();
+    const text = document.createElement('p');
+    text.textContent = scanRetry.message;
+    banner.append(text);
+    if (scanRetry.retry) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary';
+        button.textContent = 'Tentar de novo';
+        button.setAttribute('aria-label', 'Tentar de novo');
+        const run = scanRetry.retry;
+        button.addEventListener('click', () => run());
+        banner.append(button);
+    }
 }
 
 function flowButton(label, text, type) {
@@ -302,14 +473,19 @@ function flowButton(label, text, type) {
     return button;
 }
 
-function commit(next, source) {
+function commit(next, source, event) {
+    const previous = session;
+    const recalibrate = shouldRecalibrate(previous, event);
     const effect = historyEffect(session, next);
+    const closingSearch = session && session.state === State.E2 && next.state !== State.E2;
     session = next;
     saveSession(toStored(session));
+    if (recalibrate) emitRecalibrate(session.origin);
     if (source !== 'pop') {
         if (effect === 'push') {
             history.pushState({ povOverlay: session.state }, '', pageUrl(session));
         } else if (effect === 'back' && history.state && history.state.povOverlay) {
+            restoreSearchFocus = closingSearch;
             suppressPop = true;
             render();
             history.back();
@@ -322,7 +498,7 @@ function commit(next, source) {
 }
 
 export function dispatch(event) {
-    commit(transition(session, event), 'ui');
+    commit(transition(session, event), 'ui', event);
 }
 
 function requestBack() {
@@ -338,7 +514,8 @@ function onPopState() {
         suppressPop = false;
         if (!sameUrl(session)) history.replaceState(history.state, '', pageUrl(session));
         render();
-        if (searchField && typeof searchField.focus === 'function') searchField.focus();
+        if (restoreSearchFocus && searchField && typeof searchField.focus === 'function') searchField.focus();
+        restoreSearchFocus = false;
         return;
     }
     let next = pointsFromHash(session, location.hash);
@@ -361,6 +538,101 @@ function openSearch() {
     dispatch({ type: 'open-search' });
 }
 
+function vibrateRead() {
+    try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(80);
+    } catch (_) {
+        /* o aparelho pode recusar a vibração */
+    }
+}
+
+function rememberPin(found) {
+    if (!found) return;
+    const anchor = checkpointAnchor(found);
+    pendingPin = anchor ? { slug: found.slug, anchor } : { slug: found.slug, anchor: null };
+    if (mapView) mapView.showOrigin(found.slug, anchor);
+}
+
+async function checkpointList() {
+    try {
+        await mapReady;
+    } catch (_) {
+        /* o mapa segue sem a lista */
+    }
+    const loaded = mapView && mapView.model && Array.isArray(mapView.model.checkpoints)
+        ? mapView.model.checkpoints
+        : null;
+    if (loaded && loaded.length) return loaded;
+    try {
+        const catalog = await loadDestinationCatalog();
+        return (catalog && catalog.checkpoints) || loaded || [];
+    } catch (_) {
+        return loaded || [];
+    }
+}
+
+function showProblem(message, retry) {
+    scanRetry = { message, retry: retry || null };
+    if (session && session.state === State.E1 && camera) {
+        camera.setStatus(message, retry ? { retry } : {});
+        return;
+    }
+    renderBanner();
+}
+
+async function settleScan(parsed) {
+    const token = ++scanToken;
+    if (!parsed || parsed.error || !parsed.cp) {
+        return parsed && parsed.error === 'unsupported-version' ? 'unsupported' : 'invalid';
+    }
+    try {
+        const found = await resolveScannedCheckpoint({
+            b: parsed.b,
+            cp: parsed.cp,
+            checkpoints: mapView && mapView.model ? mapView.model.checkpoints : null,
+            loadCheckpoints: checkpointList
+        });
+        if (token !== scanToken) return 'stale';
+        rememberPin(found);
+        scanRetry = null;
+        dispatch({
+            type: 'qr-resolved',
+            origin: { slug: found.slug, label: found.name || found.slug }
+        });
+        return 'ok';
+    } catch (err) {
+        if (token !== scanToken) return 'stale';
+        if (err && err.code === 'not-found') return 'not-found';
+        return 'network';
+    }
+}
+
+async function onCameraSubmit(text, source) {
+    const parsed = parseQr(text);
+    if (source === 'camera' && parsed && !parsed.error) vibrateRead();
+    const result = await settleScan(parsed);
+    if (result === 'ok' || result === 'stale') return result;
+    if (session.state === State.E1) return result;
+    if (result === 'not-found') showProblem(RESOLVE_UNRECOGNIZED);
+    else if (result === 'network') showProblem('Tentar de novo', () => onCameraSubmit(text, source));
+    else if (result === 'unsupported') showProblem('Versão do QR não suportada.');
+    else showProblem('Este QR não é de um ponto.');
+    return result;
+}
+
+function submitManual(text) {
+    return onCameraSubmit(text, 'manual');
+}
+
+async function applyDeepLink(parsed) {
+    const result = await settleScan(parsed);
+    if (result === 'ok' || result === 'stale') return;
+    if (result === 'not-found') showProblem(RESOLVE_UNRECOGNIZED);
+    else if (result === 'network') showProblem('Tentar de novo', () => applyDeepLink(parsed));
+    else if (result === 'unsupported') showProblem('Versão do QR não suportada.');
+    else showProblem('Este QR não é de um ponto.');
+}
+
 export function mountVisitorApp() {
     const shell = document.getElementById('visitor-shell');
     if (!shell || shell.dataset.mounted === 'true') return;
@@ -376,6 +648,14 @@ export function mountVisitorApp() {
     ];
 
     placeRoleChrome();
+    banner = document.createElement('div');
+    banner.id = 'scan-banner';
+    banner.className = 'scan-banner';
+    banner.hidden = true;
+    banner.setAttribute('role', 'alert');
+    const top = document.querySelector('.visitor-top');
+    if (top) top.append(banner);
+
     const slot = document.getElementById('visitor-chrome');
     if (slot && !slot.querySelector('.qr-button')) {
         slot.append(createQrButton({ onClick: openCamera }));
@@ -396,19 +676,27 @@ export function mountVisitorApp() {
         originSlug: () => (session && session.origin && session.origin.slug) || ''
     });
     camera = mountCameraOverlay(document.getElementById('camera-root'), {
-        onClose: requestBack
+        onClose: requestBack,
+        onSubmit: (text, source) => onCameraSubmit(text, source),
+        onCameraFailure: ({ message }) => dispatch({ type: 'camera-error', message })
     });
 
+    const pendingScan = parseScanLocation(location.hash);
     session = {
         ...hydrateSession(location.hash),
-        returnTo: null
+        returnTo: null,
+        cameraMessage: null,
+        announceOrigin: false
     };
+    if (pendingScan && (session.state === State.E1 || session.state === State.ERRO_CAMERA)) {
+        session.state = session.destination && session.destination.slug ? State.E3 : State.E0;
+    }
     saveSession(toStored(session));
     if (OVERLAYS.has(session.state)) {
         session.returnTo = State.E0;
         history.replaceState({}, '', pageUrl(session));
         history.pushState({ povOverlay: session.state }, '', pageUrl(session));
-    } else if (!sameUrl(session)) {
+    } else if (!pendingScan && !sameUrl(session)) {
         history.replaceState(history.state, '', pageUrl(session));
     }
 
@@ -423,14 +711,24 @@ export function mountVisitorApp() {
     }
 
     window.addEventListener('popstate', onPopState);
+    window.addEventListener('hashchange', () => {
+        const scan = parseScanLocation(location.hash);
+        if (scan) applyDeepLink(scan);
+    });
     render();
+    if (pendingScan) applyDeepLink(pendingScan);
 
     const mapHost = document.getElementById('visitor-map');
     if (mapHost) {
-        mountMapView(mapHost).then((view) => {
+        mapReady = mountMapView(mapHost).then((view) => {
             mapView = view;
             if (session && session.destination) view.highlight(session.destination.slug);
-        }).catch(() => {});
+            if (session && session.origin) {
+                const pin = pendingPin && pendingPin.slug === session.origin.slug ? pendingPin.anchor : null;
+                view.showOrigin(session.origin.slug, pin);
+            }
+            return view;
+        }).catch(() => null);
     }
 }
 

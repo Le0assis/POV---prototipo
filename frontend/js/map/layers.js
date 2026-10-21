@@ -52,9 +52,9 @@ export function renderFloorLayers(floor, model, { editable = false, onMove } = {
     });
 }
 
-export function createBlueDot(floor) {
+export function createBlueDot(floor, { label = '' } = {}) {
     const icon = L.divIcon({
-        className: 'blue-dot-icon',
+        className: label ? 'blue-dot-icon you-marker' : 'blue-dot-icon',
         html: '<div class="blue-dot"><span class="blue-dot-arrow"></span><span class="blue-dot-core"></span></div>',
         iconSize: [28, 28],
         iconAnchor: [14, 14]
@@ -63,8 +63,17 @@ export function createBlueDot(floor) {
         icon,
         interactive: false,
         keyboard: false,
-        zIndexOffset: 800
+        zIndexOffset: 800,
+        title: label || undefined
     });
+    if (label) {
+        marker.bindTooltip(label, {
+            permanent: true,
+            direction: 'right',
+            className: 'you-label',
+            offset: [16, 0]
+        });
+    }
     let visible = false;
 
     function setPixel(x, y) {
