@@ -5,7 +5,7 @@
 
 import { NO_SENSORS_NOTICE } from '../nav/positioning.js';
 
-export function mountNavBanner(root) {
+export function mountNavBanner(root, { onInstruction } = {}) {
     const instruction = document.createElement('p');
     instruction.className = 'nav-instruction';
     instruction.setAttribute('aria-live', 'polite');
@@ -37,11 +37,17 @@ export function mountNavBanner(root) {
         status.textContent = '';
         notice.hidden = true;
         notice.textContent = '';
+        if (instruction.textContent) {
+            instruction.textContent = '';
+            if (typeof onInstruction === 'function') onInstruction('');
+        }
     }
 
     function setInstruction(text) {
         const next = text || '';
-        if (instruction.textContent !== next) instruction.textContent = next;
+        if (instruction.textContent === next) return;
+        instruction.textContent = next;
+        if (typeof onInstruction === 'function') onInstruction(next);
     }
 
     function setSensors(fallback) {
