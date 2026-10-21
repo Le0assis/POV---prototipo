@@ -296,6 +296,14 @@ export function getCategories() {
     return request('/api/categories');
 }
 
+/** Leitura pública. 404 quando o slug não existe naquele prédio. */
+export function resolveCheckpoint({ b, cp } = {}) {
+    const query = {};
+    if (b != null && b !== '') query.b = b;
+    if (cp != null && cp !== '') query.cp = cp;
+    return request('/api/checkpoints/resolve', { query });
+}
+
 export function getRoutes() {
     return request('/api/routes');
 }
