@@ -2,9 +2,10 @@
  * Tela única do visitante.
  * Máquina: E0 Inicial, E1 Câmera, E2 Busca, E3 Prévia, E4 Navegando,
  * E5 Chegada, e os erros de câmera, rota, mapa e rede.
- * Nesta tarefa a interface visível é E0, E1 (espaço reservado) e E2 (folha vazia).
+ * E2 lista destinos na folha. E3 ainda é o stub da prévia (a polilinha entra na T6).
  */
 
+import { loadDestinationCatalog } from './core/destination-catalog.js';
 import { mountCameraOverlay } from './ui/camera-overlay.js';
 import { createQrButton } from './ui/qr-button.js';
 import { mountRouteBar } from './ui/route-bar.js';
@@ -46,6 +47,7 @@ const INSTRUCTION = {
     [State.E1]: 'Câmera aberta. A leitura do QR ainda é um espaço reservado.',
     [State.E2]: 'Busca de destino aberta.',
     [State.E3]: 'Prévia da rota.',
+    previewNotice: 'Leia um QR para saber onde você está',
     [State.E4]: 'Navegando até o destino.',
     [State.E5]: 'Você chegou ao destino.',
     [State.ERRO_CAMERA]: ERROR_TEXT[State.ERRO_CAMERA],
@@ -99,6 +101,12 @@ export function transition(session, event) {
 
     if (type === 'set-origin') return { ...current, origin: eventPoint(event.origin) };
     if (type === 'set-destination') return { ...current, destination: eventPoint(event.destination) };
+    if (type === 'select-destination') {
+        const destination = eventPoint(event.destination);
+        if (!destination) return current;
+        if (current.state === State.E4 || current.state === State.E5 || ERRORS.has(current.state)) return current;
+        return { ...current, destination, state: State.E3, returnTo: null };
+    }
     if (type === 'clear-origin') return { ...current, origin: null };
     if (type === 'clear-destination') return { ...current, destination: null };
 
@@ -194,9 +202,14 @@ let camera = null;
 let instructions = null;
 let flow = null;
 let searchField = null;
+let mapView = null;
 let background = [];
+let suppressPop = false;
 
 function instructionFor(current) {
+    if (current.state === State.E3 && !(current.origin && current.origin.slug)) {
+        return `${INSTRUCTION[State.E3]} ${INSTRUCTION.previewNotice}`;
+    }
     if (current.state === State.E0 && (current.origin || current.destination)) {
         const origin = current.origin ? current.origin.label : 'sem origem';
         const destination = current.destination ? current.destination.label : 'sem destino';
@@ -227,6 +240,7 @@ function render() {
     setInert(overlay);
     if (searchSheet) searchSheet.setOpen(session.state === State.E2);
     if (camera) camera.setOpen(session.state === State.E1);
+    if (mapView) mapView.highlight(session.destination && session.destination.slug);
     renderFlow();
     if (instructions) {
         const text = instructionFor(session);
@@ -245,9 +259,21 @@ function renderFlow() {
     const title = document.createElement('p');
     title.className = 'flow-title';
     if (session.state === State.E3) {
-        // TODO: E3 Prévia — desenhar a rota e confirmar antes de navegar.
+        // TODO: E3 Prévia — a polilinha da rota entra na T6.
         title.textContent = 'Prévia da rota';
-        flow.append(title, flowButton('Confirmar prévia', 'Confirmar', 'confirm-preview'), flowButton('Voltar da prévia', 'Voltar', 'cancel-preview'));
+        const parts = [title];
+        if (!(session.origin && session.origin.slug)) {
+            const notice = document.createElement('p');
+            notice.className = 'flow-notice';
+            notice.id = 'preview-origin-notice';
+            notice.textContent = INSTRUCTION.previewNotice;
+            parts.push(notice);
+        }
+        parts.push(
+            flowButton('Confirmar prévia', 'Confirmar', 'confirm-preview'),
+            flowButton('Voltar da prévia', 'Voltar', 'cancel-preview')
+        );
+        flow.append(...parts);
         return;
     }
     if (session.state === State.E4) {
@@ -283,12 +309,11 @@ function commit(next, source) {
     if (source !== 'pop') {
         if (effect === 'push') {
             history.pushState({ povOverlay: session.state }, '', pageUrl(session));
-        } else if (effect === 'back') {
-            if (history.state && history.state.povOverlay) {
-                render();
-                history.back();
-                return;
-            }
+        } else if (effect === 'back' && history.state && history.state.povOverlay) {
+            suppressPop = true;
+            render();
+            history.back();
+            return;
         } else if (!sameUrl(session)) {
             history.replaceState(history.state, '', pageUrl(session));
         }
@@ -309,6 +334,13 @@ function requestBack() {
 }
 
 function onPopState() {
+    if (suppressPop) {
+        suppressPop = false;
+        if (!sameUrl(session)) history.replaceState(history.state, '', pageUrl(session));
+        render();
+        if (searchField && typeof searchField.focus === 'function') searchField.focus();
+        return;
+    }
     let next = pointsFromHash(session, location.hash);
     if (OVERLAYS.has(session.state)) next = transition(next, { type: 'back' });
     commit(next, 'pop');
@@ -326,7 +358,6 @@ function openCamera() {
 }
 
 function openSearch() {
-    if (searchField) searchField.focus();
     dispatch({ type: 'open-search' });
 }
 
@@ -356,7 +387,13 @@ export function mountVisitorApp() {
         onStart: () => dispatch({ type: 'start-route' })
     });
     searchSheet = mountSearchSheet(document.getElementById('search-sheet-root'), {
-        onClose: requestBack
+        onClose: requestBack,
+        onSelect: (item) => dispatch({
+            type: 'select-destination',
+            destination: { slug: item.slug, label: item.name || item.slug }
+        }),
+        loadCatalog: () => loadDestinationCatalog(),
+        originSlug: () => (session && session.origin && session.origin.slug) || ''
     });
     camera = mountCameraOverlay(document.getElementById('camera-root'), {
         onClose: requestBack
@@ -390,7 +427,10 @@ export function mountVisitorApp() {
 
     const mapHost = document.getElementById('visitor-map');
     if (mapHost) {
-        mountMapView(mapHost).catch(() => {});
+        mountMapView(mapHost).then((view) => {
+            mapView = view;
+            if (session && session.destination) view.highlight(session.destination.slug);
+        }).catch(() => {});
     }
 }
 

@@ -108,6 +108,38 @@ test('eventos fora de hora não mudam o estado e a sessão original fica intacta
     assert.notEqual(next, current);
 });
 
+test('escolher um destino na busca vai para a prévia e fecha a folha', () => {
+    const search = transition(session(), { type: 'open-search' });
+    assert.equal(search.state, State.E2);
+
+    const preview = transition(search, {
+        type: 'select-destination',
+        destination: { slug: 'sala', label: 'Sala' }
+    });
+    assert.equal(preview.state, State.E3);
+    assert.deepEqual(preview.destination, { slug: 'sala', label: 'Sala' });
+    assert.equal(preview.origin, null);
+    assert.equal(preview.returnTo, null);
+    assert.equal(canStartRoute(preview), false);
+    assert.equal(historyEffect(search, preview), 'back');
+
+    const stayed = transition(search, { type: 'select-destination', destination: '  ' });
+    assert.equal(stayed.state, State.E2);
+    assert.equal(stayed.destination, null);
+
+    const withOrigin = transition(session({ origin, state: State.E2, returnTo: State.E0 }), {
+        type: 'select-destination',
+        destination: 'copa'
+    });
+    assert.equal(withOrigin.state, State.E3);
+    assert.equal(withOrigin.origin.slug, 'recepcao');
+    assert.equal(withOrigin.destination.slug, 'copa');
+    assert.equal(canStartRoute(withOrigin), true);
+
+    const walking = session({ origin, destination, state: State.E4 });
+    assert.equal(transition(walking, { type: 'select-destination', destination: 'copa' }).state, State.E4);
+});
+
 test('origem e destino entram por slug ou por objeto', () => {
     const withSlug = transition(session(), { type: 'set-origin', origin: 'recepcao' });
     assert.deepEqual(withSlug.origin, { slug: 'recepcao', label: 'recepcao' });

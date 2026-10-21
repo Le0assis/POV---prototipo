@@ -292,6 +292,10 @@ export function getMap() {
     return request('/api/map');
 }
 
+export function getCategories() {
+    return request('/api/categories');
+}
+
 export function getRoutes() {
     return request('/api/routes');
 }
