@@ -28,27 +28,65 @@ jobs:
         run: |
           python -m compileall .
 
-  # JOB 2: Testes Node do frontend em pull request (main, dev e cursor/**)
+  # JOB 2: Testes Node do frontend em pull request (main, dev e cursor/**).
+  # Continua só em pull_request; o gatilho do workflow já inclui main e cursor/**.
   frontend-tests:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: frontend-tests-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      actions: write
     steps:
       - name: Baixar o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Configurar Node LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 'lts/*'
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Instalar dependências
         run: npm ci
+
+      - name: Versão do Playwright
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache do Chromium do Playwright
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
 
       - name: Instalar o Chromium do Playwright
         run: npx playwright install --with-deps chromium
 
       - name: Rodar testes do frontend
-        run: npm test
+        env:
+          AXE_REPORT_DIR: reports/axe
+          # O reporter precisa vir antes dos arquivos. O npm acrescenta
+          # argumentos no fim, e o Node ignora --test-reporter nessa posição.
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/frontend-junit.xml
+        run: |
+          mkdir -p reports/axe
+          npm test
+
+      - name: Publicar relatórios de teste e axe
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-test-reports
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            reports/frontend-junit.xml
+            reports/axe/
 
   # JOB 3: Publica a pasta frontend na branch 'gh-pages' (Apenas no push da 'main')
   deploy-github-pages:
