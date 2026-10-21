@@ -175,11 +175,13 @@ test('SHOW_ROLE_TOGGLE ligado por padrão e desligado não pede senha', async ()
 test('a troca de papel preserva hash e query', () => {
     const bits = { pathname: '/locate.html', hash: '#origem=A&destino=B', search: '?passo=1' };
     assert.equal(hrefForRole('admin', bits), 'admin/index.html?passo=1#origem=A&destino=B');
+    assert.equal(hrefForRole('visitor', bits), 'index.html?passo=1#origem=A&destino=B');
     assert.equal(
-        hrefForRole('visitor', { pathname: '/admin/editor.html', hash: '#origem=A&destino=B', search: '' }),
-        '../viewer.html#origem=A&destino=B'
+        hrefForRole('visitor', { pathname: '/admin/editor.html', hash: '#origem=A&destino=B', search: '?passo=1' }),
+        '../index.html?passo=1#origem=A&destino=B'
     );
     assert.equal(currentRole('/admin/map-config.html'), 'admin');
+    assert.equal(currentRole('/index.html'), 'visitor');
     assert.equal(currentRole('/viewer.html'), 'visitor');
 });
 

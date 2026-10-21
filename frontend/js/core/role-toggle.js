@@ -17,7 +17,7 @@ export const PASSWORD_WRONG_MESSAGE = 'Senha incorreta. Digite de novo.';
 export const PASSWORD_UNCONFIGURED_MESSAGE = 'A senha do editor não está configurada no servidor.';
 export const PASSWORD_UNREACHABLE_MESSAGE = 'Não foi possível validar a senha.';
 
-const VISITOR_PAGE = 'viewer.html';
+const VISITOR_PAGE = 'index.html';
 const ADMIN_PAGE = 'index.html';
 
 let gatePromise = null;
