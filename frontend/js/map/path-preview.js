@@ -3,13 +3,16 @@
  * Eixo y matemático (para cima). `t` do path é epoch em segundos.
  */
 
+import { pathPreviewColors } from '../core/colors.js';
+
 export function renderPathPreview(canvas, path) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
+    const colors = pathPreviewColors();
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'rgba(6, 10, 20, 0.65)';
+    ctx.fillStyle = colors.background;
     ctx.fillRect(0, 0, w, h);
 
     const pts = (Array.isArray(path) ? path : [])
@@ -17,7 +20,7 @@ export function renderPathPreview(canvas, path) {
         .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
 
     if (pts.length < 2) {
-        ctx.fillStyle = '#94a3b8';
+        ctx.fillStyle = colors.muted;
         ctx.font = '12px sans-serif';
         ctx.fillText('Sem polilinha.', 12, 24);
         return;
@@ -43,7 +46,7 @@ export function renderPathPreview(canvas, path) {
         y: h - pad - (p.y - minY) * scale
     });
 
-    ctx.strokeStyle = '#22d3ee';
+    ctx.strokeStyle = colors.stroke;
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -56,11 +59,11 @@ export function renderPathPreview(canvas, path) {
 
     const start = toCanvas(pts[0]);
     const end = toCanvas(pts[pts.length - 1]);
-    ctx.fillStyle = '#22c55e';
+    ctx.fillStyle = colors.start;
     ctx.beginPath();
     ctx.arc(start.x, start.y, 4, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#8b5cf6';
+    ctx.fillStyle = colors.end;
     ctx.beginPath();
     ctx.arc(end.x, end.y, 4, 0, Math.PI * 2);
     ctx.fill();

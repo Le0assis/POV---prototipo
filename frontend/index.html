@@ -3,35 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POV — Início</title>
+    <title>POV</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563EB">
+    <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
     <link rel="stylesheet" href="css/tokens.css">
     <link rel="stylesheet" href="css/base.css">
     <link rel="stylesheet" href="css/components.css">
-    <link rel="stylesheet" href="css/home.css">
+    <link rel="stylesheet" href="css/visitor.css">
 </head>
-<body>
-    <main class="home">
-        <h1>POV</h1>
-        <p class="hint">Mapa do prédio, navegação e rotas salvas.</p>
-        <p class="hint">API: <span id="home-api">verificando…</span></p>
-        <nav class="home-grid" aria-label="Páginas">
-            <a class="card home-card" href="viewer.html">
-                <strong>Mapa do prédio</strong>
-                <span>Trajetórias gravadas, só leitura.</span>
-            </a>
-            <a class="card home-card" href="locate.html">
-                <strong>Navegar</strong>
-                <span>PDR no aparelho, ponto azul e erro até o checkpoint.</span>
-            </a>
-            <a class="card home-card" href="routes.html">
-                <strong>Rotas</strong>
-                <span>Rotas salvas, teste e simulação.</span>
-            </a>
-        </nav>
-    </main>
+<body class="visitor-app" data-app="visitor">
+    <div id="visitor-instructions" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    <div class="visitor-shell" id="visitor-shell" data-state="E0">
+        <header class="visitor-top">
+            <div id="route-bar" role="region" aria-label="Rota"></div>
+            <div class="visitor-chrome" id="visitor-chrome" role="region" aria-label="Modo e leitura de QR"></div>
+        </header>
+        <div class="visitor-map">
+            <div id="visitor-map" role="application" aria-label="Mapa do prédio"></div>
+        </div>
+        <div class="visitor-bottom">
+            <label class="sr-only" for="search-field">Para onde você quer ir?</label>
+            <input id="search-field" class="search-field text-field" type="text" readonly inputmode="none" placeholder="Para onde você quer ir?" aria-label="Para onde você quer ir?" aria-controls="search-sheet-dialog" autocomplete="off">
+        </div>
+        <div id="visitor-flow" class="visitor-flow" hidden></div>
+    </div>
+    <div id="search-sheet-root"></div>
+    <div id="camera-root"></div>
+    <script src="vendor/leaflet/leaflet.js"></script>
     <script type="module" src="js/boot.js"></script>
-    <script type="module" src="js/pages/home.js"></script>
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>
