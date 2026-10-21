@@ -210,6 +210,30 @@ test('câmera negada durante a navegação volta para E4', () => {
     assert.equal(transition(failed, { type: 'qr-resolved', origin: { slug: 'hall', label: 'Hall' } }).state, State.E4);
 });
 
+test('Encerrar no E4 volta à prévia e a chegada oferece outro destino', () => {
+    const walking = session({ origin, destination, state: State.E4 });
+    assert.equal(transition(walking, { type: 'back' }).state, State.E3);
+    assert.equal(transition(walking, { type: 'new-destination' }).state, State.E4);
+
+    const arrived = transition(walking, { type: 'arrive' });
+    assert.equal(arrived.state, State.E5);
+    const search = transition(arrived, { type: 'new-destination' });
+    assert.equal(search.state, State.E2);
+    assert.equal(search.returnTo, State.E0);
+    assert.deepEqual(search.origin, { slug: 'sala', label: 'Sala' });
+    assert.equal(search.destination, null);
+    assert.equal(historyEffect(arrived, search), 'push');
+
+    const again = transition(search, {
+        type: 'select-destination',
+        destination: { slug: 'copa', label: 'Copa' }
+    });
+    assert.equal(again.state, State.E3);
+    assert.equal(again.origin.slug, 'sala');
+    assert.equal(again.destination.slug, 'copa');
+    assert.equal(transition(arrived, { type: 'finish' }).state, State.E0);
+});
+
 test('E3 troca destino e origem, e Iniciar rota vai para E4', () => {
     const preview = session({ origin, destination, state: State.E3 });
     assert.equal(showsRoute(State.E3), true);

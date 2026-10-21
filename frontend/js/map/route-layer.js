@@ -37,7 +37,7 @@ export function createRouteLayer(floor) {
         points = [];
     }
 
-    function show(route) {
+    function show(route, { markOrigin = true } = {}) {
         clear();
         if (!route) return;
         points = Array.isArray(route.points) ? route.points.filter(finitePoint) : [];
@@ -66,9 +66,9 @@ export function createRouteLayer(floor) {
         const stops = Array.isArray(route.checkpoints) ? route.checkpoints : [];
         const origin = stops[0];
         const destination = stops.length > 1 ? stops[stops.length - 1] : null;
-        if (origin) addOrigin(floor, group, origin);
+        if (origin && markOrigin) addOrigin(floor, group, origin);
         if (destination) addDestination(floor, group, destination);
-        group.bringToFront();
+        bringGroupToFront(group);
     }
 
     function fit(padding) {
@@ -134,6 +134,18 @@ function addDestination(floor, group, checkpoint) {
         offset: [0, -12]
     });
     marker.addTo(group);
+}
+
+/** LayerGroup nesta build do Leaflet não tem bringToFront; os filhos (linha e marcador) têm. */
+function bringGroupToFront(layer) {
+    if (!layer) return;
+    if (typeof layer.bringToFront === 'function') {
+        layer.bringToFront();
+        return;
+    }
+    if (typeof layer.eachLayer === 'function') {
+        layer.eachLayer((child) => bringGroupToFront(child));
+    }
 }
 
 function finitePoint(point) {

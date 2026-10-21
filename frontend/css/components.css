@@ -701,6 +701,33 @@ summary {
     border-bottom: 11px solid var(--you-marker);
 }
 
+.blue-dot.has-cone {
+    width: 96px;
+    height: 96px;
+}
+
+.blue-dot.has-cone .blue-dot-core {
+    left: 40px;
+    top: 40px;
+}
+
+.blue-dot.has-cone .blue-dot-arrow {
+    left: 44px;
+    top: 26px;
+}
+
+.blue-dot-cone {
+    position: absolute;
+    left: 50%;
+    top: 4px;
+    width: 56px;
+    height: 44px;
+    transform: translateX(-50%);
+    background: color-mix(in srgb, var(--you-marker) 42%, transparent);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+    pointer-events: none;
+}
+
 .map-popup p {
     margin-top: var(--space-4);
     color: var(--text-muted);

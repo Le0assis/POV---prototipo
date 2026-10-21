@@ -45,7 +45,15 @@ export async function mountMapView(element) {
         status.textContent = message || '';
     }
 
-    recenter.addEventListener('click', fitContent);
+    recenter.addEventListener('click', () => {
+        if (navActive) {
+            followWalker = true;
+            syncRecenter();
+            if (walkerPixel) panWalker(walkerPixel);
+            return;
+        }
+        fitContent();
+    });
 
     try {
         model = await loadFloorModel({ toast: () => {} });
@@ -112,9 +120,9 @@ export async function mountMapView(element) {
         if (target && pan) floor.map.panTo(target.getLatLng(), { animate: false });
     }
 
-    function showRoute(route, { fit = true } = {}) {
+    function showRoute(route, { fit = true, markOrigin = true } = {}) {
         routeActive = true;
-        routeLayer.show(route);
+        routeLayer.show(route, { markOrigin });
         if (!fit) return;
         const apply = () => {
             if (routeActive) routeLayer.fit(routePadding());
@@ -132,7 +140,82 @@ export async function mountMapView(element) {
 
     let you = null;
     let youSlug = '';
+    let walker = null;
+    let followWalker = false;
+    let navActive = false;
+    let walkerPixel = null;
     const pins = new Map();
+
+    map.on('dragstart', () => {
+        if (!followWalker) return;
+        followWalker = false;
+        syncRecenter();
+    });
+
+    function syncRecenter() {
+        recenter.classList.toggle('needs-recenter', navActive && !followWalker);
+    }
+
+    function ensureWalker() {
+        if (!walker) walker = createBlueDot(floor, { label: 'você', cone: true, zIndex: 1200 });
+        return walker;
+    }
+
+    function panWalker(pixel) {
+        if (!pixel) return;
+        const latlng = floor.pixelToLatLng(pixel.x, pixel.y);
+        map.panTo(latlng, { animate: false });
+    }
+
+    function setNavActive(on) {
+        navActive = Boolean(on);
+        if (!navActive) {
+            followWalker = false;
+            walkerPixel = null;
+            if (walker) walker.hide();
+        }
+        syncRecenter();
+    }
+
+    /** Chegada: para de seguir, mas o marcador fica onde a caminhada terminou. */
+    function holdWalker() {
+        followWalker = false;
+        navActive = false;
+        syncRecenter();
+    }
+
+    function frameWalker(pixel, pxPerM) {
+        if (!pixel) return;
+        walkerPixel = { x: pixel.x, y: pixel.y };
+        const scale = Number(pxPerM);
+        const radius = (Number.isFinite(scale) && scale > 0 ? scale : 10) * 18;
+        followWalker = true;
+        syncRecenter();
+        const bounds = L.latLngBounds(
+            floor.pixelToLatLng(pixel.x - radius, pixel.y - radius),
+            floor.pixelToLatLng(pixel.x + radius, pixel.y + radius)
+        );
+        map.fitBounds(bounds, { padding: [28, 28], animate: false, maxZoom: 2 });
+        if (floor.locateLayer && typeof floor.locateLayer.bringToFront === 'function') {
+            floor.locateLayer.bringToFront();
+        }
+    }
+
+    function setWalker(pixel, screenDeg) {
+        if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) {
+            walkerPixel = null;
+            if (walker) walker.hide();
+            return;
+        }
+        walkerPixel = { x: pixel.x, y: pixel.y };
+        const dot = ensureWalker();
+        dot.setPixel(pixel.x, pixel.y);
+        if (Number.isFinite(screenDeg)) dot.setHeading(screenDeg);
+        if (floor.locateLayer && typeof floor.locateLayer.bringToFront === 'function') {
+            floor.locateLayer.bringToFront();
+        }
+        if (followWalker) panWalker(walkerPixel);
+    }
 
     function showOrigin(slug, anchor) {
         const wanted = slug ? String(slug) : '';
@@ -163,7 +246,11 @@ export async function mountMapView(element) {
         highlight,
         showOrigin,
         showRoute,
-        clearRoute
+        clearRoute,
+        setNavActive,
+        holdWalker,
+        frameWalker,
+        setWalker
     };
 }
 
