@@ -11,6 +11,7 @@ ENV/
 
 # Frontend (Node / Vue.js)
 node_modules/
+reports/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/

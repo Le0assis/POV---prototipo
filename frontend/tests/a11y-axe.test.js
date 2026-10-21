@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { after, before, test } from 'node:test';
 
 import {
@@ -37,9 +39,40 @@ async function openPage(width = 412, height = 915) {
     return { context, page, errors };
 }
 
+function axeReportFile(label) {
+    const dir = process.env.AXE_REPORT_DIR;
+    if (!dir) return '';
+    const safe = String(label || 'pagina')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'pagina';
+    return `${String(dir).replace(/[/\\]+$/, '')}/${safe}.json`;
+}
+
+/** Grava o JSON do axe só quando AXE_REPORT_DIR está definido (o job de CI). */
+function writeAxeReport(label, results) {
+    const file = axeReportFile(label);
+    if (!file) return;
+    const violations = Array.isArray(results && results.violations) ? results.violations : [];
+    const incomplete = Array.isArray(results && results.incomplete) ? results.incomplete : [];
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify({
+        label,
+        url: results && results.url ? results.url : '',
+        timestamp: results && results.timestamp ? results.timestamp : new Date().toISOString(),
+        violationCount: violations.length,
+        incompleteCount: incomplete.length,
+        violations,
+        incomplete
+    }, null, 2)}\n`);
+}
+
 async function expectClean(page, label) {
     const { default: AxeBuilder } = await import('@axe-core/playwright');
     const results = await new AxeBuilder({ page }).analyze();
+    writeAxeReport(label, results);
     const serious = seriousViolations(results);
     assert.equal(serious.length, 0, `${label}\n${formatViolations(serious)}`);
     return results;
