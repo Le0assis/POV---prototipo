@@ -10,6 +10,7 @@ import { StepDetector } from '../sensors/step-detector.js';
 import * as api from '../core/api.js';
 import { $, escapeHtml, fillSelect, formatNum } from '../core/dom.js';
 import { toast } from '../ui/toast.js';
+import { sparklineColor } from '../core/colors.js';
 import { renderPathPreview, pathDurationSeconds } from '../map/path-preview.js';
 import { pathFromProcessResponse } from '../route/model.js';
 
@@ -246,7 +247,7 @@ function drawSpark() {
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = '#22d3ee';
+    ctx.strokeStyle = sparklineColor();
     ctx.lineWidth = 2;
     ctx.beginPath();
     const n = Math.max(spark.length, 2);

@@ -38,6 +38,16 @@
     --on-primary: #FFFFFF;
     --on-danger: #FFFFFF;
 
+    /* Polilinha e marcadores que a T1 ainda pintava em JS. */
+    --path-recorded: #22d3ee;
+    --path-manual: #64748b;
+    --path-preview-bg: rgba(6, 10, 20, 0.65);
+    --path-preview-muted: #94a3b8;
+    --path-preview-stroke: #22d3ee;
+    --path-start: #22c55e;
+    --path-end: #8b5cf6;
+    --sparkline: #22d3ee;
+
     --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     --font-size-body: 17px;

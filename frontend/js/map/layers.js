@@ -3,10 +3,16 @@
  * No modo somente leitura não há arraste nem handler que grave dados.
  */
 
+import { mapLineColors } from '../core/colors.js';
 import { escapeHtml } from '../core/dom.js';
 
-const RECORDED = { color: '#22d3ee', weight: 4, opacity: 0.95 };
-const MANUAL = { color: '#64748b', weight: 3, opacity: 0.9, dashArray: '7 8' };
+function recordedStyle() {
+    return { color: mapLineColors().recorded, weight: 4, opacity: 0.95 };
+}
+
+function manualStyle() {
+    return { color: mapLineColors().manual, weight: 3, opacity: 0.9, dashArray: '7 8' };
+}
 
 export function renderFloorLayers(floor, model, { editable = false, onMove } = {}) {
     floor.connections.clearLayers();
@@ -14,7 +20,7 @@ export function renderFloorLayers(floor, model, { editable = false, onMove } = {
 
     model.polylines.forEach((poly) => {
         const latlngs = poly.points.map((p) => floor.pixelToLatLng(p.x, p.y));
-        const style = poly.recorded ? RECORDED : MANUAL;
+        const style = poly.recorded ? recordedStyle() : manualStyle();
         const line = L.polyline(latlngs, { ...style, interactive: true });
         line.bindPopup(connectionPopup(poly.connection));
         line.addTo(floor.connections);
