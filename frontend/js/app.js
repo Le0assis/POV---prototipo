@@ -32,6 +32,7 @@ import { planRoute } from './nav/routing.js';
 import { createWakeLock } from './nav/wake-lock.js';
 import { HeadingProvider } from './sensors/heading.js';
 import { StepDetector } from './sensors/step-detector.js';
+import { mountA11yControl } from './ui/a11y-panel.js';
 import { mountArrivalCard } from './ui/arrival-card.js';
 import { mountNavBanner } from './ui/nav-banner.js';
 import { parseQr, parseScanLocation } from './qr/qr-format.js';
@@ -341,6 +342,8 @@ let framedEpoch = 0;
 let arrivalBuzzed = false;
 let injectedBearing = null;
 let navParked = false;
+let a11yControl = null;
+let speakInstructionText = () => false;
 
 function routeKey() {
     const origin = session && session.origin && session.origin.slug;
@@ -726,11 +729,17 @@ function placeRoleChrome() {
     return slot;
 }
 
+function closeA11y() {
+    if (a11yControl) a11yControl.close();
+}
+
 function openCamera() {
+    closeA11y();
     dispatch({ type: 'open-camera' });
 }
 
 function openSearch() {
+    closeA11y();
     dispatch({ type: 'open-search' });
 }
 
@@ -1161,9 +1170,12 @@ export function mountVisitorApp() {
     navHost.id = 'nav-banner';
     navHost.hidden = true;
     if (top) top.prepend(navHost);
-    navBanner = mountNavBanner(navHost);
+    navBanner = mountNavBanner(navHost, {
+        onInstruction: (text) => speakInstructionText(text)
+    });
     if (top) top.append(banner);
-    arrivalCard = mountArrivalCard(shell, {
+    const stage = document.getElementById('visitor-main') || shell;
+    arrivalCard = mountArrivalCard(stage, {
         onNewDestination: () => dispatch({ type: 'new-destination' }),
         onFinish: () => dispatch({ type: 'finish' })
     });
@@ -1190,8 +1202,13 @@ export function mountVisitorApp() {
     };
 
     const slot = document.getElementById('visitor-chrome');
-    if (slot && !slot.querySelector('.qr-button')) {
-        slot.append(createQrButton({ onClick: openCamera }));
+    if (slot && !slot.querySelector('.visitor-tools')) {
+        const tools = document.createElement('div');
+        tools.className = 'visitor-tools';
+        a11yControl = mountA11yControl(tools);
+        speakInstructionText = (text) => a11yControl.speak(text);
+        tools.append(createQrButton({ onClick: openCamera }));
+        slot.append(tools);
     }
 
     routeBar = mountRouteBar(document.getElementById('route-bar'), {

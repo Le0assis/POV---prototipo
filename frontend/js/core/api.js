@@ -11,6 +11,7 @@
  */
 
 import { API_BASE_URL } from './config.js';
+import { trapTabKey } from '../ui/focus-trap.js';
 
 const EDITOR_PASSWORD_KEY = 'pov_editor_password';
 
@@ -228,8 +229,10 @@ function promptEditorPassword(message) {
 
         const label = document.createElement('label');
         label.className = 'form-group';
+        label.setAttribute('for', 'editor-password-input');
         label.textContent = 'Senha';
         const input = document.createElement('input');
+        input.id = 'editor-password-input';
         input.type = 'password';
         input.autocomplete = 'current-password';
         input.required = true;
@@ -267,7 +270,9 @@ function promptEditorPassword(message) {
             if (event.key === 'Escape') {
                 event.preventDefault();
                 close(null);
+                return;
             }
+            if (event.key === 'Tab') trapTabKey(content, event);
         };
 
         content.addEventListener('submit', (event) => {

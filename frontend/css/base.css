@@ -115,7 +115,8 @@ a {
     color: var(--text);
 }
 
-.hidden {
+.hidden,
+[hidden] {
     display: none !important;
 }
 
@@ -134,17 +135,45 @@ html.font-lg h2,
 html.font-lg h3,
 html.font-lg h4 { font-size: 26px; }
 
-/* Contraste reforçado, sem trocar a lógica das páginas. */
+/* Contraste reforçado. Texto e botões miram AAA (7:1) no branco. */
 html.hc {
     --bg: #FFFFFF;
     --surface: #FFFFFF;
     --text: #000000;
-    --text-muted: #1B2433;
-    --border: #1B2433;
+    --text-muted: #000000;
+    --border: #000000;
+    --primary: #0C3C78;
+    --primary-soft: #E7EEF8;
+    --accent: #064E3B;
+    --success: #064E3B;
+    --success-ink: #064E3B;
+    --success-soft: #E5F6F0;
+    --warning: #FFD24A;
+    --warning-ink: #000000;
+    --warning-soft: #FFF6D8;
+    --danger: #7F1D1D;
+    --danger-soft: #FDECEC;
+    --on-primary: #FFFFFF;
+    --on-danger: #FFFFFF;
+    --you-marker: #0C3C78;
+    --you-halo: #0C3C78;
+    --path-recorded: #000000;
+    --path-manual: #000000;
+    --path-preview-bg: #FFFFFF;
+    --path-preview-muted: #000000;
+    --path-preview-stroke: #000000;
+    --path-start: #064E3B;
+    --path-end: #0C3C78;
+    --sparkline: #000000;
 }
 
 html.hc :focus-visible {
-    outline-width: 4px;
+    outline: 4px solid var(--primary);
+    outline-offset: 2px;
+}
+
+html.hc .btn-success {
+    color: var(--on-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

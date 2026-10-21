@@ -277,7 +277,7 @@ test('páginas de visitante e de admin carregam o seletor', () => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
         assert.match(html, /js\/boot\.js/, page);
     });
-    ['admin/index.html', 'admin/editor.html', 'admin/recorder.html', 'admin/map-config.html'].forEach((page) => {
+    ['admin/index.html', 'admin/editor.html', 'admin/recorder.html', 'admin/map-config.html', 'admin/qrcodes.html'].forEach((page) => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
         assert.match(html, /\.\.\/js\/boot\.js/, page);
         assert.match(html, /id="admin-header"/, page);

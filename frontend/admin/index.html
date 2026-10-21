@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+    <script>
+    (function () {
+        try {
+            var raw = localStorage.getItem('pov.a11y');
+            if (!raw) return;
+            var prefs = JSON.parse(raw);
+            var root = document.documentElement;
+            if (prefs && prefs.hc) root.classList.add('hc');
+            if (prefs && prefs.fontLg) root.classList.add('font-lg');
+        } catch (e) { /* preferência ausente: segue o tema padrão */ }
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POV — Administração</title>
@@ -30,10 +42,10 @@
                 <strong>Configurar planta</strong>
                 <span>Imagem, pixels por metro e rotação.</span>
             </a>
-            <div class="card home-card is-disabled" aria-disabled="true">
+            <a class="card home-card" href="qrcodes.html">
                 <strong>Gerar QR codes</strong>
-                <span>em breve</span>
-            </div>
+                <span>Imprime e baixa o QR de cada checkpoint.</span>
+            </a>
         </nav>
     </main>
     <script type="module" src="../js/boot.js"></script>

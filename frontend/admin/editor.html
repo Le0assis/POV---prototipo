@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+    <script>
+    (function () {
+        try {
+            var raw = localStorage.getItem('pov.a11y');
+            if (!raw) return;
+            var prefs = JSON.parse(raw);
+            var root = document.documentElement;
+            if (prefs && prefs.hc) root.classList.add('hc');
+            if (prefs && prefs.fontLg) root.classList.add('font-lg');
+        } catch (e) { /* preferência ausente: segue o tema padrão */ }
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POV — Editor</title>

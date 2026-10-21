@@ -635,6 +635,14 @@ summary {
     color: var(--text);
 }
 
+html.hc .route-line {
+    stroke: var(--primary) !important;
+}
+
+html.hc .route-line-outline {
+    stroke: var(--surface) !important;
+}
+
 .leaflet-container a.leaflet-popup-close-button {
     width: 48px;
     height: 48px;

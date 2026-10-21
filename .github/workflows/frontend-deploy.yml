@@ -41,6 +41,12 @@ jobs:
         with:
           node-version: 'lts/*'
 
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Instalar o Chromium do Playwright
+        run: npx playwright install --with-deps chromium
+
       - name: Rodar testes do frontend
         run: npm test
 

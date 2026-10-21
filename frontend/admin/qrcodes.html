@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <script>
+    (function () {
+        try {
+            var raw = localStorage.getItem('pov.a11y');
+            if (!raw) return;
+            var prefs = JSON.parse(raw);
+            var root = document.documentElement;
+            if (prefs && prefs.hc) root.classList.add('hc');
+            if (prefs && prefs.fontLg) root.classList.add('font-lg');
+        } catch (e) { /* preferência ausente: segue o tema padrão */ }
+    })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV — Gerar QR codes</title>
+    <link rel="manifest" href="../manifest.json">
+    <meta name="theme-color" content="#2563EB">
+    <link rel="stylesheet" href="../css/tokens.css">
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/home.css">
+    <link rel="stylesheet" href="../css/qrcodes.css">
+</head>
+<body>
+    <header class="admin-header" id="admin-header">
+        <a class="admin-menu-link" href="index.html">Menu da administração</a>
+    </header>
+    <main class="qr-admin hidden" id="qr-app">
+        <h1>Gerar QR codes</h1>
+        <div class="qr-layout">
+            <section class="qr-controls no-print" aria-label="Seleção dos checkpoints">
+                <div class="qr-toolbar">
+                    <label class="form-group qr-filter" for="qr-filter">
+                        Filtrar por nome ou categoria
+                        <input id="qr-filter" type="search" autocomplete="off" placeholder="Nome ou categoria">
+                    </label>
+                    <div class="qr-actions">
+                        <button type="button" class="btn btn-secondary" id="qr-all">Todos</button>
+                        <button type="button" class="btn btn-secondary" id="qr-none">Nenhum</button>
+                    </div>
+                    <fieldset class="qr-per-page">
+                        <legend>Por página</legend>
+                        <label><input type="radio" name="qr-per-page" value="1"> 1</label>
+                        <label><input type="radio" name="qr-per-page" value="2" checked> 2</label>
+                        <label><input type="radio" name="qr-per-page" value="4"> 4</label>
+                    </fieldset>
+                    <button type="button" class="btn btn-primary" id="qr-print">Imprimir / Salvar PDF</button>
+                </div>
+                <p class="qr-status" id="qr-status" role="status"></p>
+                <button type="button" class="btn btn-secondary" id="qr-retry" hidden>Tentar de novo</button>
+                <ul class="qr-list" id="qr-list" aria-label="Checkpoints" tabindex="0"></ul>
+                <p class="qr-summary" id="qr-summary" role="status"></p>
+            </section>
+            <section id="qr-preview" class="qr-sheet" data-per-page="2" aria-label="Prévia para impressão"></section>
+        </div>
+    </main>
+    <script type="module" src="../js/boot.js"></script>
+    <script type="module" src="../js/pages/qrcodes.js"></script>
+</body>
+</html>
