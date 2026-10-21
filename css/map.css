@@ -1,0 +1,89 @@
+.map-page {
+    width: min(1180px, 100%);
+    margin: 0 auto;
+    padding: var(--space-16) var(--space-16) var(--space-32);
+}
+
+.map-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.85fr);
+    gap: var(--space-16);
+    align-items: start;
+}
+
+.map-layout.is-solo { grid-template-columns: 1fr; }
+
+.map-stage {
+    position: relative;
+    height: min(70vh, 680px);
+    min-height: 320px;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background-color: var(--bg);
+    background-image:
+        linear-gradient(color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px);
+    background-size: 24px 24px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+}
+
+.map-stage .leaflet-container {
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    background-image: inherit;
+    background-size: 24px 24px;
+    font-family: var(--font-sans);
+}
+
+.map-toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-8);
+    margin-bottom: var(--space-12);
+}
+
+.side-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+}
+
+.warn-list {
+    margin: 0;
+    padding-left: var(--space-16);
+    color: var(--warning-ink);
+    font-size: max(16px, var(--font-size-body));
+}
+
+.stat-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-8);
+}
+
+.goal-ok { color: var(--success-ink); }
+.goal-bad { color: var(--warning-ink); }
+
+.path-preview {
+    width: 100%;
+    height: 140px;
+    border-radius: var(--radius);
+    border: 2px solid var(--text-muted);
+    background: var(--surface);
+}
+
+.history-card canvas {
+    width: 100%;
+    height: 96px;
+    border-radius: var(--radius);
+}
+
+#viewer-note { margin-top: var(--space-12); }
+
+@media (max-width: 900px) {
+    .map-layout { grid-template-columns: 1fr; }
+    .map-stage { height: 420px; }
+}

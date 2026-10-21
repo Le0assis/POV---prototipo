@@ -1,0 +1,333 @@
+/* ==========================================================================
+   POV — qrcodes.css
+   Lista, prévia e folha A4 dos QR codes. A impressão não usa biblioteca de PDF.
+   ========================================================================== */
+
+.qr-admin {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+    padding: 0 var(--space-16) var(--space-32);
+}
+
+.qr-layout {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-16);
+}
+
+.qr-controls {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+}
+
+.qr-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+    align-items: flex-end;
+}
+
+.qr-filter {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.qr-actions,
+.qr-per-page {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+    align-items: center;
+}
+
+.qr-per-page {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.qr-per-page legend {
+    font-weight: 700;
+    padding: 0;
+}
+
+.qr-per-page label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-8);
+    min-height: 48px;
+    min-width: 48px;
+    padding: 0 var(--space-12);
+    background: var(--surface);
+    border: 2px solid var(--text-muted);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.qr-status {
+    min-height: 1.5em;
+    font-weight: 600;
+}
+
+.qr-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    max-height: 200px;
+    margin: 0;
+    padding: var(--space-4);
+    overflow: auto;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+.qr-choice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-12);
+    min-height: 48px;
+    padding: var(--space-8);
+    cursor: pointer;
+}
+
+.qr-choice input {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+}
+
+.qr-choice-copy {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4) var(--space-12);
+    align-items: baseline;
+    min-width: 0;
+}
+
+.qr-choice-slug,
+.qr-slug {
+    color: var(--text);
+    font-size: 14px;
+}
+
+.qr-missing {
+    padding: var(--space-8) var(--space-12);
+    background: var(--danger-soft);
+    border-radius: var(--radius);
+}
+
+.qr-warning {
+    margin: 0;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    font-weight: 700;
+}
+
+.qr-empty {
+    padding: var(--space-12);
+}
+
+.qr-summary {
+    margin: 0;
+    font-weight: 700;
+}
+
+.qr-sheet {
+    display: grid;
+    gap: 0;
+}
+
+.qr-sheet[data-per-page="1"],
+.qr-sheet[data-per-page="2"] {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.qr-sheet[data-per-page="4"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qr-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-8);
+    min-width: 0;
+    padding: var(--space-16);
+    text-align: center;
+    background: var(--surface);
+    border: 1px dashed var(--text);
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.qr-mark {
+    width: 5.6cm;
+    height: 5.6cm;
+    max-width: 100%;
+}
+
+.qr-mark svg {
+    width: 5.6cm;
+    height: 5.6cm;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.qr-name {
+    margin: 0;
+    font-size: 22px;
+}
+
+.qr-category,
+.qr-hint,
+.qr-slug {
+    margin: 0;
+    max-width: 36em;
+}
+
+.qr-hint {
+    font-weight: 600;
+}
+
+.qr-downloads {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-8);
+}
+
+.qr-downloads .btn {
+    min-width: 48px;
+}
+
+html.font-lg .qr-name { font-size: 28px; }
+html.font-lg .qr-slug,
+html.font-lg .qr-choice-slug { font-size: 18px; }
+
+html.hc .qr-card,
+html.hc .qr-list,
+html.hc .qr-per-page label {
+    border-color: var(--text);
+    border-width: 2px;
+}
+
+@media (max-width: 959px) {
+    .qr-layout {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .qr-sheet { order: 1; }
+    .qr-controls { order: 2; }
+}
+
+@media (min-width: 960px) {
+    .qr-layout {
+        display: grid;
+        grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+        align-items: start;
+    }
+
+    .qr-list {
+        max-height: 70vh;
+    }
+}
+
+@media (max-width: 720px) {
+    .qr-sheet[data-per-page="4"] .qr-mark,
+    .qr-sheet[data-per-page="4"] .qr-mark svg {
+        width: 4.4cm;
+        height: 4.4cm;
+    }
+}
+
+@page {
+    size: A4 portrait;
+    margin: 10mm;
+}
+
+@media print {
+    .top-nav,
+    .role-bar,
+    .admin-header,
+    .site-footer,
+    .no-print,
+    .toast-stack,
+    .qr-admin > h1 {
+        display: none !important;
+    }
+
+    body {
+        padding: 0 !important;
+        background: #fff !important;
+        background-image: none !important;
+    }
+
+    .qr-admin {
+        width: auto;
+        margin: 0;
+        padding: 0;
+    }
+
+    .qr-layout {
+        display: block;
+    }
+
+    .qr-mark,
+    .qr-mark svg,
+    .qr-sheet[data-per-page="4"] .qr-mark,
+    .qr-sheet[data-per-page="4"] .qr-mark svg {
+        width: 5.6cm !important;
+        height: 5.6cm !important;
+        max-width: none;
+    }
+
+    .qr-card {
+        border: 1px dashed #000;
+        background: #fff;
+        color: #000;
+    }
+
+    .qr-sheet[data-per-page="1"] .qr-card:not(:last-child) {
+        height: 277mm;
+        break-after: page;
+        page-break-after: always;
+    }
+
+    .qr-sheet[data-per-page="1"] .qr-card {
+        height: 277mm;
+    }
+
+    .qr-sheet[data-per-page="2"] .qr-card {
+        height: 135mm;
+    }
+
+    .qr-sheet[data-per-page="2"] .qr-card:nth-child(2n):not(:last-child) {
+        break-after: page;
+        page-break-after: always;
+    }
+
+    .qr-sheet[data-per-page="4"] {
+        display: block;
+    }
+
+    .qr-sheet[data-per-page="4"] .qr-card {
+        display: inline-block;
+        vertical-align: top;
+        width: 50%;
+        height: 135mm;
+        box-sizing: border-box;
+    }
+
+    .qr-sheet[data-per-page="4"] .qr-card:nth-child(4n):not(:last-child) {
+        break-after: page;
+        page-break-after: always;
+    }
+}

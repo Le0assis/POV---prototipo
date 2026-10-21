@@ -1,0 +1,67 @@
+/* ==========================================================================
+   POV — tokens.css
+   Paleta, espaço, raio e sombra. As outras folhas só consomem estas variáveis.
+   ========================================================================== */
+
+:root {
+    --bg: #F7F9FC;
+    --surface: #FFFFFF;
+    --border: #E3E8EF;
+    --text: #1B2433;
+    --text-muted: #5B6B80;
+    --primary: #2563EB;
+    --primary-soft: #DBEAFE;
+    --accent: #14B8A6;
+    --success: #14B8A6;
+    --warning: #F59E0B;
+    --danger: #DC2626;
+    --you-marker: #2563EB;
+    --you-halo: #93C5FD;
+
+    --space-4: 4px;
+    --space-8: 8px;
+    --space-12: 12px;
+    --space-16: 16px;
+    --space-24: 24px;
+    --space-32: 32px;
+
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(27, 36, 51, 0.06), 0 8px 24px rgba(27, 36, 51, 0.06);
+    --shadow-soft: 0 1px 2px rgba(27, 36, 51, 0.04), 0 16px 40px rgba(27, 36, 51, 0.08);
+
+    /* Texto sobre fundo claro: amarelo e teal puros não passam AA. */
+    --warning-ink: #92400E;
+    --success-ink: #0F766E;
+    --warning-soft: #FEF3C7;
+    --success-soft: #CCFBF1;
+    --danger-soft: #FEE2E2;
+    --on-primary: #FFFFFF;
+    --on-danger: #FFFFFF;
+
+    /* Polilinha e marcadores que a T1 ainda pintava em JS. */
+    --path-recorded: #22d3ee;
+    --path-manual: #64748b;
+    --path-preview-bg: rgba(6, 10, 20, 0.65);
+    --path-preview-muted: #94a3b8;
+    --path-preview-stroke: #22d3ee;
+    --path-start: #22c55e;
+    --path-end: #8b5cf6;
+    --sparkline: #22d3ee;
+
+    --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --font-size-body: 17px;
+    --nav-h: 64px;
+
+    /* Folhas que ainda usam os nomes antigos (home, rotas, bússola). */
+    --muted: var(--text-muted);
+    --ok: var(--success-ink);
+    --warn: var(--warning-ink);
+    --cyan: var(--primary);
+    --violet: var(--accent);
+    --glass: var(--surface);
+    --surface-2: var(--primary-soft);
+    --border-strong: var(--text-muted);
+    --radius-sm: var(--radius);
+    --shadow-glow: var(--shadow);
+}

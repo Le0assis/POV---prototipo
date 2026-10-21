@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <script>
+    (function () {
+        try {
+            var raw = localStorage.getItem('pov.a11y');
+            if (!raw) return;
+            var prefs = JSON.parse(raw);
+            var root = document.documentElement;
+            if (prefs && prefs.hc) root.classList.add('hc');
+            if (prefs && prefs.fontLg) root.classList.add('font-lg');
+        } catch (e) { /* preferência ausente: segue o tema padrão */ }
+    })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563EB">
+    <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/visitor.css">
+</head>
+<body class="visitor-app" data-app="visitor">
+    <a class="skip-link" href="#visitor-main">Ir para o mapa</a>
+    <div id="visitor-instructions" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    <div class="visitor-shell" id="visitor-shell" data-state="E0">
+        <header class="visitor-top">
+            <h1 class="sr-only">POV — mapa do prédio</h1>
+            <div id="route-bar" role="region" aria-label="Rota"></div>
+            <div class="visitor-chrome" id="visitor-chrome" role="region" aria-label="Modo e leitura de QR"></div>
+        </header>
+        <main class="visitor-main" id="visitor-main" tabindex="-1">
+            <div class="visitor-map">
+                <div id="visitor-map" role="application" aria-label="Mapa do prédio"></div>
+            </div>
+        </main>
+        <div id="visitor-flow" class="visitor-flow" role="region" aria-label="Ações da rota" hidden></div>
+        <footer class="visitor-bottom">
+            <label class="sr-only" for="search-field">Para onde você quer ir?</label>
+            <input id="search-field" class="search-field text-field" type="text" readonly inputmode="none" placeholder="Para onde você quer ir?" aria-label="Para onde você quer ir?" aria-haspopup="dialog" aria-controls="search-sheet-dialog" autocomplete="off">
+        </footer>
+    </div>
+    <div id="search-sheet-root"></div>
+    <div id="camera-root"></div>
+    <script src="vendor/leaflet/leaflet.js"></script>
+    <script type="module" src="js/boot.js"></script>
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

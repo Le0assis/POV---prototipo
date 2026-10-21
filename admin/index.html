@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <script>
+    (function () {
+        try {
+            var raw = localStorage.getItem('pov.a11y');
+            if (!raw) return;
+            var prefs = JSON.parse(raw);
+            var root = document.documentElement;
+            if (prefs && prefs.hc) root.classList.add('hc');
+            if (prefs && prefs.fontLg) root.classList.add('font-lg');
+        } catch (e) { /* preferência ausente: segue o tema padrão */ }
+    })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POV — Administração</title>
+    <link rel="manifest" href="../manifest.json">
+    <meta name="theme-color" content="#2563EB">
+    <link rel="stylesheet" href="../css/tokens.css">
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/home.css">
+</head>
+<body>
+    <header class="admin-header" id="admin-header">
+        <h1>Administração</h1>
+    </header>
+    <main class="home hidden" id="admin-menu">
+        <p class="hint">Mapa, gravação e planta. A senha vale só nesta aba.</p>
+        <nav class="home-grid" aria-label="Ferramentas de administração">
+            <a class="card home-card" href="editor.html">
+                <strong>Editar mapa e pontos</strong>
+                <span>Checkpoints, conexões e posição na planta.</span>
+            </a>
+            <a class="card home-card" href="recorder.html">
+                <strong>Gravar trajeto</strong>
+                <span>Envia a caminhada e mostra o caminho devolvido.</span>
+            </a>
+            <a class="card home-card" href="map-config.html">
+                <strong>Configurar planta</strong>
+                <span>Imagem, pixels por metro e rotação.</span>
+            </a>
+            <a class="card home-card" href="qrcodes.html">
+                <strong>Gerar QR codes</strong>
+                <span>Imprime e baixa o QR de cada checkpoint.</span>
+            </a>
+        </nav>
+    </main>
+    <script type="module" src="../js/boot.js"></script>
+    <script type="module" src="../js/pages/admin-home.js"></script>
+</body>
+</html>

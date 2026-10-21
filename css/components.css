@@ -1,0 +1,754 @@
+/* ==========================================================================
+   POV — components.css
+   Controles, cartão, barra, folha, chips e o mapa Leaflet.
+   ========================================================================== */
+
+.top-bar,
+.top-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    min-height: var(--nav-h);
+    height: var(--nav-h);
+    padding: 0 var(--space-8);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+
+.top-bar::before,
+.top-nav::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--primary), var(--accent));
+    pointer-events: none;
+}
+
+.top-nav::-webkit-scrollbar { display: none; }
+
+.nav-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 0 var(--space-12);
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: max(16px, var(--font-size-body));
+    white-space: nowrap;
+    border-radius: var(--radius);
+}
+
+.nav-btn:hover {
+    background: var(--primary-soft);
+    color: var(--text);
+}
+
+.nav-btn.active {
+    background: var(--primary);
+    color: var(--on-primary);
+}
+
+.nav-btn:focus-visible,
+.nav-btn.active:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: -3px;
+}
+
+.nav-btn.active:focus-visible {
+    outline-color: var(--surface);
+}
+
+.badge-admin {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    flex: 0 0 auto;
+    margin-left: auto;
+    min-height: 32px;
+    padding: var(--space-4) var(--space-12);
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--on-primary);
+    background: var(--primary);
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.badge-homolog {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: var(--space-4) var(--space-12);
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    background: var(--warning);
+    border: 2px solid var(--warning-ink);
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.status-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.status-dot.online { background: var(--success-ink); }
+.status-dot.offline { background: var(--danger); }
+
+.title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-8);
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-8);
+    min-height: 48px;
+    padding: var(--space-12) var(--space-16);
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    cursor: pointer;
+    border-radius: var(--radius);
+    border: 2px solid transparent;
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn:hover { box-shadow: var(--shadow); }
+
+.btn:disabled,
+.btn[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: var(--on-primary);
+    border-color: var(--primary);
+}
+
+.btn-primary:hover { color: var(--on-primary); }
+
+.btn-secondary {
+    background: var(--surface);
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-secondary:hover {
+    background: var(--primary-soft);
+    color: var(--text);
+}
+
+.btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+
+.btn-ghost:hover {
+    background: var(--primary-soft);
+    color: var(--text);
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: var(--on-danger);
+    border-color: var(--danger);
+}
+
+.btn-danger:hover { color: var(--on-danger); }
+
+.btn-success {
+    background: var(--success);
+    color: var(--text);
+    border-color: var(--success-ink);
+}
+
+.card > .btn { width: 100%; }
+
+.card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    padding: var(--space-16);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+html.hc .card,
+html.hc .btn,
+html.hc input,
+html.hc select,
+html.hc textarea {
+    border-width: 2px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    margin: 0;
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 600;
+    color: var(--text);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+select,
+textarea,
+.text-field {
+    width: 100%;
+    min-height: 48px;
+    padding: var(--space-12) var(--space-16);
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 400;
+    color: var(--text);
+    background: var(--surface);
+    border: 2px solid var(--text-muted);
+    border-radius: var(--radius);
+}
+
+textarea { min-height: 96px; resize: vertical; }
+
+input::placeholder,
+textarea::placeholder { color: var(--text-muted); }
+
+select option {
+    background: var(--surface);
+    color: var(--text);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.hint {
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 400;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+.form-actions {
+    display: flex;
+    gap: var(--space-8);
+    margin-top: var(--space-4);
+}
+
+.form-actions .btn {
+    flex: 1 1 0;
+    width: auto;
+}
+
+.kpi {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-12);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.kpi-label {
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.kpi-value {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: var(--space-4) var(--space-12);
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 700;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border: 1px solid var(--primary);
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.badge.ok {
+    color: var(--success-ink);
+    background: var(--success-soft);
+    border-color: var(--success-ink);
+}
+
+.badge.warn {
+    color: var(--warning-ink);
+    background: var(--warning-soft);
+    border-color: var(--warning-ink);
+}
+
+.badge.danger {
+    color: var(--on-danger);
+    background: var(--danger);
+    border-color: var(--danger);
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: 0 var(--space-16);
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 600;
+    color: var(--primary);
+    background: var(--surface);
+    border: 2px solid var(--primary);
+    border-radius: 999px;
+}
+
+/* Seletor Visitante | Admin entra na T2. Aqui só a base visual. */
+.segmented {
+    display: flex;
+    width: max-content;
+    max-width: 100%;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    background: var(--primary-soft);
+    border-radius: var(--radius);
+}
+
+.segmented-item {
+    flex: 0 0 auto;
+    min-width: 48px;
+    min-height: 48px;
+    padding: var(--space-8) var(--space-12);
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 600;
+    color: var(--text);
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.segmented-item.is-active,
+.segmented-item[aria-checked="true"],
+.segmented-item[aria-selected="true"] {
+    background: var(--surface);
+    color: var(--primary);
+    border-color: var(--primary);
+    box-shadow: var(--shadow);
+}
+
+.role-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-8);
+    width: 100%;
+    padding: var(--space-8) var(--space-8) 0;
+}
+
+.role-bar--header {
+    width: auto;
+    max-width: 100%;
+    padding: 0;
+}
+
+.admin-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-8);
+    width: min(1180px, 100%);
+    margin: 0 auto;
+    padding: var(--space-12) var(--space-16) 0;
+}
+
+.admin-menu-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 48px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.admin-gate {
+    width: min(720px, calc(100% - 32px));
+    margin: var(--space-16) auto;
+}
+
+.site-footer {
+    width: min(880px, 100%);
+    margin: var(--space-32) auto 0;
+    padding: 0 var(--space-16) var(--space-32);
+}
+
+.admin-link {
+    color: var(--text-muted);
+    font-weight: 400;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.bottom-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1400;
+    max-height: min(80vh, 640px);
+    overflow: auto;
+    padding: var(--space-12) var(--space-16) var(--space-24);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: var(--shadow-soft);
+}
+
+.bottom-sheet-handle {
+    width: 48px;
+    height: 4px;
+    margin: var(--space-4) auto var(--space-12);
+    border-radius: 999px;
+    background: var(--text-muted);
+}
+
+.alert,
+.toast {
+    padding: var(--space-12) var(--space-16);
+    font-size: max(16px, var(--font-size-body));
+    line-height: 1.45;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.alert-success,
+.toast.ok,
+.toast.success { border-left-color: var(--success-ink); }
+
+.alert-warning,
+.toast.warn { border-left-color: var(--warning-ink); }
+
+.alert-danger,
+.toast.erro,
+.toast.error { border-left-color: var(--danger); }
+
+.alert-info,
+.toast.info { border-left-color: var(--primary); }
+
+.toast-stack {
+    position: fixed;
+    right: var(--space-16);
+    bottom: var(--space-16);
+    z-index: 4000;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    width: calc(100% - 32px);
+    max-width: 360px;
+    pointer-events: none;
+}
+
+.toast {
+    pointer-events: auto;
+    min-height: 48px;
+    cursor: pointer;
+}
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-16);
+    background: color-mix(in srgb, var(--text) 45%, transparent);
+}
+
+.modal-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    width: 100%;
+    max-width: 420px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: var(--space-24);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-soft);
+}
+
+.skeleton {
+    display: block;
+    min-height: 1em;
+    border-radius: var(--radius);
+    background: var(--primary-soft);
+    color: transparent;
+}
+
+summary {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    font-size: max(16px, var(--font-size-body));
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* Marcadores e controles do Leaflet na mesma paleta. */
+.leaflet-container {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    color: var(--text);
+    background: var(--bg);
+}
+
+.leaflet-bar {
+    border: 2px solid var(--text-muted) !important;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.leaflet-bar a,
+.leaflet-touch .leaflet-bar a {
+    width: 48px;
+    height: 48px;
+    line-height: 48px;
+    font-size: 22px;
+    background: var(--surface);
+    color: var(--text);
+    border-bottom: 1px solid var(--text-muted);
+}
+
+.leaflet-bar a:hover,
+.leaflet-touch .leaflet-bar a:hover {
+    background: var(--primary-soft);
+    color: var(--text);
+}
+
+.leaflet-bar a:first-child {
+    border-top-left-radius: var(--radius);
+    border-top-right-radius: var(--radius);
+}
+
+.leaflet-bar a:last-child {
+    border-bottom: 0;
+    border-bottom-left-radius: var(--radius);
+    border-bottom-right-radius: var(--radius);
+}
+
+.leaflet-control-attribution {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: max(16px, var(--font-size-body));
+    line-height: 1.3;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    padding: 0 var(--space-8);
+    max-width: calc(100% - 72px);
+}
+
+.leaflet-container .leaflet-control-attribution a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 48px;
+    min-width: 48px;
+    color: var(--primary);
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+    background: var(--surface);
+    color: var(--text);
+}
+
+.leaflet-popup-content-wrapper {
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.leaflet-popup-content {
+    margin: var(--space-12) var(--space-16);
+    font-size: max(16px, var(--font-size-body));
+    line-height: 1.45;
+    color: var(--text);
+}
+
+html.hc .route-line {
+    stroke: var(--primary) !important;
+}
+
+html.hc .route-line-outline {
+    stroke: var(--surface) !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+    width: 48px;
+    height: 48px;
+    font-size: 22px;
+    color: var(--text);
+    padding: 0;
+}
+
+.cp-icon,
+.blue-dot-icon {
+    background: transparent;
+    border: none;
+}
+
+.cp-dot {
+    display: block;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--success-ink);
+    border: 2px solid var(--surface);
+    box-shadow: 0 0 0 4px var(--accent);
+}
+
+.leaflet-tooltip.cp-label {
+    background: var(--surface);
+    border: 1px solid var(--text-muted);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    color: var(--text);
+    font-weight: 600;
+    font-size: max(16px, var(--font-size-body));
+    padding: var(--space-4) var(--space-8);
+}
+
+.leaflet-tooltip.cp-label::before { display: none; }
+
+.blue-dot {
+    width: 28px;
+    height: 28px;
+    position: relative;
+}
+
+.blue-dot-core {
+    position: absolute;
+    left: 6px;
+    top: 6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--you-marker);
+    border: 2px solid var(--surface);
+    box-shadow: 0 0 0 6px var(--you-halo);
+}
+
+.blue-dot-arrow {
+    position: absolute;
+    left: 10px;
+    top: 0;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 11px solid var(--you-marker);
+}
+
+.blue-dot.has-cone {
+    width: 96px;
+    height: 96px;
+}
+
+.blue-dot.has-cone .blue-dot-core {
+    left: 40px;
+    top: 40px;
+}
+
+.blue-dot.has-cone .blue-dot-arrow {
+    left: 44px;
+    top: 26px;
+}
+
+.blue-dot-cone {
+    position: absolute;
+    left: 50%;
+    top: 4px;
+    width: 56px;
+    height: 44px;
+    transform: translateX(-50%);
+    background: color-mix(in srgb, var(--you-marker) 42%, transparent);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+    pointer-events: none;
+}
+
+.map-popup p {
+    margin-top: var(--space-4);
+    color: var(--text-muted);
+    font-size: max(16px, var(--font-size-body));
+}
+
+@media (max-width: 480px) {
+    .toast-stack {
+        right: var(--space-8);
+        bottom: var(--space-8);
+        width: calc(100% - 16px);
+    }
+
+    .modal { padding: var(--space-12); }
+    .modal-content { padding: var(--space-16); }
+}
