@@ -7,6 +7,7 @@ import {
     emitRecalibrate,
     historyEffect,
     shouldRecalibrate,
+    showsRoute,
     transition
 } from '../js/app.js';
 
@@ -207,6 +208,56 @@ test('câmera negada durante a navegação volta para E4', () => {
     assert.equal(transition(failed, { type: 'retry' }).returnTo, State.E4);
     assert.equal(transition(failed, { type: 'dismiss-error' }).state, State.E4);
     assert.equal(transition(failed, { type: 'qr-resolved', origin: { slug: 'hall', label: 'Hall' } }).state, State.E4);
+});
+
+test('E3 troca destino e origem, e Iniciar rota vai para E4', () => {
+    const preview = session({ origin, destination, state: State.E3 });
+    assert.equal(showsRoute(State.E3), true);
+    assert.equal(showsRoute(State.E4), true);
+    assert.equal(showsRoute(State.E0), false);
+    assert.equal(showsRoute(State.E5), false);
+    assert.equal(showsRoute(State.ERRO_ROTA), false);
+
+    const swapped = transition(preview, {
+        type: 'select-destination',
+        destination: { slug: 'copa', label: 'Copa' }
+    });
+    assert.equal(swapped.state, State.E3);
+    assert.equal(swapped.destination.slug, 'copa');
+    assert.equal(swapped.origin.slug, 'recepcao');
+
+    const moved = transition(preview, {
+        type: 'qr-resolved',
+        origin: { slug: 'hall', label: 'Hall' }
+    });
+    assert.equal(moved.state, State.E3);
+    assert.equal(moved.origin.slug, 'hall');
+    assert.equal(moved.destination.slug, 'sala');
+    assert.equal(shouldRecalibrate(preview, { type: 'qr-resolved', origin: moved.origin }), false);
+
+    assert.equal(transition(preview, { type: 'start-route' }).state, State.E4);
+    assert.equal(transition(preview, { type: 'confirm-preview' }).state, State.E4);
+    const noOrigin = session({ destination, state: State.E3 });
+    assert.equal(canStartRoute(noOrigin), false);
+    assert.equal(transition(noOrigin, { type: 'confirm-preview' }).state, State.E3);
+    assert.equal(transition(noOrigin, { type: 'start-route' }).state, State.E3);
+});
+
+test('ERRO_ROTA abre a busca para trocar o destino e volta à prévia', () => {
+    const failed = transition(session({ origin, destination, state: State.E3 }), { type: 'route-error' });
+    assert.equal(failed.state, State.ERRO_ROTA);
+    assert.equal(showsRoute(failed.state), false);
+    const search = transition(failed, { type: 'open-search' });
+    assert.equal(search.state, State.E2);
+    assert.equal(search.origin.slug, 'recepcao');
+    const next = transition(search, {
+        type: 'select-destination',
+        destination: { slug: 'copa', label: 'Copa' }
+    });
+    assert.equal(next.state, State.E3);
+    assert.equal(next.destination.slug, 'copa');
+    assert.equal(next.origin.slug, 'recepcao');
+    assert.equal(showsRoute(next.state), true);
 });
 
 test('origem e destino entram por slug ou por objeto', () => {

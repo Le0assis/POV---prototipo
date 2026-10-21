@@ -43,7 +43,19 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {}) {
     start.textContent = 'Iniciar rota';
     start.setAttribute('aria-label', 'Iniciar rota');
 
-    expanded.append(points, start);
+    const meta = document.createElement('p');
+    meta.className = 'route-meta';
+    meta.hidden = true;
+    meta.setAttribute('aria-live', 'off');
+    meta.setAttribute('aria-atomic', 'true');
+    const visual = document.createElement('span');
+    visual.className = 'route-meta-visual';
+    visual.setAttribute('aria-hidden', 'true');
+    const spoken = document.createElement('span');
+    spoken.className = 'sr-only';
+    meta.append(visual, spoken);
+
+    expanded.append(points, meta, start);
     root.replaceChildren(compact, expanded);
 
     compact.addEventListener('click', () => {
@@ -60,13 +72,27 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {}) {
         if (typeof onStart === 'function') onStart();
     });
 
-    function update(session) {
+    function update(session, options = {}) {
         const current = session || {};
         const hasOrigin = Boolean(current.origin && current.origin.slug);
         const hasDestination = Boolean(current.destination && current.destination.slug);
         const compactMode = !hasOrigin && !hasDestination;
         compact.hidden = !compactMode;
         expanded.hidden = compactMode;
+
+        const summary = options.summary;
+        if (summary && summary.distanceLabel && summary.timeLabel) {
+            meta.hidden = false;
+            meta.setAttribute('aria-live', 'polite');
+            visual.textContent = `${summary.distanceLabel} · ${summary.timeLabel}`;
+            const announcement = summary.announcement || '';
+            if (spoken.textContent !== announcement) spoken.textContent = announcement;
+        } else {
+            meta.setAttribute('aria-live', 'off');
+            visual.textContent = '';
+            spoken.textContent = '';
+            meta.hidden = true;
+        }
 
         const originLabel = hasOrigin ? `${current.origin.label} (QR)` : 'Toque para ler o QR';
         const destinationLabel = hasDestination ? current.destination.label : 'Toque para buscar';
@@ -88,7 +114,9 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {}) {
                 : 'Destino. Toque para buscar.'
         );
 
-        const ready = hasOrigin && hasDestination;
+        let ready = hasOrigin && hasDestination;
+        if (current.state === 'E3') ready = ready && options.canStart === true;
+        if (current.state === 'E4' || current.state === 'E5' || current.state === 'ERRO_ROTA') ready = false;
         start.disabled = !ready;
         start.setAttribute('aria-disabled', ready ? 'false' : 'true');
     }

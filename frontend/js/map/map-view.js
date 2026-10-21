@@ -6,6 +6,7 @@
 import { adaptCheckpoints } from '../core/checkpoints.js';
 import { createFloorMap, resolvePlanImage } from './floor-map.js';
 import { contentPixels, createBlueDot, renderFloorLayers } from './layers.js';
+import { chromePadding, createRouteLayer } from './route-layer.js';
 import { loadFloorModel } from '../pages/floor-model.js';
 
 export async function mountMapView(element) {
@@ -44,12 +45,7 @@ export async function mountMapView(element) {
         status.textContent = message || '';
     }
 
-    function fit() {
-        floor.fitToContent(contentPixels(model));
-        map.invalidateSize();
-    }
-
-    recenter.addEventListener('click', fit);
+    recenter.addEventListener('click', fitContent);
 
     try {
         model = await loadFloorModel({ toast: () => {} });
@@ -75,10 +71,35 @@ export async function mountMapView(element) {
 
     renderFloorLayers(floor, model, { editable: false });
     tagCheckpointMarkers(floor, model.checkpoints);
-    fit();
-    window.requestAnimationFrame(fit);
+    const routeLayer = createRouteLayer(floor);
+    let routeActive = false;
 
-    function highlight(slug) {
+    function fitContent() {
+        map.invalidateSize();
+        if (routeActive) {
+            routeLayer.fit(routePadding());
+            return;
+        }
+        floor.fitToContent(contentPixels(model));
+    }
+
+    fitContent();
+    window.requestAnimationFrame(fitContent);
+
+    function routePadding() {
+        const mapRect = element.getBoundingClientRect();
+        const shell = element.closest('.visitor-shell');
+        const top = shell && shell.querySelector('.visitor-top');
+        const bottom = shell && shell.querySelector('.visitor-bottom');
+        const panel = document.getElementById('visitor-flow');
+        return chromePadding(mapRect, {
+            topRect: top ? top.getBoundingClientRect() : null,
+            bottomRect: bottom ? bottom.getBoundingClientRect() : null,
+            flowRect: panel && !panel.hidden ? panel.getBoundingClientRect() : null
+        });
+    }
+
+    function highlight(slug, { pan = true } = {}) {
         const wanted = slug ? String(slug) : '';
         let target = null;
         floor.checkpoints.eachLayer((marker) => {
@@ -88,7 +109,25 @@ export async function mountMapView(element) {
             if (typeof marker.setZIndexOffset === 'function') marker.setZIndexOffset(on ? 700 : 0);
             if (on) target = marker;
         });
-        if (target) floor.map.panTo(target.getLatLng(), { animate: false });
+        if (target && pan) floor.map.panTo(target.getLatLng(), { animate: false });
+    }
+
+    function showRoute(route, { fit = true } = {}) {
+        routeActive = true;
+        routeLayer.show(route);
+        if (!fit) return;
+        const apply = () => {
+            if (routeActive) routeLayer.fit(routePadding());
+        };
+        apply();
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => window.requestAnimationFrame(apply));
+        }
+    }
+
+    function clearRoute() {
+        routeActive = false;
+        routeLayer.clear();
     }
 
     let you = null;
@@ -120,9 +159,11 @@ export async function mountMapView(element) {
         floor,
         model,
         pxPerM,
-        recenter: fit,
+        recenter: fitContent,
         highlight,
-        showOrigin
+        showOrigin,
+        showRoute,
+        clearRoute
     };
 }
 

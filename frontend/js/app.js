@@ -2,7 +2,8 @@
  * Tela única do visitante.
  * Máquina: E0 Inicial, E1 Câmera, E2 Busca, E3 Prévia, E4 Navegando,
  * E5 Chegada, e os erros de câmera, rota, mapa e rede.
- * E2 lista destinos na folha. E3 ainda é o stub da prévia (a polilinha entra na T6).
+ * E2 lista destinos na folha. E3 calcula a rota, desenha e libera "Iniciar rota".
+ * E4 ainda é o stub da navegação (o passo a passo guiado entra na T7).
  */
 
 import { loadDestinationCatalog } from './core/destination-catalog.js';
@@ -16,6 +17,7 @@ import { createQrButton } from './ui/qr-button.js';
 import { mountRouteBar } from './ui/route-bar.js';
 import { mountSearchSheet } from './ui/search-sheet.js';
 import { mountMapView } from './map/map-view.js';
+import { planRoute } from './nav/routing.js';
 import { parseQr, parseScanLocation } from './qr/qr-format.js';
 import {
     formatHash,
@@ -43,7 +45,7 @@ const ERRORS = new Set([State.ERRO_CAMERA, State.ERRO_ROTA, State.ERRO_MAPA, Sta
 
 const ERROR_TEXT = {
     [State.ERRO_CAMERA]: 'Não foi possível abrir a câmera.',
-    [State.ERRO_ROTA]: 'Não foi possível montar a rota.',
+    [State.ERRO_ROTA]: 'Não encontramos um caminho entre esses pontos',
     [State.ERRO_MAPA]: 'Não foi possível carregar o mapa.',
     [State.ERRO_REDE]: 'Sem conexão com o servidor.'
 };
@@ -64,6 +66,11 @@ const INSTRUCTION = {
 
 export function canStartRoute(session) {
     return Boolean(session && session.origin && session.origin.slug && session.destination && session.destination.slug);
+}
+
+/** A polilinha fica no mapa na prévia e enquanto a navegação (E4) não sai. */
+export function showsRoute(state) {
+    return state === State.E3 || state === State.E4;
 }
 
 function eventPoint(value) {
@@ -105,7 +112,7 @@ function overlayReturn(session) {
 
 /**
  * Transição pura. Não mexe no DOM nem no histórico.
- * E3–E5 existem aqui; a tela delas ainda é um stub.
+ * E4 e E5 seguem stub. E3 já calcula a rota fora daqui.
  */
 export function transition(session, event) {
     const current = copySession(session);
@@ -170,10 +177,11 @@ export function transition(session, event) {
     if (type === 'start-route') {
         if (!canStartRoute(current)) return current;
         if (OVERLAYS.has(current.state) || ERRORS.has(current.state) || current.state === State.E4) return current;
+        if (current.state === State.E3) return { ...current, state: State.E4, returnTo: null };
         return { ...current, state: State.E3, returnTo: null };
     }
     if (type === 'confirm-preview') {
-        if (current.state !== State.E3) return current;
+        if (current.state !== State.E3 || !canStartRoute(current)) return current;
         return { ...current, state: State.E4 };
     }
     if (type === 'arrive') {
@@ -283,8 +291,52 @@ let scanRetry = null;
 let focusCameraError = false;
 let scanToken = 0;
 let renderedState = null;
+let routeResult = null;
+let routeSignature = '';
 
-function instructionFor(current) {
+function routeKey() {
+    const origin = session && session.origin && session.origin.slug;
+    const destination = session && session.destination && session.destination.slug;
+    if (!origin || !destination) return '';
+    return `${origin}>${destination}`;
+}
+
+function computeRouteForSession() {
+    const key = routeKey();
+    const drawing = Boolean(session) && showsRoute(session.state) && key;
+    if (!drawing) {
+        routeResult = null;
+        routeSignature = '';
+        return null;
+    }
+    if (!mapView || !mapView.model) return null;
+    if (!routeResult || routeResult.key !== key) {
+        const planned = planRoute({
+            origin: session.origin.slug,
+            destination: session.destination.slug,
+            checkpoints: mapView.model.checkpoints,
+            connections: mapView.model.connections || [],
+            mapConfig: mapView.model.config
+        });
+        routeResult = { key, ...planned };
+        if (!planned.ok) {
+            const failedKey = key;
+            const failedState = session.state;
+            queueMicrotask(() => {
+                if (!session || routeKey() !== failedKey || session.state !== failedState) return;
+                if (session.state === State.E3 || session.state === State.E4) {
+                    dispatch({ type: 'route-error' });
+                }
+            });
+        }
+    }
+    return routeResult;
+}
+
+function instructionFor(current, summary) {
+    if (summary && summary.announcement && (current.state === State.E3 || current.state === State.E4)) {
+        return summary.announcement;
+    }
     if (current.announceOrigin && current.origin && current.origin.label) {
         const where = `Você está em ${current.origin.label}`;
         if (current.state === State.E0 || current.state === State.E4) return where;
@@ -317,9 +369,19 @@ function render() {
         focusCameraError = true;
     }
     renderedState = session.state;
+    const planned = computeRouteForSession();
+    const summary = planned && planned.ok && showsRoute(session.state) ? planned.route.summary : null;
+    if (instructions) {
+        instructions.setAttribute('aria-live', summary ? 'off' : 'polite');
+        const text = instructionFor(session, summary);
+        if (instructions.textContent !== text) instructions.textContent = text;
+    }
     const shell = document.getElementById('visitor-shell');
     if (shell) shell.dataset.state = session.state;
-    routeBar.update(session);
+    routeBar.update(session, {
+        summary,
+        canStart: session.state === State.E3 ? Boolean(planned && planned.ok) : undefined
+    });
     if (searchField) {
         const label = session.destination
             ? `Destino atual: ${session.destination.label}. Para onde você quer ir?`
@@ -331,12 +393,6 @@ function render() {
     setInert(overlay);
     if (searchSheet) searchSheet.setOpen(session.state === State.E2);
     if (camera) camera.setOpen(session.state === State.E1);
-    if (mapView) {
-        mapView.highlight(session.destination && session.destination.slug);
-        const slug = session.origin && session.origin.slug;
-        const pin = pendingPin && pendingPin.slug === slug ? pendingPin.anchor : null;
-        mapView.showOrigin(slug, pin);
-    }
     const mapHost = document.getElementById('visitor-map');
     if (mapHost) {
         const where = session.origin && session.origin.label
@@ -344,51 +400,69 @@ function render() {
             : 'Mapa do prédio';
         mapHost.setAttribute('aria-label', where);
     }
-    renderFlow();
+    renderFlow(planned);
     renderBanner();
+    paintRoute(planned);
     if (session.state === State.ERRO_CAMERA && focusCameraError) {
         focusCameraError = false;
         const code = document.getElementById('camera-error-code');
         if (code && typeof code.focus === 'function') code.focus();
     }
-    if (instructions) {
-        const text = instructionFor(session);
-        if (instructions.textContent !== text) instructions.textContent = text;
-    }
 }
 
-function renderFlow() {
+function paintRoute(planned) {
+    if (!mapView) return;
+    const drawing = Boolean(planned && planned.ok && showsRoute(session.state));
+    const destination = session.destination && session.destination.slug;
+    if (typeof mapView.highlight === 'function') mapView.highlight(destination, { pan: !drawing });
+    if (drawing) {
+        mapView.showOrigin(null);
+        const signature = `${routeKey()}|${session.state}`;
+        const fit = routeSignature !== signature;
+        routeSignature = signature;
+        mapView.showRoute(planned.route, { fit });
+        return;
+    }
+    if (typeof mapView.clearRoute === 'function') mapView.clearRoute();
+    const slug = session.origin && session.origin.slug;
+    const pin = pendingPin && pendingPin.slug === slug ? pendingPin.anchor : null;
+    mapView.showOrigin(slug, pin);
+}
+
+function renderFlow(planned) {
     if (!flow) return;
     const keptCode = (flow.querySelector('#camera-error-code') || {}).value || '';
     if (session.state !== State.ERRO_CAMERA) flow.classList.remove('is-camera-error');
+    flow.classList.remove('is-preview');
     flow.replaceChildren();
-    const stub = session.state === State.E3 || session.state === State.E4 || session.state === State.E5;
+    const stub = session.state === State.E4 || session.state === State.E5;
+    const preview = session.state === State.E3;
     const error = ERRORS.has(session.state);
-    flow.hidden = !stub && !error;
-    if (!stub && !error) return;
+    flow.hidden = !stub && !preview && !error;
+    if (!stub && !preview && !error) return;
 
     const title = document.createElement('p');
     title.className = 'flow-title';
-    if (session.state === State.E3) {
-        // TODO: E3 Prévia — a polilinha da rota entra na T6.
-        title.textContent = 'Prévia da rota';
-        const parts = [title];
+    if (preview) {
+        flow.classList.add('is-preview');
         if (!(session.origin && session.origin.slug)) {
+            title.textContent = 'Prévia da rota';
             const notice = document.createElement('p');
             notice.className = 'flow-notice';
             notice.id = 'preview-origin-notice';
             notice.textContent = INSTRUCTION.previewNotice;
-            parts.push(notice);
+            flow.append(title, notice, flowButton('Voltar da prévia', 'Voltar', 'cancel-preview'));
+            return;
         }
-        parts.push(
-            flowButton('Confirmar prévia', 'Confirmar', 'confirm-preview'),
-            flowButton('Voltar da prévia', 'Voltar', 'cancel-preview')
-        );
-        flow.append(...parts);
+        if (!planned || !planned.ok) {
+            flow.hidden = true;
+            return;
+        }
+        flow.append(stepsPanel(planned.route), flowButton('Voltar da prévia', 'Voltar', 'cancel-preview'));
         return;
     }
     if (session.state === State.E4) {
-        // TODO: E4 Navegando — acompanhar o passo a passo no mapa.
+        // TODO: E4 Navegando — o passo a passo guiado entra na T7.
         title.textContent = 'Navegando';
         flow.append(title, flowButton('Cheguei ao destino', 'Cheguei', 'arrive'), flowButton('Encerrar navegação', 'Encerrar', 'stop-navigation'));
         return;
@@ -405,9 +479,51 @@ function renderFlow() {
         flow.classList.add('is-camera-error');
         return;
     }
+    if (session.state === State.ERRO_ROTA) {
+        title.textContent = ERROR_TEXT[State.ERRO_ROTA];
+        const change = flowButton('Trocar destino', 'Trocar destino', 'open-search');
+        change.classList.remove('btn-secondary');
+        change.classList.add('btn-primary');
+        flow.append(title, change);
+        return;
+    }
     flow.classList.remove('is-camera-error');
     title.textContent = ERROR_TEXT[session.state] || 'Algo deu errado.';
     flow.append(title, flowButton('Voltar ao mapa', 'Voltar', 'dismiss-error'), flowButton('Tentar de novo', 'Tentar de novo', 'retry'));
+}
+
+function stepsPanel(route) {
+    const section = document.createElement('section');
+    section.className = 'route-steps';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'route-steps-toggle';
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.setAttribute('aria-controls', 'route-step-list');
+    toggle.textContent = 'Passos da rota';
+    const list = document.createElement('ol');
+    list.id = 'route-step-list';
+    list.className = 'route-step-list';
+    list.setAttribute('aria-label', 'Passos da rota');
+    const steps = route && Array.isArray(route.steps) ? route.steps : [];
+    if (!steps.length) {
+        const item = document.createElement('li');
+        item.textContent = 'Você já está neste ponto';
+        list.append(item);
+    } else {
+        steps.forEach((step) => {
+            const item = document.createElement('li');
+            item.textContent = step.text;
+            list.append(item);
+        });
+    }
+    toggle.addEventListener('click', () => {
+        const open = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+        list.hidden = open;
+    });
+    section.append(toggle, list);
+    return section;
 }
 
 function cameraErrorForm(kept) {
@@ -722,11 +838,7 @@ export function mountVisitorApp() {
     if (mapHost) {
         mapReady = mountMapView(mapHost).then((view) => {
             mapView = view;
-            if (session && session.destination) view.highlight(session.destination.slug);
-            if (session && session.origin) {
-                const pin = pendingPin && pendingPin.slug === session.origin.slug ? pendingPin.anchor : null;
-                view.showOrigin(session.origin.slug, pin);
-            }
+            render();
             return view;
         }).catch(() => null);
     }
