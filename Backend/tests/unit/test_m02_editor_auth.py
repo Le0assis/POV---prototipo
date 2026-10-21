@@ -25,6 +25,7 @@ PROTECTED = {
     "create_route",
     "reset_session",
     "update_checkpoint_category",
+    "check_editor_auth",
 }
 PUBLIC = {
     "get_map_layout",
