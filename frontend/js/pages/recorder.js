@@ -9,7 +9,7 @@ import { HeadingProvider } from '../sensors/heading.js';
 import { StepDetector } from '../sensors/step-detector.js';
 import * as api from '../core/api.js';
 import { $, escapeHtml, fillSelect, formatNum } from '../core/dom.js';
-import { toast } from '../ui/toast.js';
+import { toast } from '../core/toast.js';
 import { sparklineColor } from '../core/colors.js';
 import { renderPathPreview, pathDurationSeconds } from '../map/path-preview.js';
 import { pathFromProcessResponse } from '../route/model.js';
@@ -117,9 +117,7 @@ async function toggle() {
 
 function capture(event) {
     if (!recording) return;
-    // Chrome para Android entrega devicemotion com accelerationIncludingGravity
-    // em m/s². acceleration (sem gravidade) zeraria o pipeline, que espera ~9,8.
-    // Não há fallback silencioso: a amostra é ignorada e o aviso aparece uma vez.
+    // Chrome Android: accelerationIncludingGravity em m/s². Sem gravidade, a amostra é ignorada.
     const acc = event.accelerationIncludingGravity;
     if (!acc || !axisFinite(acc.x) || !axisFinite(acc.y) || !axisFinite(acc.z)) {
         if (!warnedNoGravity) {
@@ -129,9 +127,7 @@ function capture(event) {
         return;
     }
 
-    // W3C / Chrome Android: rotationRate em graus/s no mesmo eixo do acelerômetro.
-    // alpha gira em Z, beta em X, gamma em Y. O mapeamento antigo (alpha→x,
-    // beta→y, gamma→z) trocava os eixos e o Madgwick inclinava a vertical.
+    // rotationRate em graus/s: beta→x, gamma→y, alpha→z.
     const rot = event.rotationRate || {};
     const gyroX = numberOrZero(rot.beta) * (Math.PI / 180);
     const gyroY = numberOrZero(rot.gamma) * (Math.PI / 180);
@@ -141,8 +137,7 @@ function capture(event) {
     const accelZ = numberOrZero(acc.z);
     const mag = Math.hypot(accelX, accelY, accelZ);
     const gyroMag = Math.hypot(gyroX, gyroY, gyroZ);
-    // mag_* continua sendo a orientação (alpha/beta/gamma), não o magnetômetro.
-    // No Chrome para Android o HeadingProvider prefere deviceorientationabsolute.
+    // mag_* aqui é alpha/beta/gamma, não o magnetômetro.
     const orientation = heading.orientation;
     const timestamp = motionTimestampSeconds(event);
     lastMotionTimestamp = timestamp;
@@ -335,14 +330,7 @@ function axisFinite(value) {
     return value !== null && value !== undefined && Number.isFinite(Number(value));
 }
 
-/**
- * Chrome para Android: event.timeStamp é DOMHighResTimeStamp (ms desde
- * performance.timeOrigin), com fração de ms. Date.now() no handler marca a
- * hora de chegada e junta vários devicemotion no mesmo milissegundo.
- * Epoch em segundos = (timeOrigin + timeStamp) / 1000, a mesma base que o
- * backend já espera. Se o timestamp não avança (lote no mesmo task), usa
- * event.interval (ms; no Chrome Android costuma ser ~16, 60 Hz).
- */
+/** Epoch em segundos a partir de timeOrigin + timeStamp. Se não avança, soma event.interval. */
 function motionTimestampSeconds(event) {
     let timestamp = null;
     const stamp = event && event.timeStamp;

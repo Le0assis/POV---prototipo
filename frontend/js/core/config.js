@@ -15,6 +15,9 @@ function resolveApiBaseUrl() {
 
 export const API_BASE_URL = resolveApiBaseUrl();
 
+/** Liga o seletor Visitante | Admin. */
+export const SHOW_ROLE_TOGGLE = true;
+
 export const STEP_LENGTH_DEFAULT = 0.70;
 export const WEINBERG_K = 0.45;
 export const STEP_MIN_M = 0.40;

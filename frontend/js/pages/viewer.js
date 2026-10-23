@@ -4,7 +4,7 @@
 
 import { insertTopNav } from '../components/nav.js';
 import { $ } from '../core/dom.js';
-import { toast } from '../ui/toast.js';
+import { toast } from '../core/toast.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels } from '../map/layers.js';
 import { loadFloorModel } from './floor-model.js';

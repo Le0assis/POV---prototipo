@@ -4,7 +4,7 @@ import { insertTopNav } from '../components/nav.js';
 import * as api from '../core/api.js';
 import { $, fillSelect } from '../core/dom.js';
 import { whenAdminGranted } from '../core/role-toggle.js';
-import { toast } from '../ui/toast.js';
+import { toast } from '../core/toast.js';
 import { degToRad } from '../sensors/angles.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels } from '../map/layers.js';

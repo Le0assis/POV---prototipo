@@ -290,28 +290,11 @@ git checkout dev
 
 ---
 
-## 8. Frontend do administrador
+## 8. Frontend
 
-As páginas ficam em `frontend/` e são servidas pelo FastAPI (`/`, `/recorder`, `/routes`) e também abrem por arquivo, com caminhos relativos.
+O visitante abre `frontend/index.html`. A administração fica em `frontend/admin/` (editor, gravador, planta e QR). Rotas salvas, simulação, dashboard e as páginas da raiz que só redirecionavam saíram.
 
-```text
-frontend/
-├── index.html          painel: mapa, checkpoints, conexões, rota planejada
-├── recorder.html       gravação da caminhada e telemetria
-├── routes.html         rotas salvas, Testar e Simular rota
-├── manifest.json
-├── assets/icon.svg
-├── css/                base.css, dashboard.css, recorder.css, routes.css, compass.css
-└── js/
-    ├── core/           config.js (URL da API), api.js (HTTP), dom.js, toast.js
-    ├── components/     nav.js, compass.js
-    ├── sensors/        angles.js, heading.js, step-detector.js
-    └── pages/          dashboard.js, recorder.js, routes.js
-```
-
-**Simular rota** (em Rotas) conta os passos na sessão local, a 1,8 passos/s, e gira a bússola ao longo dos segmentos. O checkbox "Sincronizar com backend" manda cada passo para `/api/localize`.
-
-**Calibração da bússola:** no teste real, o botão "Calibrar (estou de frente para o corredor)" guarda um offset no navegador. O heading do grafo é relativo à pose da gravação e anti-horário; a bússola usa rumo horário. A conversão está só em `frontend/js/sensors/angles.js`.
+**Calibração da bússola:** o heading do grafo é anti-horário e a bússola é horária. A conversão está só em `frontend/js/sensors/angles.js`.
 
 ## 9. Frontend — fase 0
 

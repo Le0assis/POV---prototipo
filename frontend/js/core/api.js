@@ -1,14 +1,4 @@
-/**
- * Camada HTTP única do frontend POV.
- * Toda chamada ao backend passa por aqui.
- *
- * Escritas protegidas enviam `X-Editor-Password` (sessionStorage, mesma chave
- * no editor, no gravador e nas rotas). Inclui process-raw, checkpoints, edges,
- * posição, map-config e POST/DELETE /api/routes.
- * 401 pede a senha de novo e tenta outra vez. 503 avisa que a senha não está
- * configurada no servidor. Leitura (viewer, locate) não pede senha.
- * A entrada na administração confere a senha com GET /api/auth/check.
- */
+/** HTTP do frontend. Escritas protegidas enviam X-Editor-Password. */
 
 import { API_BASE_URL } from './config.js';
 import { trapTabKey } from '../ui/focus-trap.js';
@@ -307,29 +297,6 @@ export function resolveCheckpoint({ b, cp } = {}) {
     if (b != null && b !== '') query.b = b;
     if (cp != null && cp !== '') query.cp = cp;
     return request('/api/checkpoints/resolve', { query });
-}
-
-export function getRoutes() {
-    return request('/api/routes');
-}
-
-export function getRoute(id) {
-    return request(`/api/routes/${encodeURIComponent(id)}`);
-}
-
-export function createRoute({ start_node, end_node, name }) {
-    return editorWrite('/api/routes', {
-        method: 'POST',
-        body: { start_node, end_node, name }
-    });
-}
-
-export function deleteRoute(id) {
-    return editorWrite(`/api/routes/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export function getCompassRoute(start, end) {
-    return request('/api/compass_route', { query: { start, end } });
 }
 
 export function saveCheckpoint(name) {

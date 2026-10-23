@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { SHOW_ROLE_TOGGLE } from '../js/config.js';
+import { SHOW_ROLE_TOGGLE } from '../js/core/config.js';
 import {
     PASSWORD_UNCONFIGURED_MESSAGE,
     PASSWORD_WRONG_MESSAGE,
@@ -273,7 +273,7 @@ test('nenhum código valida a senha com DELETE', () => {
 });
 
 test('páginas de visitante e de admin carregam o seletor', () => {
-    ['index.html', 'viewer.html', 'locate.html', 'routes.html'].forEach((page) => {
+    ['index.html', 'viewer.html', 'locate.html'].forEach((page) => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
         assert.match(html, /js\/boot\.js/, page);
     });

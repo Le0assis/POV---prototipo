@@ -7,7 +7,7 @@
 import { insertTopNav } from '../components/nav.js';
 import { getPdrConfig } from '../core/api.js';
 import { $, fillSelect, formatNum } from '../core/dom.js';
-import { toast } from '../ui/toast.js';
+import { toast } from '../core/toast.js';
 import { HeadingProvider } from '../sensors/heading.js';
 import { StepDetector } from '../sensors/step-detector.js';
 import { metersToPixels, plantHeadingToScreenDeg } from '../map/coords.js';

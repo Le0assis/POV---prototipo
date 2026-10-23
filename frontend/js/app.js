@@ -1,10 +1,4 @@
-/**
- * Tela única do visitante.
- * Máquina: E0 Inicial, E1 Câmera, E2 Busca, E3 Prévia, E4 Navegando,
- * E5 Chegada, e os erros de câmera, rota, mapa e rede.
- * E2 lista destinos na folha. E3 calcula a rota, desenha e libera "Iniciar rota".
- * E4 anda na polilinha da rota (passos + heading). E5 confirma a chegada.
- */
+/** Visitante: E0 a E5, mais erros de câmera, rota, mapa e rede. */
 
 import { getPdrConfig } from './core/api.js';
 import { loadDestinationCatalog } from './core/destination-catalog.js';

@@ -11,8 +11,7 @@ const PING_INTERVAL_MS = 10000;
 const LINKS = [
     { key: 'home', aliases: ['index', 'dashboard', 'nav'], href: 'index.html', label: 'Início' },
     { key: 'viewer', aliases: [], href: 'viewer.html', label: 'Mapa do prédio' },
-    { key: 'locate', aliases: [], href: 'locate.html', label: 'Navegar' },
-    { key: 'routes', aliases: [], href: 'routes.html', label: 'Rotas' }
+    { key: 'locate', aliases: [], href: 'locate.html', label: 'Navegar' }
 ];
 
 function rootPrefix() {

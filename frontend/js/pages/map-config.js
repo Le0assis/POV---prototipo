@@ -2,7 +2,7 @@ import { insertTopNav } from '../components/nav.js';
 import { getMapConfig, saveMapConfig } from '../core/api.js';
 import { $ } from '../core/dom.js';
 import { whenAdminGranted } from '../core/role-toggle.js';
-import { toast } from '../ui/toast.js';
+import { toast } from '../core/toast.js';
 import { normalizeMapConfig } from '../route/model.js';
 import {
     degreesFromRadians,

@@ -4,7 +4,7 @@
  * Quem digita uma senha nova passa por uma chamada protegida leve antes de seguir.
  */
 
-import { SHOW_ROLE_TOGGLE } from '../config.js';
+import { SHOW_ROLE_TOGGLE } from './config.js';
 import {
     clearEditorPassword,
     ensureEditorPassword,
