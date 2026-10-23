@@ -140,10 +140,25 @@ def aplicar_migracao_004(db: ConexaoBD) -> None:
     spec.loader.exec_module(module)
     module.apply(db)
 
+def conexao_from_settings() -> ConexaoBD:
+    """Host, porta, base, usuário e senha saem de ``DB_*`` (padrão do XAMPP)."""
+    from api.envfile import load_env_file
+    from api.settings import get_settings
+
+    load_env_file()
+    cfg = get_settings()
+    return ConexaoBD(
+        host=cfg.db_host,
+        database=cfg.db_name,
+        user=cfg.db_user,
+        password=cfg.db_password,
+        port=cfg.db_port,
+    )
+
+
 if __name__ == "__main__":
-    # Script para você rodar de forma isolada uma única vez e preparar o XAMPP
-    # Certifique-se de que o banco 'POV' já foi criado no phpMyAdmin!
-    conexao = ConexaoBD(host="localhost", database="POV", user="root", password="")
+    # O banco nomeado em DB_NAME já precisa existir no MySQL.
+    conexao = conexao_from_settings()
     conexao.connect()
     
     if conexao.connection:

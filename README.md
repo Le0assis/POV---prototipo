@@ -145,7 +145,7 @@ Acesse o diretório `Backend` com o `venv` ativado:
 cd Backend
 # Senha do editor: só o hash argon2id. Gere com python scripts/hash_password.py
 # e cole em .env na raiz (EDITOR_PASSWORD_HASH). Não exporte a senha em claro.
-uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
+uvicorn api.app:app --reload --host 127.0.0.1 --port 8000 --forwarded-allow-ips=127.0.0.1
 
 ```
 
@@ -155,7 +155,7 @@ uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 
 ### Senha do editor do mapa
 
-O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha e sem hash. Há uma senha só. No `.env` fica `EDITOR_PASSWORD_HASH`, um hash argon2id. Gere com `python scripts/hash_password.py` a partir de `Backend/` (a senha é pedida no terminal, não vai para o histórico). A API carrega o `.env` da raiz na subida; uma variável já exportada no shell não é substituída. O header continua `X-Editor-Password`. A comparação é `PasswordHasher.verify` (argon2id). Oito senhas erradas no mesmo cliente, em cinco minutos, respondem **429**. Pelo túnel o par local é 127.0.0.1; o IP usado é `CF-Connecting-IP`.
+O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha e sem hash. Há uma senha só. No `.env` fica `EDITOR_PASSWORD_HASH`, um hash argon2id. Gere com `python scripts/hash_password.py` a partir de `Backend/` (a senha é pedida no terminal, não vai para o histórico). A API carrega o `.env` da raiz na subida; uma variável já exportada no shell não é substituída. O header continua `X-Editor-Password`. A comparação é `PasswordHasher.verify` (argon2id). Oito senhas erradas no mesmo cliente, em cinco minutos, respondem **429**. A contagem e o incremento usam o mesmo lock. No máximo quatro conferências argon2 ao mesmo tempo; o excesso também é **429**, sem esperar na fila. `CF-Connecting-IP` e `X-Forwarded-For` só entram se o par do socket estiver em `TRUSTED_PROXIES` (lista separada por vírgula; `*` é ignorado). Sem essa variável, os headers não mudam o cliente. O comando do uvicorn acima fixa `--forwarded-allow-ips=127.0.0.1`. Não use `*`.
 
 | Situação | Resposta |
 | --- | --- |

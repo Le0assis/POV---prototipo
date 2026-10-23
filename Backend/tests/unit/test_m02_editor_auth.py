@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import ast
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from argon2.exceptions import VerifyMismatchError
 from fastapi import HTTPException
 
 from argon2 import PasswordHasher
@@ -14,6 +18,9 @@ from api.editor_auth import (
     BAD_HASH_DETAIL,
     LOCKED_DETAIL,
     MISSING_HASH_DETAIL,
+    VERIFY_SLOTS,
+    _MAX_TRACKED_CLIENTS,
+    _failures,
     check_editor_password,
     client_key,
     make_password_hash,
@@ -149,11 +156,96 @@ def test_require_editor_password_returns_429(monkeypatch):
     assert locked.value.detail == LOCKED_DETAIL
 
 
-def test_loopback_uses_cloudflare_ip():
-    request = _Client("127.0.0.1", {"cf-connecting-ip": "203.0.113.50"})
-    assert client_key(request) == "203.0.113.50"
+def test_untrusted_peer_ignores_forwarded_headers(monkeypatch):
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    loopback = _Client("127.0.0.1", {
+        "cf-connecting-ip": "203.0.113.50",
+        "x-forwarded-for": "198.51.100.9",
+    })
+    assert client_key(loopback) == "127.0.0.1"
     public = _Client("203.0.113.7", {"cf-connecting-ip": "198.51.100.9"})
     assert client_key(public) == "203.0.113.7"
+
+
+def test_trusted_proxy_list_is_explicit(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1")
+    request = _Client("127.0.0.1", {"cf-connecting-ip": "203.0.113.50"})
+    assert client_key(request) == "203.0.113.50"
+    monkeypatch.setenv("TRUSTED_PROXIES", "*")
+    assert client_key(request) == "127.0.0.1"
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "--forwarded-allow-ips" in readme
+    assert "forwarded-allow-ips=*" not in readme
+    assert "forwarded-allow-ips *" not in readme
+
+
+def test_rotating_forwarded_headers_do_not_bypass_429(monkeypatch):
+    _use_hash(monkeypatch)
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    set_attempt_limit(2)
+    for index in range(2):
+        request = _Client("198.51.100.8", {
+            "cf-connecting-ip": f"203.0.113.{index}",
+            "x-forwarded-for": f"198.51.100.{index}",
+        })
+        with pytest.raises(HTTPException) as exc:
+            require_editor_password(request, x_editor_password="errada")
+        assert exc.value.status_code == 401
+    rotated = _Client("198.51.100.8", {
+        "cf-connecting-ip": "203.0.113.99",
+        "x-forwarded-for": "198.51.100.99",
+    })
+    with pytest.raises(HTTPException) as locked:
+        require_editor_password(rotated, x_editor_password="errada")
+    assert locked.value.status_code == 429
+
+
+def test_forty_parallel_bad_attempts_yield_429(monkeypatch):
+    _use_hash(monkeypatch)
+    set_attempt_limit(8)
+    gate = threading.Event()
+    inside = threading.Semaphore(0)
+
+    def verify(_encoded, _password):
+        inside.release()
+        assert gate.wait(timeout=3)
+        raise VerifyMismatchError()
+
+    class _SlowHasher:
+        def verify(self, _encoded, _password):
+            verify(_encoded, _password)
+
+    monkeypatch.setattr("api.editor_auth._hasher", _SlowHasher())
+    request = _Client("203.0.113.40")
+
+    def once() -> int:
+        try:
+            require_editor_password(request, x_editor_password="errada")
+        except HTTPException as exc:
+            return exc.status_code
+        return 200
+
+    with ThreadPoolExecutor(max_workers=40) as pool:
+        pending = [pool.submit(once) for _ in range(40)]
+        for _ in range(VERIFY_SLOTS):
+            assert inside.acquire(timeout=3)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if sum(item.done() for item in pending) >= 40 - VERIFY_SLOTS:
+                break
+            time.sleep(0.01)
+        gate.set()
+        codes = [item.result(timeout=5) for item in pending]
+    assert codes.count(200) == 0
+    assert codes.count(401) <= VERIFY_SLOTS
+    assert codes.count(429) >= 40 - 8
+
+
+def test_failure_log_is_bounded():
+    now = 1_000_000.0
+    for index in range(_MAX_TRACKED_CLIENTS + 25):
+        note_failure(f"client-{index}", now=now)
+    assert len(_failures) <= _MAX_TRACKED_CLIENTS
 
 
 def _guarded_functions(path: Path) -> set[str]:

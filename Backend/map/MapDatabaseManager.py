@@ -8,6 +8,7 @@ from mysql.connector import IntegrityError
 
 from datasets.ManagerDatabase import (
     ConexaoBD,
+    DatabaseBusy,
     DatabaseUnavailable,
     request_connection,
     request_session,
@@ -308,6 +309,8 @@ class MapDatabaseManager:
                     if not self.db.begin_transaction():
                         if self._lock_conflict() and attempt == 0:
                             continue
+                        if self._lock_conflict():
+                            raise DatabaseBusy()
                         return False
                     try:
                         self._lock_checkpoints(source, target)
@@ -318,11 +321,15 @@ class MapDatabaseManager:
                         if not self.db.commit_transaction():
                             raise RuntimeError("commit da aresta falhou")
                         return True
+                    except DatabaseBusy:
+                        raise
                     except Exception as exc:
                         print(f"Aresta revertida: {exc}")
                         self.db.rollback_transaction()
                         if self._lock_conflict() and attempt == 0:
                             continue
+                        if self._lock_conflict():
+                            raise DatabaseBusy() from exc
                         return False
         return False
 
@@ -533,6 +540,8 @@ class MapDatabaseManager:
                         print("Erro ao abrir transação de walk_trace")
                         if self._lock_conflict() and attempt == 0:
                             continue
+                        if self._lock_conflict():
+                            raise DatabaseBusy()
                         return None
                     try:
                         payload = self._write_walk(
@@ -541,11 +550,15 @@ class MapDatabaseManager:
                         if not self.db.commit_transaction():
                             raise RuntimeError("commit da trajetória falhou")
                         return payload
+                    except DatabaseBusy:
+                        raise
                     except Exception as exc:
                         print(f"Trajetória revertida: {exc}")
                         self.db.rollback_transaction()
                         if self._lock_conflict() and attempt == 0:
                             continue
+                        if self._lock_conflict():
+                            raise DatabaseBusy() from exc
                         return None
         return None
 

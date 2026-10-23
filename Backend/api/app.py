@@ -6,6 +6,7 @@ from pathlib import Path
 
 from datasets.ManagerDatabase import (
     ConexaoBD,
+    DatabaseBusy,
     DatabaseUnavailable,
     drain_pool,
     request_session,
@@ -78,6 +79,16 @@ app.add_middleware(OriginCORSMiddleware)
 async def mysql_unavailable(_request, exc: DatabaseUnavailable):
     """Connect falhou. Não segue com a conexão modelo do processo."""
     return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(DatabaseBusy)
+async def mysql_busy(_request, exc: DatabaseBusy):
+    """Lock ou pool esgotado depois da nova tentativa."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "5"},
+    )
 
 
 topo_map = TopologicalMap()

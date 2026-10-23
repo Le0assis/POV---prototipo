@@ -4,6 +4,27 @@ from __future__ import annotations
 
 from .settings import get_settings
 
+# O preflight não devolve o que o navegador pediu. Só estes nomes.
+_ALLOWED_REQUEST_HEADERS = frozenset({
+    "accept",
+    "authorization",
+    "content-type",
+    "x-editor-password",
+})
+
+
+def _allow_headers(requested: str | None) -> str:
+    if not requested:
+        return "Content-Type, X-Editor-Password"
+    chosen = []
+    for part in requested.split(","):
+        name = part.strip()
+        if name.lower() in _ALLOWED_REQUEST_HEADERS:
+            chosen.append(name)
+    if not chosen:
+        return "Content-Type, X-Editor-Password"
+    return ", ".join(chosen)
+
 
 def _header(scope, name: bytes) -> str | None:
     for key, value in scope.get("headers") or ():
@@ -31,8 +52,7 @@ class OriginCORSMiddleware:
             if not allowed or origin is None:
                 await self.app(scope, receive, send)
                 return
-            requested = _header(scope, b"access-control-request-headers")
-            allow_headers = requested or "Content-Type, X-Editor-Password"
+            allow_headers = _allow_headers(_header(scope, b"access-control-request-headers"))
             encoded = origin.encode("latin-1")
             headers = [
                 (b"access-control-allow-origin", encoded),

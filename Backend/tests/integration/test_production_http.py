@@ -50,12 +50,14 @@ def test_production_preflight_allows_the_editor_header(monkeypatch):
         headers={
             "Origin": "https://www.pov-unimar.com",
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "X-Editor-Password",
+            "Access-Control-Request-Headers": "X-Editor-Password, X-Injected",
         },
     )
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "https://www.pov-unimar.com"
-    assert "x-editor-password" in response.headers["access-control-allow-headers"].lower()
+    allowed = response.headers["access-control-allow-headers"].lower()
+    assert "x-editor-password" in allowed
+    assert "x-injected" not in allowed
     assert "access-control-allow-credentials" not in response.headers
 
 

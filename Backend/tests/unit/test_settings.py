@@ -50,6 +50,23 @@ def test_cors_origins_replaces_the_list(monkeypatch):
     ]
 
 
+def test_create_tables_uses_db_settings(monkeypatch):
+    from datasets.create_tables import conexao_from_settings
+
+    monkeypatch.setenv("DB_HOST", "db.internal")
+    monkeypatch.setenv("DB_PORT", "3307")
+    monkeypatch.setenv("DB_NAME", "pov_test")
+    monkeypatch.setenv("DB_USER", "pov")
+    monkeypatch.setenv("DB_PASSWORD", "local-only")
+    conn = conexao_from_settings()
+    assert conn.host == "db.internal"
+    assert conn.port == 3307
+    assert conn.database == "pov_test"
+    assert conn.user == "pov"
+    assert conn.password == "local-only"
+    assert conn.connection is None
+
+
 def test_test_routes_flag_parses_common_words(monkeypatch):
     monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "on")
     assert get_settings().pov_enable_test_routes is True

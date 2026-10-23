@@ -24,6 +24,7 @@ CONNECT_TIMEOUT_S = 5
 # Comando SQL. O conector zera o timeout do socket depois do login.
 COMMAND_TIMEOUT_S = 30
 POOL_MAX_IDLE = 8
+POOL_MAX_TOTAL = 16
 
 # Conexão da requisição atual. Fora de uma requisição o valor é None:
 # o processo não guarda uma sessão aberta só para pingar a cada GET.
@@ -34,10 +35,18 @@ request_connection: ContextVar["ConexaoBD | None"] = ContextVar(
 
 _pool_lock = threading.Lock()
 _idle: list["ConexaoBD"] = []
+_open = 0
 
 
 class DatabaseUnavailable(Exception):
     """O connect não abriu. A API responde 503 e não usa outra sessão."""
+
+
+class DatabaseBusy(Exception):
+    """Lock do InnoDB ou pool no limite, depois da nova tentativa."""
+
+    def __init__(self, message: str = "O banco está ocupado. Tente de novo em alguns segundos.") -> None:
+        super().__init__(message)
 
 
 def _tcp_host(host: str) -> str:
@@ -382,13 +391,26 @@ class ConexaoBD:
             print("Conexão encerrada.")
 
 
+def _release_slot() -> None:
+    global _open
+    with _pool_lock:
+        if _open > 0:
+            _open -= 1
+
+
 def checkout_connection(template: ConexaoBD) -> ConexaoBD:
-    """Pega uma sessão ociosa ou abre outra. Não bloqueia se o pool acabar."""
+    """Pega uma sessão ociosa ou abre outra, até ``POOL_MAX_TOTAL``."""
+    global _open
     with _pool_lock:
         while _idle:
             cached = _idle.pop()
             if cached.connection is not None and cached.cursor is not None:
                 return cached
+            _open = max(0, _open - 1)
+            cached.disconnect(announce=False)
+        if _open >= POOL_MAX_TOTAL:
+            raise DatabaseBusy("Não há conexão livre no pool.")
+        _open += 1
     opened = ConexaoBD(
         template.host,
         template.database,
@@ -396,7 +418,13 @@ def checkout_connection(template: ConexaoBD) -> ConexaoBD:
         template.password,
         template.port,
     )
-    opened.connect(announce=False)
+    try:
+        opened.connect(announce=False)
+    except Exception:
+        _release_slot()
+        raise
+    if opened.connection is None:
+        _release_slot()
     return opened
 
 
@@ -406,12 +434,14 @@ def checkin_connection(conn: ConexaoBD | None) -> None:
         return
     if not conn.reset_for_pool():
         conn.disconnect(announce=False)
+        _release_slot()
         return
     with _pool_lock:
         if len(_idle) < POOL_MAX_IDLE:
             _idle.append(conn)
             return
     conn.disconnect(announce=False)
+    _release_slot()
 
 
 @contextmanager
@@ -438,9 +468,11 @@ def request_session(template: ConexaoBD):
 
 def drain_pool() -> None:
     """Fecha o que estiver ocioso. Usado no shutdown e entre testes."""
+    global _open
     with _pool_lock:
         idle = list(_idle)
         _idle.clear()
+        _open = max(0, _open - len(idle))
     for conn in idle:
         try:
             conn.disconnect(announce=False)

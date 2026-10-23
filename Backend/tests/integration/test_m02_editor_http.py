@@ -318,6 +318,36 @@ def test_connections_include_path_defaults_to_true_and_path_is_array(monkeypatch
     assert "path" not in hidden.json()["connections"][0]
 
 
+def test_wrong_password_does_not_open_mysql(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise AssertionError("a senha errada não abre MySQL")
+
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setattr("datasets.ManagerDatabase.ConexaoBD.connect", fail)
+    response = TestClient(app).post("/api/checkpoints", json={"name": "Novo"})
+    assert response.status_code == 401
+
+
+def test_lock_conflict_after_retry_is_503(monkeypatch):
+    from datasets.ManagerDatabase import DatabaseBusy
+
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    app_module.topo_map.add_checkpoint("A")
+    app_module.topo_map.add_checkpoint("B")
+
+    def busy(*_args, **_kwargs):
+        raise DatabaseBusy()
+
+    monkeypatch.setattr(app_module.map_db_manager, "save_edge", busy)
+    response = TestClient(app).post(
+        "/api/edges",
+        headers=OK,
+        json={"source": "A", "target": "B", "distance_m": 1.0, "heading_rad": 0.0},
+    )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+
+
 def test_post_reset_requires_editor_password(monkeypatch):
     monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
