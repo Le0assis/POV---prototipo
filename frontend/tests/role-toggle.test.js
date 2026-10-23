@@ -124,21 +124,40 @@ test('senha errada mostra erro e não navega', async () => {
     assert.match(decision.error, /Senha incorreta/);
 });
 
-test('503 avisa que a senha não está configurada no servidor', async () => {
-    let cleared = false;
-    const decision = await requestAdminEntry({
+test('503 sem hash avisa e não apaga a senha; 503 ocupado também não apaga', async () => {
+    let cleared = 0;
+    const unconfigured = await requestAdminEntry({
         getPassword: () => '',
         prompt: async () => 'qualquer',
         verify: async () => {
-            throw statusError(503);
+            const error = statusError(503);
+            error.detail = 'EDITOR_PASSWORD_HASH não está definida no ambiente do servidor.';
+            throw error;
         },
         clearPassword: () => {
-            cleared = true;
+            cleared += 1;
         }
     });
-    assert.equal(decision.action, 'warn');
-    assert.equal(decision.message, PASSWORD_UNCONFIGURED_MESSAGE);
-    assert.equal(cleared, true);
+    assert.equal(unconfigured.action, 'warn');
+    assert.equal(unconfigured.message, PASSWORD_UNCONFIGURED_MESSAGE);
+
+    const busy = await requestAdminEntry({
+        getPassword: () => '',
+        prompt: async () => 'qualquer',
+        verify: async () => {
+            const error = statusError(503);
+            error.detail = 'Muitas conferências ao mesmo tempo. Tente de novo em instantes.';
+            error.retryAfter = 2;
+            throw error;
+        },
+        clearPassword: () => {
+            cleared += 1;
+        }
+    });
+    assert.equal(busy.action, 'warn');
+    assert.match(busy.message, /Servidor ocupado, tente de novo em instantes/);
+    assert.match(busy.message, /\(2s\)/);
+    assert.equal(cleared, 0);
 });
 
 test('SHOW_ROLE_TOGGLE ligado por padrão e desligado não pede senha', async () => {
@@ -236,14 +255,14 @@ test('verifyEditorPassword usa GET /api/auth/check: 204 aceita, 401 e 503 rejeit
         globalThis.fetch = async () => ({
             ok: false,
             status: 503,
-            json: async () => ({ detail: 'EDITOR_PASSWORD não está definida no ambiente do servidor.' })
+            json: async () => ({ detail: 'EDITOR_PASSWORD_HASH não está definida no ambiente do servidor.' })
         });
         setEditorPassword('qualquer');
         await assert.rejects(
             () => verifyEditorPassword('qualquer'),
             (err) => err.status === 503 && /não está configurada/.test(err.message)
         );
-        assert.equal(getEditorPassword(), '');
+        assert.equal(getEditorPassword(), 'qualquer');
     } finally {
         globalThis.fetch = original;
         clearEditorPassword();

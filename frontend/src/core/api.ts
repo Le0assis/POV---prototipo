@@ -8,14 +8,22 @@ const EDITOR_PASSWORD_KEY = 'pov_editor_password';
 export class ApiError extends Error {
     detail: any;
     status: any;
+    retryAfter: any;
 
-    constructor(detail, status = 0) {
+    constructor(detail, status = 0, retryAfter = null) {
         super(detail);
         this.name = 'ApiError';
         this.detail = detail;
         this.status = status;
+        this.retryAfter = retryAfter;
     }
 }
+
+/** Só este detalhe do backend é senha ausente. Os outros 503 são ocupação. */
+export const PASSWORD_UNCONFIGURED_MESSAGE = 'A senha do editor não está configurada no servidor.';
+export const SERVER_BUSY_MESSAGE = 'Servidor ocupado, tente de novo em instantes';
+
+const UNCONFIGURED_DETAIL = 'editor_password_hash não está definida';
 
 function buildQueryString(query) {
     if (!query) return '';
@@ -91,9 +99,57 @@ async function request(path, { method = 'GET', body, query, timeout = 8000, pass
     }
 
     if (!res.ok) {
-        throw new ApiError(extractDetail(data, res.status), res.status);
+        const retryAfter = readRetryAfter(res);
+        throw new ApiError(extractDetail(data, res.status), res.status, retryAfter);
     }
     return data;
+}
+
+function readRetryAfter(res) {
+    const headers = res && res.headers;
+    if (!headers) return null;
+    let raw = null;
+    if (typeof headers.get === 'function') raw = headers.get('Retry-After');
+    if ((raw == null || raw === '') && typeof headers === 'object') {
+        raw = headers['Retry-After'] || headers['retry-after'] || null;
+    }
+    if (raw == null || raw === '') return null;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds;
+    const when = Date.parse(String(raw));
+    if (Number.isFinite(when)) return Math.max(0, Math.ceil((when - Date.now()) / 1000));
+    return null;
+}
+
+/**
+ * 503 do editor. Hash ausente: `EDITOR_PASSWORD_HASH não está definida…`.
+ * Ocupado: `Retry-After` (vaga do argon2 ou pool MySQL), detalhe de ocupação,
+ * ou qualquer outro 503 (MySQL fora, hash inválido, migração).
+ */
+export function describeEditor503(err) {
+    const detail = String((err && (err.detail != null ? err.detail : err.message)) || '');
+    if (detail.toLowerCase().includes(UNCONFIGURED_DETAIL) || detail === PASSWORD_UNCONFIGURED_MESSAGE) {
+        return { kind: 'unconfigured', message: PASSWORD_UNCONFIGURED_MESSAGE, retryAfter: null };
+    }
+    const retryAfter = err && err.retryAfter != null ? err.retryAfter : null;
+    return { kind: 'busy', message: busyMessage(retryAfter), retryAfter };
+}
+
+function busyMessage(retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) {
+        return `${SERVER_BUSY_MESSAGE} (${Math.ceil(seconds)}s)`;
+    }
+    return SERVER_BUSY_MESSAGE;
+}
+
+function editorUnavailable(err) {
+    const described = describeEditor503(err);
+    return new ApiError(described.message, 503, described.retryAfter);
+}
+
+function credentialRejected(status) {
+    return status === 401 || status === 403;
 }
 
 export function getEditorPassword() {
@@ -122,8 +178,7 @@ export function clearEditorPassword() {
 
 /**
  * Confere a senha com GET /api/auth/check e o header X-Editor-Password.
- * 204: senha válida. 401: ausente ou errada. 503: servidor sem senha.
- * 401 e 503 limpam a sessão.
+ * 204: válida. 401/403: recusada e a sessão sai. 503 não apaga a senha.
  */
 export async function verifyEditorPassword(password) {
     const given = password || getEditorPassword();
@@ -131,13 +186,10 @@ export async function verifyEditorPassword(password) {
     try {
         await request('/api/auth/check', { method: 'GET', password: given });
     } catch (err) {
-        if (err.status === 503) {
+        if (err.status === 503) throw editorUnavailable(err);
+        if (credentialRejected(err.status)) {
             clearEditorPassword();
-            throw new ApiError('A senha do editor não está configurada no servidor.', 503);
-        }
-        if (err.status === 401) {
-            clearEditorPassword();
-            throw new ApiError('Senha incorreta.', 401);
+            throw new ApiError('Senha incorreta.', err.status);
         }
         throw err;
     }
@@ -164,8 +216,8 @@ export function ensureEditorPassword({ force = false, message = '' } = {} as any
 }
 
 /**
- * Escrita protegida: envia a senha, e em 401 pede de novo e tenta uma vez.
- * Em 503 não insiste.
+ * Escrita protegida: envia a senha, e em 401/403 pede de novo e tenta uma vez.
+ * 503 não insiste e não apaga a senha.
  */
 async function editorWrite(path, options) {
     let password = await ensureEditorPassword();
@@ -173,10 +225,8 @@ async function editorWrite(path, options) {
     try {
         return await request(path, { ...options, password });
     } catch (err) {
-        if (err.status === 503) {
-            throw new ApiError('A senha do editor não está configurada no servidor.', 503);
-        }
-        if (err.status !== 401) throw err;
+        if (err.status === 503) throw editorUnavailable(err);
+        if (!credentialRejected(err.status)) throw err;
         clearEditorPassword();
         password = await ensureEditorPassword({
             force: true,
@@ -186,12 +236,10 @@ async function editorWrite(path, options) {
         try {
             return await request(path, { ...options, password });
         } catch (retryErr) {
-            if (retryErr.status === 503) {
-                throw new ApiError('A senha do editor não está configurada no servidor.', 503);
-            }
-            if (retryErr.status === 401) {
+            if (retryErr.status === 503) throw editorUnavailable(retryErr);
+            if (credentialRejected(retryErr.status)) {
                 clearEditorPassword();
-                throw new ApiError('Senha incorreta.', 401);
+                throw new ApiError('Senha incorreta.', retryErr.status);
             }
             throw retryErr;
         }

@@ -7,14 +7,16 @@
 import { SHOW_ROLE_TOGGLE } from './config.js';
 import {
     clearEditorPassword,
+    describeEditor503,
     ensureEditorPassword,
     getEditorPassword,
+    PASSWORD_UNCONFIGURED_MESSAGE,
     verifyEditorPassword
 } from './api.js';
 import { toast } from './toast.js';
 
+export { PASSWORD_UNCONFIGURED_MESSAGE };
 export const PASSWORD_WRONG_MESSAGE = 'Senha incorreta. Digite de novo.';
-export const PASSWORD_UNCONFIGURED_MESSAGE = 'A senha do editor não está configurada no servidor.';
 export const PASSWORD_UNREACHABLE_MESSAGE = 'Não foi possível validar a senha.';
 
 const VISITOR_PAGE = 'index.html';
@@ -71,18 +73,22 @@ export function nextRadioIndex(current, key, length = 2) {
 async function probeStatus(verify, password) {
     try {
         await verify(password);
-        return 200;
+        return { status: 200, error: null };
     } catch (err) {
-        if (err && typeof err.status === 'number') return err.status;
-        return 0;
+        const status = err && typeof err.status === 'number' ? err.status : 0;
+        return { status, error: err };
     }
+}
+
+function badCredentials(status) {
+    return status === 401 || status === 403;
 }
 
 /**
  * Decide a entrada em Admin.
  * Senha já na sessão: segue, sem modal.
- * Sem senha: pede, valida, e em 401 pede outra vez. A segunda falha fica na página.
- * 503 avisa que o servidor não tem senha configurada.
+ * Sem senha: pede, valida, e em 401/403 pede outra vez. A segunda falha fica na página.
+ * 503 não apaga a senha: ou o hash não existe, ou o servidor está ocupado.
  */
 export async function requestAdminEntry({
     getPassword,
@@ -99,22 +105,21 @@ export async function requestAdminEntry({
     let password = await prompt('');
     if (!password) return { action: 'cancel' };
 
-    let status = await probeStatus(verify, password);
-    if (status === 401) {
+    let result = await probeStatus(verify, password);
+    if (badCredentials(result.status)) {
         clearPassword();
         password = await prompt(PASSWORD_WRONG_MESSAGE);
         if (!password) return { action: 'cancel' };
-        status = await probeStatus(verify, password);
+        result = await probeStatus(verify, password);
     }
-    if (status === 401) {
+    if (badCredentials(result.status)) {
         clearPassword();
         return { action: 'stay', error: PASSWORD_WRONG_MESSAGE };
     }
-    if (status === 503) {
-        clearPassword();
-        return { action: 'warn', message: PASSWORD_UNCONFIGURED_MESSAGE };
+    if (result.status === 503) {
+        return { action: 'warn', message: describeEditor503(result.error).message };
     }
-    if (status !== 200) {
+    if (result.status !== 200) {
         return { action: 'stay', error: PASSWORD_UNREACHABLE_MESSAGE };
     }
     return { action: 'navigate' };
