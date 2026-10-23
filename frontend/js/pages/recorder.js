@@ -30,6 +30,15 @@ let clock = null;
 let motionHandler = null;
 let lastMotionTimestamp = null;
 let warnedNoGravity = false;
+let paintQueued = false;
+const view = {
+    sampleCount: null,
+    acc: null,
+    gyro: null,
+    ori: null,
+    badge: null,
+    spark: null
+};
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -40,6 +49,12 @@ function init() {
 
 async function start() {
     $('#rec-app').classList.remove('hidden');
+    view.sampleCount = $('#sample-count');
+    view.acc = $('#rec-acc');
+    view.gyro = $('#rec-gyro');
+    view.ori = $('#rec-ori');
+    view.badge = $('#gyro-badge');
+    view.spark = $('#rec-spark');
     $('#rec-go').addEventListener('click', toggle);
     detector.onStep(() => {
         if (!recording) return;
@@ -152,15 +167,13 @@ function capture(event) {
 
     spark.push(mag);
     if (spark.length > SPARK_MAX) spark.shift();
-    $('#sample-count').textContent = String(samples.length);
-    $('#rec-acc').textContent = `X ${formatNum(accelX, 2)}  Y ${formatNum(accelY, 2)}  Z ${formatNum(accelZ, 2)}  |a| ${formatNum(mag, 2)}`;
-    $('#rec-gyro').textContent = `X ${formatNum(gyroX, 2)}  Y ${formatNum(gyroY, 2)}  Z ${formatNum(gyroZ, 2)} rad/s`;
-    $('#rec-ori').textContent = `α ${formatNum(orientation.alpha, 0)}°  β ${formatNum(orientation.beta, 0)}°  γ ${formatNum(orientation.gamma, 0)}°`;
-    const badge = $('#gyro-badge');
-    const active = gyroMag > 0.05;
-    badge.textContent = active ? 'Giroscópio ativo' : 'Giroscópio parado';
-    badge.classList.toggle('is-on', active);
-    drawSpark();
+    schedulePaint({
+        count: samples.length,
+        acc: `X ${formatNum(accelX, 2)}  Y ${formatNum(accelY, 2)}  Z ${formatNum(accelZ, 2)}  |a| ${formatNum(mag, 2)}`,
+        gyro: `X ${formatNum(gyroX, 2)}  Y ${formatNum(gyroY, 2)}  Z ${formatNum(gyroZ, 2)} rad/s`,
+        ori: `α ${formatNum(orientation.alpha, 0)}°  β ${formatNum(orientation.beta, 0)}°  γ ${formatNum(orientation.gamma, 0)}°`,
+        gyroOn: gyroMag > 0.05
+    });
 }
 
 async function stopAndSend() {
@@ -232,6 +245,31 @@ function stopSensors() {
     }
 }
 
+function schedulePaint(frame) {
+    view.pending = frame;
+    if (paintQueued) return;
+    paintQueued = true;
+    const raf = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : (fn) => setTimeout(fn, 16);
+    raf(flushPaint);
+}
+
+function flushPaint() {
+    paintQueued = false;
+    const frame = view.pending;
+    if (!frame) return;
+    if (view.sampleCount) view.sampleCount.textContent = String(frame.count);
+    if (view.acc) view.acc.textContent = frame.acc;
+    if (view.gyro) view.gyro.textContent = frame.gyro;
+    if (view.ori) view.ori.textContent = frame.ori;
+    if (view.badge) {
+        view.badge.textContent = frame.gyroOn ? 'Giroscópio ativo' : 'Giroscópio parado';
+        view.badge.classList.toggle('is-on', frame.gyroOn);
+    }
+    drawSpark();
+}
+
 function paintClock() {
     const elapsed = Math.max(0, Date.now() - startedAt);
     const total = Math.floor(elapsed / 1000);
@@ -241,7 +279,7 @@ function paintClock() {
 }
 
 function drawSpark() {
-    const canvas = $('#rec-spark');
+    const canvas = view.spark || $('#rec-spark');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;

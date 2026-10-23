@@ -12,6 +12,7 @@ import { degToRad } from '../sensors/angles.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels } from '../map/layers.js';
 import { loadFloorModel } from './floor-model.js';
+import { addCheckpoint, addManualConnection, patchCheckpointPosition } from './editor-model.js';
 
 const state = {
     floor: null,
@@ -40,14 +41,8 @@ async function start() {
 }
 
 async function reload() {
-    state.model = await loadFloorModel({ toast });
-    const options = state.model.checkpoints.map((cp) => ({ id: cp.name, label: cp.name }));
-    fillSelect($('#edge-source'), options, 'Origem');
-    fillSelect($('#edge-target'), options, 'Destino');
-    const resetNode = $('#reset-node');
-    const previousReset = resetNode.value;
-    fillSelect(resetNode, options, 'Nó inicial');
-    if (previousReset) resetNode.value = previousReset;
+    state.model = await loadFloorModel({ toast, includePath: true });
+    fillNodeSelects();
     renderUnplaced();
     if (state.model.config && state.model.config.plan_image) {
         try {
@@ -100,26 +95,31 @@ function renderUnplaced() {
 
 async function onMapClick(event) {
     if (!state.placing) return;
-    const pixel = state.floor.latLngToPixel(event.latlng);
+    const pixel = roundPixel(state.floor.latLngToPixel(event.latlng));
     const name = state.placing;
     try {
-        await api.updateCheckpointPosition(name, roundPixel(pixel));
+        await api.updateCheckpointPosition(name, pixel);
         state.placing = null;
+        patchCheckpointPosition(state.model, name, pixel);
+        paintModel();
         toast(`Posição de "${name}" salva.`, 'ok');
-        await reload();
     } catch (err) {
         toast(err.message || 'Falha ao salvar a posição.', 'erro');
     }
 }
 
 async function onMove(name, pixel) {
+    const rounded = roundPixel(pixel);
+    const previous = checkpointPixel(name);
     try {
-        await api.updateCheckpointPosition(name, roundPixel(pixel));
+        await api.updateCheckpointPosition(name, rounded);
+        patchCheckpointPosition(state.model, name, rounded);
+        paintModel();
         toast(`Posição de "${name}" salva.`, 'ok');
-        await reload();
     } catch (err) {
+        if (previous) patchCheckpointPosition(state.model, name, previous);
+        paintModel();
         toast(err.message || 'Falha ao salvar a posição.', 'erro');
-        await reload();
     }
 }
 
@@ -128,11 +128,14 @@ async function onCheckpoint(event) {
     const name = $('#checkpoint-name').value.trim();
     if (!name) return;
     try {
-        await api.saveCheckpoint(name);
+        const saved = await api.saveCheckpoint(name);
         $('#checkpoint-name').value = '';
-        state.placing = name;
+        const created = (saved && saved.checkpoint) || { name };
+        addCheckpoint(state.model, created);
+        state.placing = created.name || name;
+        fillNodeSelects();
+        renderUnplaced();
         toast(`Checkpoint "${name}" criado. Clique na planta para posicionar.`, 'ok');
-        await reload();
     } catch (err) {
         toast(err.message || 'Falha ao criar o checkpoint.', 'erro');
     }
@@ -153,14 +156,16 @@ async function onEdge(event) {
         return;
     }
     try {
+        const heading = degToRad(Number.isFinite(degrees) ? degrees : 0);
         await api.saveEdge({
             source,
             target,
             distance_m: distance,
-            heading_rad: degToRad(Number.isFinite(degrees) ? degrees : 0)
+            heading_rad: heading
         });
+        addManualConnection(state.model, { source, target, distance_m: distance, heading_rad: heading });
+        paintModel();
         toast('Conexão gravada.', 'ok');
-        await reload();
     } catch (err) {
         toast(err.message || 'Falha ao gravar a conexão.', 'erro');
     }
@@ -180,6 +185,27 @@ async function onReset(event) {
     } catch (err) {
         toast(err.message || 'Falha ao reiniciar a sessão.', 'erro');
     }
+}
+
+function fillNodeSelects() {
+    const options = state.model.checkpoints.map((cp) => ({ id: cp.name, label: cp.name }));
+    fillSelect($('#edge-source'), options, 'Origem');
+    fillSelect($('#edge-target'), options, 'Destino');
+    const resetNode = $('#reset-node');
+    const previousReset = resetNode.value;
+    fillSelect(resetNode, options, 'Nó inicial');
+    if (previousReset) resetNode.value = previousReset;
+}
+
+function paintModel() {
+    renderUnplaced();
+    renderFloorLayers(state.floor, state.model, { editable: true, onMove });
+}
+
+function checkpointPixel(name) {
+    const node = state.model && state.model.byName && state.model.byName.get(name);
+    if (!node || !node.anchor) return null;
+    return { pos_x_px: node.anchor.pos_x_px, pos_y_px: node.anchor.pos_y_px };
 }
 
 function roundPixel(pixel) {
