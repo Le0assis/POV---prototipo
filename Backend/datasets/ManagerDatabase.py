@@ -1,16 +1,7 @@
 """Conexão MySQL (XAMPP) por requisição, com prazo e devolução ao pool.
 
-O conector usa a extensão C por padrão e trata ``connection_timeout`` nulo
-como 0, isto é, espera sem limite. No Windows, ``host=localhost`` ainda pode
-ir para named pipe. Um ``connect()`` ou um ``ping`` nessa situação, feito
-dentro do middleware async, trava o event loop: o salvamento não anda, e
-arquivo estático nenhum precisa de banco.
-
-``is_connected()`` manda PING. Se ainda houver resultado não lido, o servidor
-não responde outro comando e o cliente espera para sempre. Por isso fechar
-ou reutilizar a sessão nunca começa por um ping: primeiro esvazia o cursor,
-desfaz a transação implícita (autocommit desligado) e só então devolve ou
-derruba o socket.
+O connect não roda no event loop. Fechar ou reutilizar a sessão esvazia o
+cursor e desfaz a transação implícita antes de qualquer outro comando.
 """
 
 from __future__ import annotations

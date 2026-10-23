@@ -170,8 +170,7 @@ class PeakStepDetector(StepDetector):
         self._config = config or StepDetectorConfig()
         if weinberg_k is not None:
             self._config = replace(self._config, weinberg_k=float(weinberg_k))
-        # Assinatura antiga (run_csv_client passa sample_rate_hz=50). A taxa
-        # efetiva não é esta constante: ``detect`` mede pelos timestamps.
+        # Fica na assinatura. ``detect`` mede a taxa pelos timestamps.
         self._declared_sample_rate_hz = sample_rate_hz
 
     @property
@@ -185,10 +184,7 @@ class PeakStepDetector(StepDetector):
         gyro_magnitude: npt.NDArray[np.float64] | None = None,
         sample_rate_hz: float | None = None,
     ) -> list[StepEvent]:
-        # ``sample_rate_hz`` e o valor guardado no construtor ficam na
-        # assinatura por causa de chamadas antigas (run_csv_client). Não
-        # entram no cálculo: 30 Hz declarado em cima de um arquivo de 50 Hz
-        # mudava o refratário e a FFT.
+        # Não entra no cálculo: a taxa declarada mudava refratário e FFT.
         _ = (sample_rate_hz, self._declared_sample_rate_hz)
 
         signal = np.asarray(filtered_magnitude, dtype=np.float64)

@@ -55,12 +55,11 @@ POV---prototipo/
 │   │   ├── topological_map.py        # Grafo de checkpoints
 │   │   └── topological_matcher.py    # Casamento de posições em mapa
 │   ├── others/
-│   │   ├── run_csv_client.py         # Cliente de simulação PDR via cliente HTTP
+│   │   ├── evaluate_steps.py         # Conta passos de um CSV contra o rótulo
 │   │   └── seed_map.py               # Alimentador de posições iniciais do mapa
 │   ├── pdr/
 │   │   ├── processor.py              # Pipeline principal de PDR e validação
-│   │   ├── steps.py                  # Detector de picos de passos (Weinberg)
-│   │   └── tracker.py                # Rastreamento de deslocamento acumulado
+│   │   └── steps.py                  # Detector de picos de passos (Weinberg)
 │   └── requirements.txt
 ├── frontend/
 ├── cloudflared-config.yml
@@ -213,17 +212,15 @@ cloudflared tunnel --config cloudflared-config.yml run
 
 ---
 
-### Terminal 3: Cliente de Simulação e Validação PDR
+### Conferir um CSV de caminhada
 
-Acesse a pasta `Backend`, ative o `venv` e execute o cliente de envio de dados inerciais:
+A partir de `Backend/`, o script conta os passos do arquivo (e compara com o rótulo, se você passar `--steps-real`):
 
 ```bash
 cd Backend
-python -m others.run_csv_client
+python others/evaluate_steps.py datasets/sample_walk.csv --steps-real 20
 
 ```
-
-> **Status de Sucesso:** Envio em lote dos sensores brutos, retornos de validação HTTP `200 OK` e persistência dos CSVs na tabela `sensors_log`.
 
 ---
 

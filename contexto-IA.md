@@ -28,9 +28,9 @@ POV---prototipo/
 │   ├── datasets/       create_tables.py, ManagerDatabase.py, generate_sample_dataset.py, sample_walk.csv
 │   ├── filters/        madgwick.py, quaternion.py, butterworth.py, moving_average.py, signal_filter.py, attitude_estimator.py
 │   ├── map/            MapDatabaseManager.py, router.py (Dijkstra), topological_map.py, topological_matcher.py
-│   ├── pdr/            processor.py (pipeline), steps.py (picos + Weinberg), tracker.py, magnitude.py, altitude.py
-│   ├── sensors/        accelerometer.py, gyroscope.py, magnetometer.py, barometer.py, sensor_sample.py, repository.py
-│   ├── others/         run_csv_client.py, seed_map.py, example_sensors.py
+│   ├── pdr/            processor.py (pipeline), steps.py (picos + Weinberg), magnitude.py, altitude.py
+│   ├── sensors/        accelerometer.py, gyroscope.py, magnetometer.py, barometer.py, sensor_sample.py
+│   ├── others/         seed_map.py, evaluate_steps.py
 │   ├── static/         páginas legadas (index.html, mapa-2d.html, sensors_upload.html)
 │   └── tests/
 ├── frontend/           visão do administrador (css/, js/, index, recorder, routes)

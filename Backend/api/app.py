@@ -1,9 +1,6 @@
 import math
-import numpy as np
 import anyio
 from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
-from pydantic import BaseModel
-from typing import List
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
@@ -43,14 +40,9 @@ from .schema import (
 )
 from pdr.steps import StepDetectorConfig, pdr_config_payload
 
-# --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
-from filters.butterworth import ButterworthLowPassFilter
-from filters.madgwick import MadgwickAttitudeEstimator
-from pdr.steps import PeakStepDetector
 
-
-# --- CLASSE AUXILIAR DE COMPATIBILIDADE ---
 class StepEventAdapter:
+    """Passo já medido, no formato que o matcher de teste consome."""
     def __init__(self, step_length_m: float):
         self.step_length_m = step_length_m
 
@@ -658,8 +650,6 @@ def _frontend_page(name: str):
     if path.exists():
         return FileResponse(path)
     return {"error": f"Arquivo {name} nao encontrado em frontend/"}
-
-from fastapi import Response, HTTPException
 
 @app.get("/api/sensors_log/{log_id}/csv")
 def download_sensor_log_csv(
