@@ -19,11 +19,13 @@ export class ApiError extends Error {
     }
 }
 
-/** Só este detalhe do backend é senha ausente. Os outros 503 são ocupação. */
+/** Hash ausente ou hash inválido é configuração. Os outros 503 são ocupação. */
 export const PASSWORD_UNCONFIGURED_MESSAGE = 'A senha do editor não está configurada no servidor.';
+export const PASSWORD_MISCONFIGURED_MESSAGE = 'A senha do editor está configurada incorretamente no servidor.';
 export const SERVER_BUSY_MESSAGE = 'Servidor ocupado, tente de novo em instantes';
 
 const UNCONFIGURED_DETAIL = 'editor_password_hash não está definida';
+const INVALID_HASH_DETAIL = 'não é um hash argon2id válido';
 
 function buildQueryString(query) {
     if (!query) return '';
@@ -123,13 +125,18 @@ function readRetryAfter(res) {
 
 /**
  * 503 do editor. Hash ausente: `EDITOR_PASSWORD_HASH não está definida…`.
+ * Hash inválido: `EDITOR_PASSWORD_HASH não é um hash argon2id válido.`
  * Ocupado: `Retry-After` (vaga do argon2 ou pool MySQL), detalhe de ocupação,
- * ou qualquer outro 503 (MySQL fora, hash inválido, migração).
+ * ou qualquer outro 503 (MySQL fora, migração).
  */
 export function describeEditor503(err) {
     const detail = String((err && (err.detail != null ? err.detail : err.message)) || '');
-    if (detail.toLowerCase().includes(UNCONFIGURED_DETAIL) || detail === PASSWORD_UNCONFIGURED_MESSAGE) {
+    const text = detail.toLowerCase();
+    if (text.includes(UNCONFIGURED_DETAIL) || detail === PASSWORD_UNCONFIGURED_MESSAGE) {
         return { kind: 'unconfigured', message: PASSWORD_UNCONFIGURED_MESSAGE, retryAfter: null };
+    }
+    if (text.includes(INVALID_HASH_DETAIL) || detail === PASSWORD_MISCONFIGURED_MESSAGE) {
+        return { kind: 'misconfigured', message: PASSWORD_MISCONFIGURED_MESSAGE, retryAfter: null };
     }
     const retryAfter = err && err.retryAfter != null ? err.retryAfter : null;
     return { kind: 'busy', message: busyMessage(retryAfter), retryAfter };

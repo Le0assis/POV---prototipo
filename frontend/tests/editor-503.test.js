@@ -4,6 +4,7 @@ import { test } from 'vitest';
 import {
     clearEditorPassword,
     getEditorPassword,
+    PASSWORD_MISCONFIGURED_MESSAGE,
     PASSWORD_UNCONFIGURED_MESSAGE,
     saveCheckpoint,
     SERVER_BUSY_MESSAGE,
@@ -117,7 +118,7 @@ test('login: só o hash ausente fala de senha; ocupado e 503 desconhecido pedem 
             {
                 detail: BAD_HASH,
                 retryAfter: null,
-                message: SERVER_BUSY_MESSAGE,
+                message: PASSWORD_MISCONFIGURED_MESSAGE,
                 kept: true
             },
             {
