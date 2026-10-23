@@ -59,7 +59,7 @@ def test_record_walk_keeps_the_lock_until_commit():
     original = database.commit_transaction
 
     def commit_transaction():
-        seen.append(manager._walk_lock.locked())
+        seen.append(manager._lock_for("Quarto", "Sala").locked())
         return original()
 
     database.commit_transaction = commit_transaction
@@ -69,4 +69,4 @@ def test_record_walk_keeps_the_lock_until_commit():
     )
     assert saved is not None
     assert seen == [True]
-    assert manager._walk_lock.locked() is False
+    assert manager._lock_for("Quarto", "Sala").locked() is False

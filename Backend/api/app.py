@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import anyio
 from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
 from pydantic import BaseModel
 from typing import List
@@ -8,7 +9,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from datasets.ManagerDatabase import ConexaoBD, request_connection
+from datasets.ManagerDatabase import (
+    ConexaoBD,
+    checkin_connection,
+    checkout_connection,
+    drain_pool,
+    request_connection,
+)
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
@@ -69,54 +76,78 @@ BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR / "../../frontend").resolve()
 
 db = ConexaoBD(host="localhost", database="POV", user="root", password="")
-db.connect()
-
-if not db.connection:
-    print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
-
 map_db_manager = MapDatabaseManager(db, per_request=True)
 
+# Só estas rotas pegam sessão. Estático, /api/pdr/config e a localização
+# de teste não passam por connect().
+_DB_PREFIXES = (
+    "/api/edges",
+    "/api/checkpoints",
+    "/api/routes",
+    "/api/map",
+    "/api/categories",
+    "/api/connections",
+    "/api/sensors_log",
+)
 
-def _shared_database_is_up() -> bool:
-    connection = getattr(db, "connection", None)
-    if connection is None:
+
+def _route_uses_database(path: str, method: str) -> bool:
+    if method == "OPTIONS":
         return False
-    try:
-        return bool(connection.is_connected())
-    except Exception:
-        return False
+    return any(path.startswith(prefix) for prefix in _DB_PREFIXES)
 
 
-@app.middleware("http")
-async def db_connection_per_request(request, call_next):
-    """Uma conexão por requisição. O cursor global não atravessa GET e gravação."""
-    local = None
-    token = None
-    if _shared_database_is_up():
-        local = ConexaoBD(db.host, db.database, db.user, db.password)
-        local.connect(announce=False)
-        if local.connection:
+class DatabaseSessionMiddleware:
+    """Abre a sessão MySQL fora do event loop e no mesmo contexto da rota.
+
+    ``Depends`` com yield perdia o token do ContextVar (outro contexto no
+    finally) e o pedido quebrava ao devolver a conexão. O connect bloqueante
+    vai para um thread; o token é criado e limpo nesta task.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not _route_uses_database(scope.get("path", ""), scope.get("method", "")):
+            await self.app(scope, receive, send)
+            return
+        local = await anyio.to_thread.run_sync(lambda: checkout_connection(db))
+        token = None
+        if local.connection is not None:
             token = request_connection.set(local)
-        else:
-            local.disconnect(announce=False)
-            local = None
-    try:
-        return await call_next(request)
-    finally:
-        if token is not None:
-            request_connection.reset(token)
-        if local is not None:
-            local.disconnect(announce=False)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if token is not None:
+                request_connection.reset(token)
+            await anyio.to_thread.run_sync(lambda: checkin_connection(local))
+
+
+app.add_middleware(DatabaseSessionMiddleware)
 
 
 topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
-try:
-    map_db_manager.load_map_into_system(topo_map)
-    print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
-except Exception as e:
-    print(f"[AVISO] Falha ao carregar o mapa inicial ou banco vazio. Erro: {e}")
+def _load_map_once() -> None:
+    """Carrega o grafo na subida e devolve a sessão. Não fica aberta no processo."""
+    local = checkout_connection(db)
+    if local.connection is None:
+        print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
+        return
+    token = request_connection.set(local)
+    try:
+        map_db_manager.load_map_into_system(topo_map)
+        print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
+    except Exception as exc:
+        print(f"[AVISO] Falha ao carregar o mapa inicial ou banco vazio. Erro: {exc}")
+    finally:
+        request_connection.reset(token)
+        checkin_connection(local)
+
+
+_load_map_once()
 
 starting_node = "Recepcao"
 matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
@@ -628,4 +659,5 @@ def download_sensor_log_csv(log_id: int):
 
 @app.on_event("shutdown")
 def shutdown_event():
+    drain_pool()
     db.disconnect()

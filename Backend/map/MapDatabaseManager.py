@@ -46,10 +46,23 @@ _CHECKPOINT_COLUMNS = """
 class MapDatabaseManager:
     """Responsável por salvar e carregar o grafo diretamente do MySQL do XAMPP."""
 
+    # Um lock por sentido. O lock global segurava todo salvamento atrás de
+    # um corredor só, inclusive quando o MySQL daquele corredor estava preso.
+    _pair_locks: dict[tuple[str, str], threading.Lock] = {}
+    _pair_locks_guard = threading.Lock()
+
     def __init__(self, database: ConexaoBD, per_request: bool = False):
         self._database = database
         self._per_request = per_request
-        self._walk_lock = threading.Lock()
+
+    def _lock_for(self, source: str, target: str) -> threading.Lock:
+        key = (source, target)
+        with self._pair_locks_guard:
+            lock = self._pair_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._pair_locks[key] = lock
+            return lock
 
     @property
     def db(self):
@@ -90,7 +103,6 @@ class MapDatabaseManager:
             if not success:
                 print(f"Erro ao adicionar checkpoint {name}")
                 return False
-            print(f"Checkpoint {name} adicionado com sucesso")
             loaded = self.get_checkpoint_by_name(name)
             if loaded is not None:
                 return loaded
@@ -215,16 +227,27 @@ class MapDatabaseManager:
         return {row["slug"] for row in rows if row.get("slug")}
         
     def save_edge(self, source: str, target: str, distance: float, heading_rad: float):
-        """Upsert manual dos dois sentidos. Uma linha por sentido; manual vence."""
-        inverse_heading = (heading_rad + np.pi) % (2 * np.pi)
-        forward = self._upsert_manual_direction(source, target, distance, heading_rad)
-        backward = self._upsert_manual_direction(target, source, distance, inverse_heading)
+        """Upsert manual dos dois sentidos, numa transação só.
 
-        if forward and backward:
-            print(f"Edge {source} <-> {target} gravada (upsert manual)")
+        Dois commits separados deixavam um sentido gravado se o segundo
+        esperasse lock ou falhasse.
+        """
+        inverse_heading = (heading_rad + np.pi) % (2 * np.pi)
+        if not self.db.begin_transaction():
+            print(f"Erro ao adicionar edge com {target, source}")
+            return False
+        try:
+            forward = self._upsert_manual_direction(source, target, distance, heading_rad)
+            backward = self._upsert_manual_direction(target, source, distance, inverse_heading)
+            if not (forward and backward) or not self.db.commit_transaction():
+                self.db.rollback_transaction()
+                print(f"Erro ao adicionar edge com {target, source}")
+                return False
             return True
-        print(f"Erro ao adicionar edge com {target, source}")
-        return False
+        except Exception:
+            self.db.rollback_transaction()
+            print(f"Erro ao adicionar edge com {target, source}")
+            return False
 
     def _upsert_manual_direction(self, source: str, target: str, distance: float, heading_rad: float) -> bool:
         sql = """
@@ -237,7 +260,7 @@ class MapDatabaseManager:
                 updated_at = CURRENT_TIMESTAMP,
                 id = LAST_INSERT_ID(id)
         """
-        return bool(self.db.execute_query(sql, (source, target, distance, heading_rad)))
+        return bool(self.db.execute_within(sql, (source, target, distance, heading_rad)))
                 
     def load_map_into_system(self, topo_map) -> None:
         """Carrega todos os dados persistidos no MySQL e reconstrói o grafo na memória."""
@@ -278,7 +301,6 @@ class MapDatabaseManager:
         """
         log_id = self.db.execute_insert(query, (source, target, "gravado", csv_data))
         if log_id:
-            print("Log salvo com sucesso")
             return int(log_id)
         print("Erro ao processar log")
         return None
@@ -326,11 +348,9 @@ class MapDatabaseManager:
         ))
 
         if success:
-            print(f"Rota '{name}' salva com sucesso ({len(segments)} segmentos, {total_distance:.1f}m)")
             return True
-        else:
-            print(f"Erro ao salvar rota '{name}'")
-            return False
+        print(f"Erro ao salvar rota '{name}'")
+        return False
 
     def get_all_routes(self):
         """Lista todas as rotas salvas (resumo para UI)."""
@@ -383,10 +403,7 @@ class MapDatabaseManager:
     def delete_route(self, route_id: int):
         """Remove uma rota salva."""
         sql = "DELETE FROM saved_routes WHERE id = %s"
-        success = self.db.execute_query(sql, (route_id,))
-        if success:
-            print(f"Rota {route_id} removida com sucesso")
-        return success
+        return bool(self.db.execute_query(sql, (route_id,)))
 
     def record_walk(
         self,
@@ -403,9 +420,8 @@ class MapDatabaseManager:
         ``started_at``/``ended_at`` já vêm em UTC (DATETIME naive). Caminhada
         inválida persiste ``is_valid=0`` e não altera ``edges``.
         """
-        # Serializa o agregado da aresta. Cada requisição tem a própria
-        # conexão; o lock evita duas medianas lendo o mesmo par ao mesmo tempo.
-        with self._walk_lock:
+        # Só este sentido espera. Outro corredor grava em paralelo.
+        with self._lock_for(source, target):
             if not self.db.begin_transaction():
                 print("Erro ao abrir transação de walk_trace")
                 return None
