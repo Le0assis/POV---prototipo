@@ -39,6 +39,7 @@ PROTECTED = {
     "reset_session",
     "update_checkpoint_category",
     "check_editor_auth",
+    "download_sensor_log_csv",
 }
 PUBLIC = {
     "get_map_layout",
@@ -49,8 +50,9 @@ PUBLIC = {
     "get_map_config",
     "get_pdr_config",
     "get_all_routes",
-    "download_sensor_log_csv",
+    "health",
     "localize_user",
+    "get_current_location",
 }
 
 

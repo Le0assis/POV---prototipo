@@ -103,6 +103,7 @@ def _send(client: TestClient, method: str, path: str, body, headers=None):
 def test_protected_writes_reject_missing_and_wrong_password(monkeypatch):
     set_attempt_limit(50)
     monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     client = TestClient(app)
     for method, path, body in _calls():
         missing = _send(client, method, path, body)
@@ -114,6 +115,7 @@ def test_protected_writes_reject_missing_and_wrong_password(monkeypatch):
 
 def test_protected_writes_fail_closed_without_env(monkeypatch):
     monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     client = TestClient(app)
     for method, path, body in _calls():
         response = _send(client, method, path, body, OK)
@@ -122,6 +124,7 @@ def test_protected_writes_fail_closed_without_env(monkeypatch):
 
 def test_protected_writes_accept_the_password(monkeypatch):
     monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     _succeed(monkeypatch)
     client = TestClient(app)
     expected = {
@@ -315,6 +318,7 @@ def test_connections_include_path_defaults_to_true_and_path_is_array(monkeypatch
 
 
 def test_post_reset_requires_editor_password(monkeypatch):
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
     missing = client.post("/api/reset")

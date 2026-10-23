@@ -165,9 +165,15 @@ O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, 
 | Tentativas demais | **429** |
 | Senha correta | a escrita segue |
 
-Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `POST /api/routes`, `DELETE /api/routes/{id}`, `POST /api/reset`.
+Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `POST /api/routes`, `DELETE /api/routes/{id}`. `POST /api/reset` também, e só responde se `POV_ENABLE_TEST_ROUTES` estiver ligada; sem a flag é **404**. `GET /api/sensors_log/{id}/csv` exige a mesma senha.
 
-Leituras públicas, entre elas `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/connections/{id}`, `GET /api/pdr/config` e o restante dos GET já existentes. `POST /api/localize` continua aberto.
+Leituras públicas, entre elas `GET /api/health`, `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/connections/{id}` e `GET /api/pdr/config`. `GET /api/health` não abre MySQL. `POST /api/localize` e `GET /api/current_location` ficam atrás da mesma flag de teste (padrão desligada). O fallback `Recepcao` vale só nessas rotas.
+
+### API pública, CORS e banco
+
+A API de produção é `https://api.pov-unimar.com`. Com `POV_ENV=production`, o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem `POV_ENV`, o padrão é desenvolvimento: `localhost` e `127.0.0.1` nas portas do uvicorn (8000), do Live Server (5500) e da 3000. `CORS_ORIGINS` (vírgulas) substitui essa lista. A resposta não manda `Access-Control-Allow-Credentials`. Os registros DNS estão em `docs/dns.md`.
+
+O MySQL continua o do XAMPP. `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD` têm padrão `localhost`, `3306`, `POV`, `root` e senha vazia. `localhost` na conexão vira `127.0.0.1`.
 
 ### Mapa, arestas e trajetória
 
@@ -203,7 +209,7 @@ cloudflared tunnel --config cloudflared-config.yml run
 
 ```
 
-> **Status de Sucesso:** Rotas mapeadas para HTTPS remoto (ex: `[https://api.pov-unimar.com/docs](https://api.pov-unimar.com/docs)`).
+> **Status de Sucesso:** A API em `[https://api.pov-unimar.com/docs](https://api.pov-unimar.com/docs)`. O túnel não publica o site: `pov-unimar.com` é o GitHub Pages.
 
 ---
 

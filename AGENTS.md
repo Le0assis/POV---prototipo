@@ -5,6 +5,11 @@ Notas para quem altera o POV. O README continua sendo o passo a passo de instala
 ## Backend
 
 - A senha do editor é uma só, em `EDITOR_PASSWORD_HASH` (argon2id). Gere com `Backend/scripts/hash_password.py`. Não commite senha nem hash.
+- `GET /api/health` responde `{"status":"ok"}` e não abre MySQL.
+- `/api/localize`, `/api/current_location` e `/api/reset` só existem com `POV_ENABLE_TEST_ROUTES` (padrão desligado). O nó `Recepcao` é fallback dessas rotas de teste.
+- Em `POV_ENV=production` o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem a variável, o padrão é desenvolvimento e o localhost continua. `CORS_ORIGINS` substitui a lista. Sem `allow_credentials`.
+- O túnel publica só `api.pov-unimar.com` em `127.0.0.1:8000`. O site é o GitHub Pages (ver `docs/dns.md`).
+- MySQL continua o do XAMPP. Host, porta, base, usuário e senha saem de `DB_*`, com padrão `localhost` / `3306` / `POV` / `root` / vazio.
 
 ## Frontend
 

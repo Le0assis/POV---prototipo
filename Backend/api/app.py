@@ -4,7 +4,6 @@ import anyio
 from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
 from pydantic import BaseModel
 from typing import List
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
@@ -21,8 +20,10 @@ from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
+from .cors import OriginCORSMiddleware
 from .editor_auth import require_editor_password
 from .envfile import load_env_file
+from .settings import get_settings
 
 load_env_file()
 from map.MapDatabaseManager import (
@@ -60,25 +61,23 @@ app = FastAPI(
     description="Backend HTTP para mapeamento e localização indoor em tempo real via sensores mobile."
 )
 
-origins = [
-    "https://pov-unimar.com",
-    "https://www.pov-unimar.com",
-    "http://localhost",
-    "http://127.0.0.1:8000"
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  
-    allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"],  
-)
-
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR / "../../frontend").resolve()
 
-db = ConexaoBD(host="localhost", database="POV", user="root", password="")
+
+def database_from_settings() -> ConexaoBD:
+    """Sessão modelo. Padrão de dev é o XAMPP local; produção vem do ambiente."""
+    cfg = get_settings()
+    return ConexaoBD(
+        host=cfg.db_host,
+        database=cfg.db_name,
+        user=cfg.db_user,
+        password=cfg.db_password,
+        port=cfg.db_port,
+    )
+
+
+db = database_from_settings()
 map_db_manager = MapDatabaseManager(db, per_request=True)
 
 # Só estas rotas pegam sessão. Estático, /api/pdr/config e a localização
@@ -128,6 +127,8 @@ class DatabaseSessionMiddleware:
 
 
 app.add_middleware(DatabaseSessionMiddleware)
+# Por fora da sessão: o preflight não abre MySQL.
+app.add_middleware(OriginCORSMiddleware)
 
 
 topo_map = TopologicalMap()
@@ -159,6 +160,18 @@ visited_path = [starting_node]
 # --- ROTAS DA API ---
 
 edge_processor = RawEdgeProcessor(map_db_manager, topo_map)
+
+
+def require_test_routes() -> None:
+    """As rotas de localização fixa só existem com a flag. Sem ela, 404."""
+    if not get_settings().pov_enable_test_routes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
+@app.get("/api/health")
+def health():
+    """Ping do status. Não abre MySQL nem as rotas de teste."""
+    return {"status": "ok"}
 
 @app.get("/api/auth/check", status_code=status.HTTP_204_NO_CONTENT)
 def check_editor_auth(_editor: None = Depends(require_editor_password)):
@@ -257,7 +270,10 @@ def create_edge(
 
 
 @app.post("/api/localize", status_code=status.HTTP_200_OK)
-def localize_user(sensor_data: StepSensorSchema):
+def localize_user(
+    sensor_data: StepSensorSchema,
+    _test: None = Depends(require_test_routes),
+):
     if not topo_map.nodes:
         raise HTTPException(status_code=400, detail="O mapa do sistema está vazio.")
         
@@ -390,6 +406,7 @@ def delete_route(
 @app.post("/api/reset")
 def reset_session(
     start_node: str = Query(default="Recepcao"),
+    _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
 ):
     """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
@@ -406,7 +423,7 @@ app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="asset
 app.mount("/vendor", StaticFiles(directory=FRONTEND_DIR / "vendor"), name="vendor")
 
 @app.get("/api/current_location")
-def get_current_location():
+def get_current_location(_test: None = Depends(require_test_routes)):
     return {
         "current_node": getattr(matcher, 'current_node', getattr(matcher, 'current_state', 'Desconhecido')),
         "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0),
@@ -645,7 +662,10 @@ def _frontend_page(name: str):
 from fastapi import Response, HTTPException
 
 @app.get("/api/sensors_log/{log_id}/csv")
-def download_sensor_log_csv(log_id: int):
+def download_sensor_log_csv(
+    log_id: int,
+    _editor: None = Depends(require_editor_password),
+):
     """Retorna o CSV gravado no banco como um arquivo para download."""
     csv_data = map_db_manager.get_sensor_log_csv(log_id)
     
