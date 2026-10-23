@@ -313,3 +313,12 @@ frontend/
 
 **Calibração da bússola:** no teste real, o botão "Calibrar (estou de frente para o corredor)" guarda um offset no navegador. O heading do grafo é relativo à pose da gravação e anti-horário; a bússola usa rumo horário. A conversão está só em `frontend/js/sensors/angles.js`.
 
+## 9. Frontend — fase 0
+
+As travadas ao salvar e no mapa 2D estão diagnosticadas em `docs/frontend/fase-0-travadas.md`. Ainda não há número de FPS do Poco 6 Pro: a medição de campo continua no checklist `docs/qa/checklist-poco6pro.md`. Os testes do frontend, a partir da raiz:
+
+```bash
+npm ci
+npm test
+```
+
