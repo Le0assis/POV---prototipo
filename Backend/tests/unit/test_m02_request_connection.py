@@ -52,14 +52,21 @@ def test_per_request_manager_uses_the_request_connection():
         request_connection.reset(token)
 
 
-def test_record_walk_keeps_the_lock_until_commit():
+def test_record_walk_keeps_the_pair_lock_until_commit():
     database = _TxDB()
     manager = MapDatabaseManager(database)
     seen: list[bool] = []
+    other_free: list[bool] = []
     original = database.commit_transaction
 
     def commit_transaction():
-        seen.append(manager._lock_for("Quarto", "Sala").locked())
+        pair = manager._lock_for("Quarto", "Sala")
+        other = manager._lock_for("Copa", "Hall")
+        seen.append(pair.locked())
+        acquired = other.acquire(blocking=False)
+        other_free.append(acquired)
+        if acquired:
+            other.release()
         return original()
 
     database.commit_transaction = commit_transaction
@@ -69,4 +76,5 @@ def test_record_walk_keeps_the_lock_until_commit():
     )
     assert saved is not None
     assert seen == [True]
+    assert other_free == [True]
     assert manager._lock_for("Quarto", "Sala").locked() is False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 import pytest
@@ -38,6 +39,7 @@ class _TxDB:
         self.next_trace = 1
         self.next_edge = 10
         self.edge_sql = ""
+        self.searches: list[str] = []
 
     def begin_transaction(self):
         self.open = True
@@ -107,14 +109,45 @@ class _TxDB:
         self.ops.append("update")
         return True
 
+    def _valid(self, params):
+        return [
+            row for row in self.traces
+            if row["source_node"] == params[0]
+            and row["target_node"] == params[1]
+            and row["is_valid"] == 1
+        ]
+
     def execute_search(self, sql, params=None):
-        if "FROM walk_traces" in sql:
+        params = params or ()
+        self.searches.append(sql)
+        if "AS samples_count" in sql:
+            valid = self._valid(params)
+            if not valid:
+                return [{"samples_count": 0, "heading_rad": None}]
+            from map.edge_rules import circular_mean
+            return [{
+                "samples_count": len(valid),
+                "heading_rad": circular_mean([
+                    float(row["net_heading_rad"] or 0) for row in valid
+                ]),
+            }]
+        if "ORDER BY total_distance_m" in sql:
+            import re
+            match = re.search(r"LIMIT (\d+) OFFSET (\d+)", sql)
+            limit, offset = int(match.group(1)), int(match.group(2))
+            ordered = sorted(self._valid(params), key=lambda row: float(row["total_distance_m"]))
             return [
-                row for row in self.traces
-                if row["source_node"] == params[0]
-                and row["target_node"] == params[1]
-                and row["is_valid"] == 1
+                {"total_distance_m": row["total_distance_m"]}
+                for row in ordered[offset:offset + limit]
             ]
+        if "ORDER BY started_at DESC" in sql:
+            valid = self._valid(params)
+            if not valid:
+                return []
+            latest = max(valid, key=lambda row: (str(row["started_at"]), int(row["id"])))
+            return [{"id": latest["id"]}]
+        if "FROM walk_traces" in sql:
+            return self._valid(params)
         if "FROM edges" in sql:
             found = self.edges.get((params[0], params[1]))
             return [found] if found else []
@@ -192,6 +225,93 @@ def test_invalid_walk_does_not_change_the_edge():
     assert db.traces[0]["is_valid"] == 0
     assert "INSERT INTO edges" not in db.edge_sql
     assert db.ops[-1] == "commit"
+
+
+def test_median_uses_the_middle_distance_not_the_latest():
+    db = _TxDB()
+    manager = MapDatabaseManager(db)
+    stamps = (
+        "2026-10-20 16:05:11.020",
+        "2026-10-20 16:05:12.020",
+        "2026-10-20 16:05:13.020",
+    )
+    saved = None
+    for stamp, distance in zip(stamps, (1.0, 100.0, 10.0)):
+        saved = manager.record_walk(
+            "Quarto", "Sala", 4, stamp, stamp, _built(distance), is_valid=True,
+        )
+        assert saved is not None
+    assert saved["samples_count"] == 3
+    assert saved["edge_distance_m"] == pytest.approx(10.0)
+    assert saved["edge_origin"] == "recorded"
+    assert db.edges[("Quarto", "Sala")]["samples_count"] == 3
+    assert any("ORDER BY total_distance_m" in sql for sql in db.searches)
+    assert not any("polyline_json" in sql and "is_valid = 1" in sql for sql in db.searches)
+
+
+def test_save_edge_commits_both_directions_in_name_order():
+    db = _EdgeTx()
+    manager = MapDatabaseManager(db)
+    assert manager.save_edge("Sala", "Quarto", 4.0, 0.2) is True
+    assert db.ops[0] == "begin"
+    assert db.ops[-1] == "commit"
+    assert db.ops.count("commit") == 1
+    assert [pair for pair in db.order] == [("Quarto", "Sala"), ("Sala", "Quarto")]
+    assert db.edges[("Sala", "Quarto")][2] == pytest.approx(4.0)
+    assert db.edges[("Quarto", "Sala")][3] == pytest.approx((0.2 + math.pi) % (2 * math.pi))
+
+    again = _EdgeTx()
+    assert MapDatabaseManager(again).save_edge("Quarto", "Sala", 4.0, 1.0) is True
+    assert [pair for pair in again.order] == [("Quarto", "Sala"), ("Sala", "Quarto")]
+
+
+def test_save_edge_rolls_back_when_the_second_direction_fails():
+    db = _EdgeTx(fail_second=True)
+    assert MapDatabaseManager(db).save_edge("Sala", "Quarto", 4.0, 0.2) is False
+    assert "commit" not in db.ops
+    assert "rollback" in db.ops
+    assert db.edges == {}
+
+
+class _EdgeTx:
+    def __init__(self, fail_second: bool = False) -> None:
+        self.fail_second = fail_second
+        self.ops: list[str] = []
+        self.order: list[tuple[str, str]] = []
+        self.edges: dict[tuple[str, str], tuple] = {}
+        self.open = False
+        self.upserts = 0
+
+    def begin_transaction(self):
+        self.open = True
+        self.ops.append("begin")
+        return True
+
+    def commit_transaction(self):
+        assert self.open
+        self.open = False
+        self.ops.append("commit")
+        return True
+
+    def rollback_transaction(self):
+        self.open = False
+        self.edges.clear()
+        self.order.clear()
+        self.ops.append("rollback")
+        return True
+
+    def execute_search(self, sql, params=None):
+        self.ops.append("lock")
+        return []
+
+    def execute_within(self, sql, params=None):
+        assert self.open
+        self.upserts += 1
+        if self.fail_second and self.upserts == 2:
+            return False
+        self.order.append((params[0], params[1]))
+        self.edges[(params[0], params[1])] = params
+        return True
 
 
 def test_step_failure_rolls_back_and_skips_the_edge():

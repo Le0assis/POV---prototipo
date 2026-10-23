@@ -93,6 +93,8 @@ def criar_tabelas_sistema(db: ConexaoBD):
     aplicar_migracao_002(db)
     print("Aplicando migração 003 (prédio, categoria, slug)...")
     aplicar_migracao_003(db)
+    print("Aplicando migração 004 (índices do salvamento)...")
+    aplicar_migracao_004(db)
     print("[SETUP] Processo de criação de tabelas concluído.\n")
 
 
@@ -118,6 +120,20 @@ def aplicar_migracao_003(db: ConexaoBD) -> None:
 
     path = Path(__file__).resolve().parent / "migrations" / "003_checkpoint_slug.py"
     spec = importlib.util.spec_from_file_location("migration_003_checkpoint_slug", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Migração não encontrada: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.apply(db)
+
+
+def aplicar_migracao_004(db: ConexaoBD) -> None:
+    """Carrega datasets/migrations/004_save_indexes.py (o nome começa com dígito)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / "migrations" / "004_save_indexes.py"
+    spec = importlib.util.spec_from_file_location("migration_004_save_indexes", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Migração não encontrada: {path}")
     module = importlib.util.module_from_spec(spec)

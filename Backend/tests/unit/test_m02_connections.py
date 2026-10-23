@@ -79,8 +79,14 @@ class _MemDB:
 
     def execute_search(self, sql, params=None):
         params = params or ()
+        if "FROM walk_steps" in sql and " IN (" in sql:
+            ids = set(params)
+            return [step for step in self.steps if step["trace_id"] in ids]
         if "FROM walk_steps" in sql:
             return [step for step in self.steps if step["trace_id"] == params[0]]
+        if "FROM walk_traces" in sql and " IN (" in sql:
+            ids = set(params)
+            return [row for row in self.traces if row["id"] in ids]
         if "FROM walk_traces" in sql and "WHERE id = %s" in sql:
             return [row for row in self.traces if row["id"] == params[0]]
         if "FROM walk_traces" in sql:
@@ -128,6 +134,25 @@ def test_include_path_false_omits_the_key():
     listed = MapDatabaseManager(_MemDB()).list_connections(include_path=False)
     assert "path" not in listed[0]
     assert listed[0]["reverse_edge_id"] == 8
+
+
+def test_list_connections_is_not_n_plus_one():
+    class _Counting(_MemDB):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def execute_search(self, sql, params=None):
+            self.calls += 1
+            return super().execute_search(sql, params)
+
+    database = _Counting()
+    listed = MapDatabaseManager(database).list_connections(include_path=True)
+    assert len(listed) == 2
+    assert database.calls == 3
+    without_path = _Counting()
+    MapDatabaseManager(without_path).list_connections(include_path=False)
+    assert without_path.calls == 2
 
 
 def test_detail_returns_the_requested_direction():

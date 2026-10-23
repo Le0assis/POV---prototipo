@@ -1,7 +1,12 @@
 """Conexão MySQL (XAMPP) por requisição, com prazo e devolução ao pool.
 
 O connect não roda no event loop. Fechar ou reutilizar a sessão esvazia o
-cursor e desfaz a transação implícita antes de qualquer outro comando.
+cursor e desfaz a transação que ficou aberta antes de qualquer outro comando.
+
+Autocommit fica ligado: um SELECT não segura read view. Aresta e caminhada
+abrem a transação na mão. A sessão entra em READ COMMITTED, com
+``innodb_lock_wait_timeout`` de 5s. ``FOUND_ROWS`` faz o rowcount do UPDATE
+contar a linha achada, mesmo quando o valor não mudou.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ import threading
 
 import mysql.connector
 from mysql.connector import Error, IntegrityError
+from mysql.connector.constants import ClientFlag
 
 # Handshake. 0 no conector C significa "sem prazo".
 CONNECT_TIMEOUT_S = 5
@@ -46,6 +52,7 @@ class ConexaoBD:
         self.connection = None
         self.cursor = None
         self._explicit = False
+        self.last_errno = None
 
     def connect(self, announce: bool = True, timeout: float | None = None):
         """Abre a sessão. ``timeout`` None usa ``CONNECT_TIMEOUT_S``.
@@ -57,8 +64,11 @@ class ConexaoBD:
         self.connection = None
         self.cursor = None
         self._explicit = False
+        self.last_errno = None
         wait = CONNECT_TIMEOUT_S if timeout is None else timeout
         try:
+            # FOUND_ROWS: rowcount do UPDATE é o que casou, não só o que mudou.
+            flags = ClientFlag.get_default() | ClientFlag.FOUND_ROWS
             self.connection = mysql.connector.connect(
                 host=_tcp_host(self.host),
                 port=self.port,
@@ -66,20 +76,34 @@ class ConexaoBD:
                 user=self.user,
                 password=self.password,
                 connection_timeout=wait,
-                autocommit=False,
+                autocommit=True,
                 use_pure=True,
+                client_flags=flags,
             )
             sock = getattr(self.connection, "_socket", None)
             if sock is not None:
                 sock.set_connection_timeout(COMMAND_TIMEOUT_S)
             self.cursor = self.connection.cursor(dictionary=True, buffered=True)
+            self.cursor.execute(
+                "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"
+            )
+            self.cursor.execute("SET SESSION innodb_lock_wait_timeout = 5")
             if announce:
                 print("Conexão com o banco de dados estabelecida com sucesso!")
         except (Error, OSError) as exc:
+            failed = self.connection
             self.connection = None
             self.cursor = None
+            if failed is not None:
+                try:
+                    failed.close()
+                except (Error, OSError):
+                    pass
             if announce:
                 print(f"Erro ao conectar ao banco de dados: {exc}")
+
+    def _note_error(self, exc: BaseException) -> None:
+        self.last_errno = getattr(exc, "errno", None)
 
     def _drain_unread(self) -> None:
         """Consome o resultado pendente antes de qualquer outro comando."""
@@ -114,12 +138,15 @@ class ConexaoBD:
             return None
         try:
             self.cursor.execute(sql, params)
+            self.last_errno = None
             return self.cursor.fetchall()
         except Error as exc:
+            self._note_error(exc)
             print(f"Erro ao executar consulta: {exc}")
             return None
 
     def execute_query(self, sql, params=None):
+        """Um comando e commit. Não usar dentro de ``begin_transaction``."""
         if not self._ready():
             print("Erro ao executar comando: sem conexão")
             return False
@@ -127,18 +154,41 @@ class ConexaoBD:
             self.cursor.execute(sql, params)
             self.connection.commit()
             self._explicit = False
+            self.last_errno = None
             return True
-        except IntegrityError:
+        except IntegrityError as exc:
+            self._note_error(exc)
             if self.connection:
                 self.connection.rollback()
             self._explicit = False
             raise
         except Error as exc:
+            self._note_error(exc)
             if self.connection:
                 self.connection.rollback()
             self._explicit = False
             print(f"Erro ao executar comando: {exc}")
             return False
+
+    def execute_update(self, sql, params=None):
+        """UPDATE/DELETE. Devolve linhas casadas (FOUND_ROWS), ou None."""
+        if not self._ready():
+            print("Erro ao executar update: sem conexão")
+            return None
+        try:
+            self.cursor.execute(sql, params)
+            affected = int(self.cursor.rowcount)
+            self.connection.commit()
+            self._explicit = False
+            self.last_errno = None
+            return affected
+        except Error as exc:
+            self._note_error(exc)
+            if self.connection:
+                self.connection.rollback()
+            self._explicit = False
+            print(f"Erro ao executar update: {exc}")
+            return None
 
     def execute_insert(self, sql, params=None):
         """INSERT (ou upsert com LAST_INSERT_ID). Devolve o id, ou None se falhar."""
@@ -149,8 +199,10 @@ class ConexaoBD:
             self.cursor.execute(sql, params)
             self.connection.commit()
             self._explicit = False
+            self.last_errno = None
             return self.cursor.lastrowid
         except Error as exc:
+            self._note_error(exc)
             if self.connection:
                 self.connection.rollback()
             self._explicit = False
@@ -165,8 +217,10 @@ class ConexaoBD:
             self.cursor.executemany(sql, list(seq))
             self.connection.commit()
             self._explicit = False
+            self.last_errno = None
             return True
         except Error as exc:
+            self._note_error(exc)
             if self.connection:
                 self.connection.rollback()
             self._explicit = False
@@ -176,9 +230,10 @@ class ConexaoBD:
     def begin_transaction(self):
         """Abre uma transação. Os métodos ``*_within`` não dão commit.
 
-        Um SELECT anterior (autocommit desligado) deixa transação implícita.
-        Resultado ainda não lido é consumido antes do ROLLBACK e do
-        ``START TRANSACTION``: senão o conector espera um pacote que não vem.
+        Com autocommit ligado o SELECT não abre transação. Se ainda houver
+        uma (retry, ou sessão antiga), ela é revertida: ``start_transaction``
+        recusa com "Transaction already in progress". Resultado ainda não
+        lido é consumido antes: senão o conector espera um pacote que não vem.
         """
         try:
             if not self.connection:
@@ -188,8 +243,10 @@ class ConexaoBD:
                 self.connection.rollback()
             self.connection.start_transaction()
             self._explicit = True
+            self.last_errno = None
             return True
         except Error as exc:
+            self._note_error(exc)
             self._explicit = False
             print(f"Erro ao abrir transação: {exc}")
             return False
@@ -198,8 +255,10 @@ class ConexaoBD:
         try:
             self.connection.commit()
             self._explicit = False
+            self.last_errno = None
             return True
         except Error as exc:
+            self._note_error(exc)
             self._explicit = False
             print(f"Erro ao confirmar transação: {exc}")
             return False
@@ -221,8 +280,10 @@ class ConexaoBD:
             return False
         try:
             self.cursor.execute(sql, params)
+            self.last_errno = None
             return True
         except Error as exc:
+            self._note_error(exc)
             print(f"Erro ao executar comando na transação: {exc}")
             return False
 
@@ -231,8 +292,10 @@ class ConexaoBD:
             return None
         try:
             self.cursor.execute(sql, params)
+            self.last_errno = None
             return self.cursor.lastrowid
         except Error as exc:
+            self._note_error(exc)
             print(f"Erro ao executar insert na transação: {exc}")
             return None
 
@@ -241,8 +304,10 @@ class ConexaoBD:
             return False
         try:
             self.cursor.executemany(sql, list(seq))
+            self.last_errno = None
             return True
         except Error as exc:
+            self._note_error(exc)
             print(f"Erro ao executar lote na transação: {exc}")
             return False
 
