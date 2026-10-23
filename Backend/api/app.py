@@ -7,6 +7,7 @@ from pathlib import Path
 from datasets.ManagerDatabase import (
     ConexaoBD,
     DatabaseBusy,
+    DatabaseQueryError,
     DatabaseUnavailable,
     drain_pool,
     request_session,
@@ -89,6 +90,12 @@ async def mysql_busy(_request, exc: DatabaseBusy):
         content={"detail": str(exc)},
         headers={"Retry-After": "5"},
     )
+
+
+@app.exception_handler(DatabaseQueryError)
+async def mysql_query_failed(_request, exc: DatabaseQueryError):
+    """Erro de SQL que não é lock. Não vira 404 de recurso ausente."""
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
 topo_map = TopologicalMap()
@@ -353,7 +360,7 @@ def delete_route(
     """Remove uma rota salva."""
     success = map_db_manager.delete_route(route_id)
     if not success:
-        raise HTTPException(status_code=404, detail="Rota não encontrada ou erro ao remover.")
+        raise HTTPException(status_code=404, detail="Rota não encontrada.")
 
     return {"status": "success", "message": "Rota removida com sucesso."}
 

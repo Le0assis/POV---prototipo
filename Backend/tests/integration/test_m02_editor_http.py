@@ -379,6 +379,79 @@ def test_post_reset_requires_editor_password(monkeypatch):
     assert closed.status_code == 503
 
 
+def _lock_error(errno: int = 1205):
+    from mysql.connector import Error
+
+    return Error(msg="lock wait", errno=errno)
+
+
+class _PositionCursor:
+    def __init__(self, steps) -> None:
+        self.steps = list(steps)
+        self.rowcount = 0
+        self.calls = 0
+
+    def execute(self, sql, params=None):
+        self.calls += 1
+        step = self.steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        self.rowcount = int(step)
+
+
+class _PositionConnection:
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return None
+
+
+def _patch_position(monkeypatch, steps):
+    from datasets.ManagerDatabase import ConexaoBD
+
+    database = ConexaoBD("127.0.0.1", "pov", "pov", "x")
+    database.connection = _PositionConnection()
+    database.cursor = _PositionCursor(steps)
+    monkeypatch.setattr(app_module.map_db_manager, "_per_request", False)
+    monkeypatch.setattr(app_module.map_db_manager, "_database", database)
+    return database.cursor
+
+
+def _patch_position_request(monkeypatch, steps):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    cursor = _patch_position(monkeypatch, steps)
+    response = TestClient(app).patch(
+        "/api/checkpoints/Sala/position",
+        headers=OK,
+        json={"pos_x_px": 12.0, "pos_y_px": 40.0},
+    )
+    return cursor, response
+
+
+def test_position_patch_held_lock_is_503_with_retry_after(monkeypatch):
+    cursor, response = _patch_position_request(monkeypatch, [_lock_error(), _lock_error()])
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"] != "Checkpoint não encontrado."
+    assert cursor.calls == 2
+
+
+def test_position_patch_missing_checkpoint_is_404(monkeypatch):
+    cursor, response = _patch_position_request(monkeypatch, [0])
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Checkpoint não encontrado."
+    assert response.headers.get("retry-after") is None
+    assert cursor.calls == 1
+
+
+def test_position_patch_sql_error_is_500_not_404(monkeypatch):
+    cursor, response = _patch_position_request(monkeypatch, [_lock_error(1064)])
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Falha ao gravar a posição do checkpoint."
+    assert cursor.calls == 1
+
+
 def test_post_routes_requires_editor_password(monkeypatch):
     monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     body = {"start_node": "A", "end_node": "B", "name": "Rota"}

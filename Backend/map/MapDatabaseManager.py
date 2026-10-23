@@ -9,6 +9,7 @@ from mysql.connector import IntegrityError
 from datasets.ManagerDatabase import (
     ConexaoBD,
     DatabaseBusy,
+    DatabaseQueryError,
     DatabaseUnavailable,
     request_connection,
     request_session,
@@ -192,7 +193,7 @@ class MapDatabaseManager:
             (cleaned, name),
         )
         if not updated:
-            return False
+            raise DatabaseQueryError("Falha ao renomear o checkpoint.")
         renamed = self.db.execute_search(
             "SELECT slug FROM checkpoints WHERE name = %s",
             (cleaned,),
@@ -222,7 +223,7 @@ class MapDatabaseManager:
             (category_id, name),
         )
         if not updated:
-            return None
+            raise DatabaseQueryError("Falha ao atualizar a categoria do checkpoint.")
         return self.get_checkpoint_by_name(name)
 
     @_sql_method
@@ -306,26 +307,31 @@ class MapDatabaseManager:
             with self._lock_for(source, target):
                 with self._session():
                     self._clear_lock_error()
-                    if not self.db.begin_transaction():
-                        if self._lock_conflict() and attempt == 0:
-                            continue
-                        if self._lock_conflict():
-                            raise DatabaseBusy()
-                        return False
                     try:
-                        self._lock_checkpoints(source, target)
-                        for src, tgt, dist, heading in directions:
-                            self._lock_edge(src, tgt)
-                            if not self._upsert_manual_direction(src, tgt, dist, heading):
-                                raise RuntimeError("falha ao gravar um sentido da aresta")
-                        if not self.db.commit_transaction():
-                            raise RuntimeError("commit da aresta falhou")
-                        return True
+                        if not self.db.begin_transaction():
+                            if self._lock_conflict() and attempt == 0:
+                                continue
+                            if self._lock_conflict():
+                                raise DatabaseBusy()
+                            return False
+                        try:
+                            self._lock_checkpoints(source, target)
+                            for src, tgt, dist, heading in directions:
+                                self._lock_edge(src, tgt)
+                                if not self._upsert_manual_direction(src, tgt, dist, heading):
+                                    raise RuntimeError("falha ao gravar um sentido da aresta")
+                            if not self.db.commit_transaction():
+                                raise RuntimeError("commit da aresta falhou")
+                            return True
+                        except Exception as exc:
+                            print(f"Aresta revertida: {exc}")
+                            self.db.rollback_transaction()
+                            raise
                     except DatabaseBusy:
+                        if attempt == 0:
+                            continue
                         raise
                     except Exception as exc:
-                        print(f"Aresta revertida: {exc}")
-                        self.db.rollback_transaction()
                         if self._lock_conflict() and attempt == 0:
                             continue
                         if self._lock_conflict():
@@ -371,7 +377,8 @@ class MapDatabaseManager:
         # O executar_consulta vai te retornar uma lista de dicionários se você usou dictionary=True
         # Ex: [{'name': 'Recepcao'}, {'name': 'Corredor Central'}]
         rows_nodes = self.db.execute_search(sql_nodes)
-        
+        if rows_nodes is None:
+            raise DatabaseQueryError("Falha ao carregar checkpoints.")
         if rows_nodes:
             for row in rows_nodes:
                 # Extraia o nome do nó e adicione ao topo_map usando a função add_checkpoint
@@ -386,7 +393,8 @@ class MapDatabaseManager:
             "FROM edges ORDER BY id"
         )
         rows_edges = self.db.execute_search(sql_edges)
-
+        if rows_edges is None:
+            raise DatabaseQueryError("Falha ao carregar arestas.")
         if rows_edges:
             topo_map.load_directed_edges(rows_edges)
             for row in rows_edges:
@@ -427,8 +435,8 @@ class MapDatabaseManager:
         """Busca o conteúdo CSV de um log específico pelo ID."""
         query = "SELECT raw_csv FROM sensors_log WHERE id = %s"
         result = self.db.execute_search(query, (log_id,))
-        
-        # Ajuste a extração conforme o retorno do seu DB (tuple ou dict)
+        if result is None:
+            raise DatabaseQueryError("Falha ao ler o log de sensores.")
         if result and len(result) > 0:
             return result[0]['raw_csv'] if isinstance(result[0], dict) else result[0][0]
         return None
@@ -466,20 +474,20 @@ class MapDatabaseManager:
             ORDER BY created_at DESC
         """
         rows = self.db.execute_search(sql)
-        if rows:
-            return [
-                {
-                    "id": row["id"],
-                    "name": row["name"],
-                    "start_node": row["start_node"],
-                    "end_node": row["end_node"],
-                    "total_distance_m": row["total_distance_m"],
-                    "total_steps_estimated": row["total_steps_estimated"],
-                    "created_at": row["created_at"]
-                }
-                for row in rows
-            ]
-        return []
+        if rows is None:
+            raise DatabaseQueryError("Falha ao listar as rotas.")
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "start_node": row["start_node"],
+                "end_node": row["end_node"],
+                "total_distance_m": row["total_distance_m"],
+                "total_steps_estimated": row["total_steps_estimated"],
+                "created_at": row["created_at"]
+            }
+            for row in rows
+        ]
 
     @_sql_method
     def get_route_by_id(self, route_id: int):
@@ -491,6 +499,8 @@ class MapDatabaseManager:
             WHERE id = %s
         """
         rows = self.db.execute_search(sql, (route_id,))
+        if rows is None:
+            raise DatabaseQueryError("Falha ao ler a rota.")
         if rows and len(rows) > 0:
             row = rows[0]
             import json
@@ -509,9 +519,14 @@ class MapDatabaseManager:
 
     @_sql_method
     def delete_route(self, route_id: int):
-        """Remove uma rota salva."""
-        sql = "DELETE FROM saved_routes WHERE id = %s"
-        return bool(self.db.execute_query(sql, (route_id,)))
+        """Remove uma rota salva. False só quando o id não existe."""
+        affected = self.db.execute_update(
+            "DELETE FROM saved_routes WHERE id = %s",
+            (route_id,),
+        )
+        if affected is None:
+            raise DatabaseQueryError("Falha ao remover a rota.")
+        return affected > 0
 
     def record_walk(
         self,
@@ -536,25 +551,30 @@ class MapDatabaseManager:
             with self._lock_for(source, target):
                 with self._session():
                     self._clear_lock_error()
-                    if not self.db.begin_transaction():
-                        print("Erro ao abrir transação de walk_trace")
-                        if self._lock_conflict() and attempt == 0:
-                            continue
-                        if self._lock_conflict():
-                            raise DatabaseBusy()
-                        return None
                     try:
-                        payload = self._write_walk(
-                            source, target, sensors_log_id, started_at, ended_at, built, bool(is_valid),
-                        )
-                        if not self.db.commit_transaction():
-                            raise RuntimeError("commit da trajetória falhou")
-                        return payload
+                        if not self.db.begin_transaction():
+                            print("Erro ao abrir transação de walk_trace")
+                            if self._lock_conflict() and attempt == 0:
+                                continue
+                            if self._lock_conflict():
+                                raise DatabaseBusy()
+                            return None
+                        try:
+                            payload = self._write_walk(
+                                source, target, sensors_log_id, started_at, ended_at, built, bool(is_valid),
+                            )
+                            if not self.db.commit_transaction():
+                                raise RuntimeError("commit da trajetória falhou")
+                            return payload
+                        except Exception as exc:
+                            print(f"Trajetória revertida: {exc}")
+                            self.db.rollback_transaction()
+                            raise
                     except DatabaseBusy:
+                        if attempt == 0:
+                            continue
                         raise
                     except Exception as exc:
-                        print(f"Trajetória revertida: {exc}")
-                        self.db.rollback_transaction()
                         if self._lock_conflict() and attempt == 0:
                             continue
                         if self._lock_conflict():
@@ -727,6 +747,8 @@ class MapDatabaseManager:
             """,
             (source, target),
         )
+        if rows is None:
+            raise DatabaseQueryError("Falha ao ler a aresta.")
         if not rows:
             return None
         return rows[0]
@@ -779,6 +801,8 @@ class MapDatabaseManager:
             """,
             (int(trace_id),),
         )
+        if rows is None:
+            raise DatabaseQueryError("Falha ao ler a trajetória.")
         if not rows:
             return None
         steps = self.db.execute_search(
@@ -791,7 +815,7 @@ class MapDatabaseManager:
             (int(trace_id),),
         )
         if steps is None:
-            return None
+            raise DatabaseQueryError("Falha ao ler os passos da trajetória.")
         return trace_payload(rows[0], steps)
 
     @_sql_method
@@ -849,6 +873,8 @@ class MapDatabaseManager:
             """,
             (int(edge_id),),
         )
+        if rows is None:
+            raise DatabaseQueryError("Falha ao ler a conexão.")
         if not rows:
             return None
         row = rows[0]
@@ -860,6 +886,8 @@ class MapDatabaseManager:
             """,
             (row["target_node"], row["source_node"]),
         )
+        if reverse is None:
+            raise DatabaseQueryError("Falha ao ler o sentido inverso.")
         reverse_id = int(reverse[0]["id"]) if reverse else None
         item = self._connection_view(row, reverse_id, include_path=True)
         item["traces"] = self._traces_for_direction(row["source_node"], row["target_node"])
@@ -913,12 +941,14 @@ class MapDatabaseManager:
             """,
             (int(trace_id),),
         )
+        if rows is None:
+            raise DatabaseQueryError("Falha ao ler a trajetória.")
         if not rows:
             return None
         return rows[0]
 
     def _steps_for_trace(self, trace_id: int) -> list[dict] | None:
-        return self.db.execute_search(
+        rows = self.db.execute_search(
             """
             SELECT step_index, t_ms, heading_rad, step_length_m, x_m, y_m
             FROM walk_steps
@@ -927,6 +957,9 @@ class MapDatabaseManager:
             """,
             (int(trace_id),),
         )
+        if rows is None:
+            raise DatabaseQueryError("Falha ao ler os passos da trajetória.")
+        return rows
 
     def _path_for(self, row: dict, trace: dict | None, steps: list | None = None) -> list[dict]:
         if trace is None:
@@ -955,9 +988,13 @@ class MapDatabaseManager:
             """,
             (source, target),
         )
+        if rows is None:
+            raise DatabaseQueryError("Falha ao listar trajetórias.")
         if not rows:
             return []
-        grouped = self._steps_by_trace_id([int(row["id"]) for row in rows]) or {}
+        grouped = self._steps_by_trace_id([int(row["id"]) for row in rows])
+        if grouped is None:
+            raise DatabaseQueryError("Falha ao ler os passos da trajetória.")
         traces = []
         for row in rows:
             traces.append({
@@ -1035,7 +1072,9 @@ class MapDatabaseManager:
             "UPDATE checkpoints SET pos_x_px = %s, pos_y_px = %s WHERE name = %s",
             (pos_x_px, pos_y_px, name),
         )
-        return bool(affected)
+        if affected is None:
+            raise DatabaseQueryError("Falha ao gravar a posição do checkpoint.")
+        return affected > 0
 
     @_sql_method
     def get_map_config(self) -> dict | None:

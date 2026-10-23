@@ -53,6 +53,14 @@ class DatabaseBusy(Exception):
         super().__init__(message)
 
 
+class DatabaseQueryError(Exception):
+    """O SQL falhou. Não é lock e não é linha ausente."""
+
+
+# innodb_lock_wait_timeout (1205) e deadlock (1213).
+_LOCK_ERRNOS = (1205, 1213)
+
+
 def _tcp_host(host: str) -> str:
     """127.0.0.1 em vez de localhost, para não cair em named pipe nem em ::1."""
     if str(host).strip().lower() == "localhost":
@@ -123,6 +131,34 @@ class ConexaoBD:
     def _note_error(self, exc: BaseException) -> None:
         self.last_errno = getattr(exc, "errno", None)
 
+    def _attempt(self, operation, *, retry_lock: bool, cleanup, failed):
+        """Roda ``operation``. 1205/1213 não viram None nem False.
+
+        Fora da transação há uma nova tentativa (duas esperas de 5s, ~10s).
+        Dentro dela o save da aresta ou da caminhada é quem repete: repetir
+        o comando aqui também dobraria o prazo.
+        """
+        retried = False
+        while True:
+            try:
+                result = operation()
+            except Error as exc:
+                self._note_error(exc)
+                cleanup()
+                if getattr(exc, "errno", None) in _LOCK_ERRNOS:
+                    if retry_lock and not retried:
+                        retried = True
+                        continue
+                    raise DatabaseBusy() from exc
+                return failed(exc)
+            self.last_errno = None
+            return result
+
+    def _rollback_autocommit(self) -> None:
+        if self.connection:
+            self.connection.rollback()
+        self._explicit = False
+
     def _drain_unread(self) -> None:
         """Consome o resultado pendente antes de qualquer outro comando."""
         connection = self.connection
@@ -154,14 +190,21 @@ class ConexaoBD:
         if not self._ready():
             print("Erro ao executar consulta: sem conexão")
             return None
-        try:
+
+        def operation():
             self.cursor.execute(sql, params)
-            self.last_errno = None
             return self.cursor.fetchall()
-        except Error as exc:
-            self._note_error(exc)
+
+        def failed(exc):
             print(f"Erro ao executar consulta: {exc}")
             return None
+
+        return self._attempt(
+            operation,
+            retry_lock=not self._explicit,
+            cleanup=lambda: None,
+            failed=failed,
+        )
 
     def _outside_transaction(self) -> bool:
         """``execute_query`` e os irmãos dão commit. Dentro da transação, não."""
@@ -177,47 +220,55 @@ class ConexaoBD:
         if not self._ready():
             print("Erro ao executar comando: sem conexão")
             return False
-        try:
+
+        def operation():
             self.cursor.execute(sql, params)
             self.connection.commit()
             self._explicit = False
-            self.last_errno = None
             return True
-        except IntegrityError as exc:
-            self._note_error(exc)
-            if self.connection:
-                self.connection.rollback()
-            self._explicit = False
-            raise
-        except Error as exc:
-            self._note_error(exc)
-            if self.connection:
-                self.connection.rollback()
-            self._explicit = False
+
+        def failed(exc):
+            if isinstance(exc, IntegrityError):
+                raise exc
             print(f"Erro ao executar comando: {exc}")
             return False
 
+        return self._attempt(
+            operation,
+            retry_lock=True,
+            cleanup=self._rollback_autocommit,
+            failed=failed,
+        )
+
     def execute_update(self, sql, params=None):
-        """UPDATE/DELETE. Devolve linhas casadas (FOUND_ROWS), ou None."""
+        """UPDATE/DELETE. Devolve linhas casadas (FOUND_ROWS), ou None.
+
+        None é erro de SQL. 0 é nenhuma linha. 1205/1213 sobem
+        ``DatabaseBusy`` depois de uma nova tentativa.
+        """
         if not self._outside_transaction():
             return None
         if not self._ready():
             print("Erro ao executar update: sem conexão")
             return None
-        try:
+
+        def operation():
             self.cursor.execute(sql, params)
             affected = int(self.cursor.rowcount)
             self.connection.commit()
             self._explicit = False
-            self.last_errno = None
             return affected
-        except Error as exc:
-            self._note_error(exc)
-            if self.connection:
-                self.connection.rollback()
-            self._explicit = False
+
+        def failed(exc):
             print(f"Erro ao executar update: {exc}")
             return None
+
+        return self._attempt(
+            operation,
+            retry_lock=True,
+            cleanup=self._rollback_autocommit,
+            failed=failed,
+        )
 
     def execute_insert(self, sql, params=None):
         """INSERT (ou upsert com LAST_INSERT_ID). Devolve o id, ou None se falhar."""
@@ -226,19 +277,23 @@ class ConexaoBD:
         if not self._ready():
             print("Erro ao executar insert: sem conexão")
             return None
-        try:
+
+        def operation():
             self.cursor.execute(sql, params)
             self.connection.commit()
             self._explicit = False
-            self.last_errno = None
             return self.cursor.lastrowid
-        except Error as exc:
-            self._note_error(exc)
-            if self.connection:
-                self.connection.rollback()
-            self._explicit = False
+
+        def failed(exc):
             print(f"Erro ao executar insert: {exc}")
             return None
+
+        return self._attempt(
+            operation,
+            retry_lock=True,
+            cleanup=self._rollback_autocommit,
+            failed=failed,
+        )
 
     def execute_many(self, sql, seq):
         if not self._outside_transaction():
@@ -246,19 +301,24 @@ class ConexaoBD:
         if not self._ready():
             print("Erro ao executar lote: sem conexão")
             return False
-        try:
-            self.cursor.executemany(sql, list(seq))
+        rows = list(seq)
+
+        def operation():
+            self.cursor.executemany(sql, rows)
             self.connection.commit()
             self._explicit = False
-            self.last_errno = None
             return True
-        except Error as exc:
-            self._note_error(exc)
-            if self.connection:
-                self.connection.rollback()
-            self._explicit = False
+
+        def failed(exc):
             print(f"Erro ao executar lote: {exc}")
             return False
+
+        return self._attempt(
+            operation,
+            retry_lock=True,
+            cleanup=self._rollback_autocommit,
+            failed=failed,
+        )
 
     def begin_transaction(self):
         """Abre uma transação. Os métodos ``*_within`` não dão commit.
@@ -267,34 +327,46 @@ class ConexaoBD:
         uma (retry, ou sessão antiga), ela é revertida: ``start_transaction``
         recusa com "Transaction already in progress". Resultado ainda não
         lido é consumido antes: senão o conector espera um pacote que não vem.
+        Lock aqui sobe na hora: quem abre a transação já repete uma vez.
         """
-        try:
-            if not self.connection:
-                return False
+        if not self.connection:
+            return False
+
+        def operation():
             self._drain_unread()
             if getattr(self.connection, "in_transaction", False):
                 self.connection.rollback()
             self.connection.start_transaction()
             self._explicit = True
-            self.last_errno = None
             return True
-        except Error as exc:
-            self._note_error(exc)
-            self._explicit = False
+
+        def failed(exc):
             print(f"Erro ao abrir transação: {exc}")
             return False
 
+        return self._attempt(
+            operation,
+            retry_lock=False,
+            cleanup=lambda: setattr(self, "_explicit", False),
+            failed=failed,
+        )
+
     def commit_transaction(self):
-        try:
+        def operation():
             self.connection.commit()
             self._explicit = False
-            self.last_errno = None
             return True
-        except Error as exc:
-            self._note_error(exc)
-            self._explicit = False
+
+        def failed(exc):
             print(f"Erro ao confirmar transação: {exc}")
             return False
+
+        return self._attempt(
+            operation,
+            retry_lock=False,
+            cleanup=lambda: setattr(self, "_explicit", False),
+            failed=failed,
+        )
 
     def rollback_transaction(self):
         try:
@@ -311,38 +383,45 @@ class ConexaoBD:
     def execute_within(self, sql, params=None):
         if not self._ready():
             return False
-        try:
+
+        def operation():
             self.cursor.execute(sql, params)
-            self.last_errno = None
             return True
-        except Error as exc:
-            self._note_error(exc)
+
+        def failed(exc):
             print(f"Erro ao executar comando na transação: {exc}")
             return False
+
+        return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
 
     def insert_within(self, sql, params=None):
         if not self._ready():
             return None
-        try:
+
+        def operation():
             self.cursor.execute(sql, params)
-            self.last_errno = None
             return self.cursor.lastrowid
-        except Error as exc:
-            self._note_error(exc)
+
+        def failed(exc):
             print(f"Erro ao executar insert na transação: {exc}")
             return None
+
+        return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
 
     def executemany_within(self, sql, seq):
         if not self._ready():
             return False
-        try:
-            self.cursor.executemany(sql, list(seq))
-            self.last_errno = None
+        rows = list(seq)
+
+        def operation():
+            self.cursor.executemany(sql, rows)
             return True
-        except Error as exc:
-            self._note_error(exc)
+
+        def failed(exc):
             print(f"Erro ao executar lote na transação: {exc}")
             return False
+
+        return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
 
     def reset_for_pool(self) -> bool:
         """Deixa a sessão limpa para outro request. Não manda PING antes."""
