@@ -3,6 +3,8 @@
  * Substitui alert() e confirm().
  */
 
+const MAX_VISIBLE_TOASTS = 2;
+
 function getToastStack() {
     let stack = document.querySelector('.toast-stack');
     if (!stack) {
@@ -29,6 +31,9 @@ export function toast(msg, type = 'info', ms = 3500) {
     el.setAttribute('role', type === 'erro' || type === 'error' ? 'alert' : 'status');
     el.textContent = String(msg ?? '');
     stack.appendChild(el);
+    while (stack.childElementCount > MAX_VISIBLE_TOASTS && stack.firstElementChild) {
+        stack.removeChild(stack.firstElementChild);
+    }
 
     const remove = () => {
         if (el.parentNode) el.parentNode.removeChild(el);

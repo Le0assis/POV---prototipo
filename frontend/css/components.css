@@ -756,11 +756,12 @@ html.hc .route-line-outline {
 
 @media (max-width: 480px) {
     .toast-stack {
-        top: auto;
-        left: var(--space-8);
-        right: var(--space-8);
-        bottom: var(--space-8);
+        top: calc(env(safe-area-inset-top, 0px) + var(--nav-h) + var(--space-8));
+        right: calc(env(safe-area-inset-right, 0px) + var(--space-8));
+        bottom: auto;
+        left: calc(env(safe-area-inset-left, 0px) + var(--space-8));
         width: auto;
+        pointer-events: none;
     }
 
     .modal { padding: var(--space-12); }
