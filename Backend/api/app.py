@@ -1,3 +1,4 @@
+import logging
 import math
 from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,23 @@ from .envfile import load_env_file
 from .settings import get_settings
 
 load_env_file()
+
+logger = logging.getLogger(__name__)
+
+
+def _internal_error(
+    detail: str,
+    exc: BaseException | None = None,
+    *,
+    status_code: int = 500,
+    note: str,
+) -> HTTPException:
+    """Corpo genérico. A causa fica no log do processo."""
+    if exc is None:
+        logger.error("%s", note)
+    else:
+        logger.error("%s", note, exc_info=exc)
+    return HTTPException(status_code=status_code, detail=detail)
 from map.MapDatabaseManager import (
     CheckpointConflictError,
     CheckpointLookupError,
@@ -172,9 +190,10 @@ def create_checkpoint(
             detail=f"Categoria '{exc.code}' não existe.",
         ) from exc
     except CheckpointLookupError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível consultar as categorias. Execute a migração 003.",
+        raise _internal_error(
+            "Erro interno ao salvar.",
+            exc,
+            note="POST /api/checkpoints",
         ) from exc
     except CheckpointConflictError as exc:
         raise HTTPException(
@@ -416,9 +435,11 @@ def get_map_layout():
     try:
         positions = map_db_manager.get_checkpoint_positions()
     except CheckpointLookupError as exc:
-        raise HTTPException(
+        raise _internal_error(
+            "Erro interno.",
+            exc,
             status_code=503,
-            detail="Não foi possível ler os checkpoints do mapa. Execute a migração 003.",
+            note="GET /api/map",
         ) from exc
     nodes = []
     for node in layout["nodes"]:
@@ -443,10 +464,7 @@ def list_categories():
     """Categorias de checkpoint, da menor sort_order para a maior."""
     categories = map_db_manager.list_categories()
     if categories is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível listar as categorias. Execute a migração 003.",
-        )
+        raise _internal_error("Erro interno.", note="GET /api/categories")
     return {"status": "success", "categories": categories}
 
 
@@ -462,9 +480,10 @@ def resolve_checkpoint(
     try:
         found = map_db_manager.resolve_checkpoint(b, slug)
     except CheckpointLookupError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível resolver o checkpoint. Execute a migração 003.",
+        raise _internal_error(
+            "Erro interno.",
+            exc,
+            note="GET /api/checkpoints/resolve",
         ) from exc
     if found is None:
         raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
@@ -489,9 +508,10 @@ def update_checkpoint_category(
             detail=f"Categoria '{exc.code}' não existe.",
         ) from exc
     except CheckpointLookupError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível atualizar a categoria. Execute a migração 003.",
+        raise _internal_error(
+            "Erro interno ao salvar.",
+            exc,
+            note="PATCH /api/checkpoints/{name}",
         ) from exc
     if saved is None:
         raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
@@ -536,10 +556,7 @@ def _map_config_body(config: dict) -> dict:
 def get_map_config():
     config = map_db_manager.get_map_config()
     if config is None:
-        raise HTTPException(
-            status_code=500,
-            detail="map_config indisponível. Rode a migração 002: python -m datasets.create_tables.",
-        )
+        raise _internal_error("Erro interno.", note="GET /api/map-config")
     return _map_config_body(config)
 
 
@@ -550,7 +567,7 @@ def put_map_config(
 ):
     saved = map_db_manager.save_map_config(body.plan_image, body.px_per_m, body.rotation_rad)
     if saved is None:
-        raise HTTPException(status_code=500, detail="Não foi possível gravar map_config. Execute a migração 002.")
+        raise _internal_error("Erro interno ao salvar.", note="PUT /api/map-config")
     return _map_config_body(saved)
 
 
@@ -559,7 +576,7 @@ def get_connections(include_path: bool = Query(default=True)):
     """Um item por par físico. include_path default true; false omite path."""
     connections = map_db_manager.list_connections(include_path=include_path)
     if connections is None:
-        raise HTTPException(status_code=500, detail="Não foi possível ler as conexões. Execute a migração 002.")
+        raise _internal_error("Erro interno.", note="GET /api/connections")
     return {"status": "success", "frame": "edge_local", "connections": connections}
 
 

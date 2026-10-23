@@ -198,14 +198,81 @@ def test_create_checkpoint_accepts_optional_category_code(monkeypatch):
     assert invalid.status_code == 422
 
 
-def test_map_returns_503_when_the_checkpoint_query_fails(monkeypatch):
+def test_map_returns_503_when_the_checkpoint_query_fails(monkeypatch, caplog):
+    cause = "Falha ao ler checkpoints. Execute a migração 003."
+
     def fail():
-        raise CheckpointLookupError("Falha ao ler checkpoints. Execute a migração 003.")
+        raise CheckpointLookupError(cause)
 
     monkeypatch.setattr(app_module.map_db_manager, "get_checkpoint_positions", fail)
-    response = TestClient(app).get("/api/map")
+    with caplog.at_level("ERROR"):
+        response = TestClient(app).get("/api/map")
     assert response.status_code == 503
-    assert "migração 003" in response.json()["detail"]
+    assert response.json() == {"detail": "Erro interno."}
+    assert "migração" not in response.text
+    assert cause in caplog.text
+
+
+def test_sql_failures_do_not_name_migrations(monkeypatch, caplog):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    cause = "Execute a migração 003."
+    client = TestClient(app)
+
+    def boom(*_args, **_kwargs):
+        raise CheckpointLookupError(cause)
+
+    monkeypatch.setattr(app_module.map_db_manager, "save_checkpoint", boom)
+    with caplog.at_level("ERROR"):
+        created = client.post("/api/checkpoints", json={"name": "Sala"}, headers=OK)
+    assert created.status_code == 500
+    assert created.json() == {"detail": "Erro interno ao salvar."}
+    assert "migração" not in created.text
+    assert cause in caplog.text
+
+    caplog.clear()
+    monkeypatch.setattr(app_module.map_db_manager, "update_checkpoint_category", boom)
+    with caplog.at_level("ERROR"):
+        patched = client.patch(
+            "/api/checkpoints/Sala",
+            json={"category_code": "banheiros"},
+            headers=OK,
+        )
+    assert patched.status_code == 500
+    assert patched.json() == {"detail": "Erro interno ao salvar."}
+    assert "migração" not in patched.text
+    assert cause in caplog.text
+
+    caplog.clear()
+    monkeypatch.setattr(app_module.map_db_manager, "resolve_checkpoint", boom)
+    with caplog.at_level("ERROR"):
+        resolved = client.get("/api/checkpoints/resolve", params={"b": 1, "cp": "sala"})
+    assert resolved.status_code == 500
+    assert resolved.json() == {"detail": "Erro interno."}
+    assert "migração" not in resolved.text
+    assert cause in caplog.text
+
+    caplog.clear()
+    monkeypatch.setattr(app_module.map_db_manager, "list_categories", lambda: None)
+    monkeypatch.setattr(app_module.map_db_manager, "get_map_config", lambda: None)
+    monkeypatch.setattr(app_module.map_db_manager, "list_connections", lambda include_path=True: None)
+    monkeypatch.setattr(app_module.map_db_manager, "save_map_config", lambda *_args, **_kwargs: None)
+    with caplog.at_level("ERROR"):
+        categories = client.get("/api/categories")
+        config = client.get("/api/map-config")
+        connections = client.get("/api/connections")
+        saved = client.put(
+            "/api/map-config",
+            json={"plan_image": "assets/planta.png", "px_per_m": 10, "rotation_rad": 0},
+            headers=OK,
+        )
+    for response in (categories, config, connections):
+        assert response.status_code == 500
+        assert response.json() == {"detail": "Erro interno."}
+        assert "migração" not in response.text
+    assert saved.status_code == 500
+    assert saved.json() == {"detail": "Erro interno ao salvar."}
+    assert "migração" not in saved.text
+    assert "PUT /api/map-config" in caplog.text
 
 
 def test_create_checkpoint_conflict_is_409(monkeypatch):
