@@ -27,11 +27,11 @@ export function checkpointStyle(active) {
     };
 }
 
-export function renderFloorLayers(floor, model, { editable = false, onMove } = {} as any) {
+export function renderFloorLayers(floor, model, { editable = false, onMove, showManual = false } = {} as any) {
     const index = floor.layerIndex || (floor.layerIndex = { lines: new Map(), points: new Map() });
     floor.layers = floor.layers || defaultLayerVisibility();
     floor._styleModel = model;
-    floor._styleOptions = { editable, onMove };
+    floor._styleOptions = { editable, onMove, showManual };
     floor.refreshStyle = () => {
         if (floor._styleModel) renderFloorLayers(floor, floor._styleModel, floor._styleOptions || {});
     };
@@ -43,6 +43,7 @@ export function renderFloorLayers(floor, model, { editable = false, onMove } = {
 
 function syncLines(floor, index, model) {
     const seen = new Set();
+    const showManual = Boolean(floor._styleOptions && floor._styleOptions.showManual);
     const tolerance = pixelTolerance(model.config && model.config.px_per_m);
     (model.polylines || []).forEach((poly, order) => {
         const key = poly.id != null ? `id:${poly.id}` : `pair:${poly.source}->${poly.target}:${order}`;
@@ -69,6 +70,7 @@ function syncLines(floor, index, model) {
             line.setStyle(style);
         }
         line.connection = poly.connection;
+        syncManualLabel(line, poly, showManual);
         if (shown) {
             if (!floor.connections.hasLayer(line)) line.addTo(floor.connections);
         } else if (floor.connections.hasLayer(line)) {
@@ -110,6 +112,7 @@ function syncPoints(floor, index, model, { editable, onMove }) {
     });
     index.points.forEach((marker, key) => {
         if (seen.has(key)) return;
+        if (typeof marker._povDragOff === 'function') marker._povDragOff();
         floor.checkpoints.removeLayer(marker);
         index.points.delete(key);
     });
@@ -172,21 +175,169 @@ function setPermanentLabel(marker, show, name) {
 }
 
 function enableDrag(marker, floor, name, onMove) {
-    marker.on('mousedown', (event) => {
-        if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+    enableNodeDrag(marker, floor, name, onMove);
+}
+
+/**
+ * Arrasta o nó com pointer events (mouse e toque). A captura fica no
+ * container, o pan do mapa sai enquanto o ponteiro está preso, e o PATCH
+ * sai no pointerup. Falha ou cancelamento devolve o nó ao lugar, sem recarregar.
+ */
+export function enableNodeDrag(marker, floor, name, onMove) {
+    const map = floor && floor.map;
+    const container = map && typeof map.getContainer === 'function' ? map.getContainer() : null;
+    if (!container || !marker || typeof onMove !== 'function') return null;
+    const host = dragHost(container, map);
+    host.track(marker, floor, name, onMove);
+    return host;
+}
+
+function dragHost(container, map) {
+    if (container._povNodeDrag) return container._povNodeDrag;
+    const markers = new Map();
+    let active = null;
+    const host = {
+        markers,
+        settled: Promise.resolve(),
+        track(marker, floor, name, onMove) {
+            markers.set(marker, { floor, name, onMove });
+            marker._povDragOff = () => markers.delete(marker);
+        }
+    };
+
+    function pointOf(event) {
+        if (typeof map.mouseEventToContainerPoint === 'function') return map.mouseEventToContainerPoint(event);
+        return { x: event.clientX, y: event.clientY };
+    }
+
+    function hitRadius(marker, event) {
+        const base = Number(marker.options && marker.options.radius) || 7;
+        const weight = Number(marker.options && marker.options.weight) || 0;
+        const coarse = event.pointerType === 'touch' || event.pointerType === 'pen';
+        return base + weight + (coarse ? 28 : 8);
+    }
+
+    function hit(event) {
+        if (typeof map.latLngToContainerPoint !== 'function') return null;
+        const point = pointOf(event);
+        let found = null;
+        let best = Infinity;
+        markers.forEach((meta, marker) => {
+            if (typeof marker.getLatLng !== 'function') return;
+            const center = map.latLngToContainerPoint(marker.getLatLng());
+            const dist = Math.hypot(point.x - center.x, point.y - center.y);
+            if (dist <= hitRadius(marker, event) && dist < best) {
+                best = dist;
+                found = { marker, meta };
+            }
+        });
+        return found;
+    }
+
+    function setPan(on) {
+        const dragging = map.dragging;
+        if (!dragging) return;
+        const fn = on ? dragging.enable : dragging.disable;
+        if (typeof fn === 'function') fn.call(dragging);
+    }
+
+    function onControl(event) {
+        const target = event.target;
+        return Boolean(target && typeof target.closest === 'function'
+            && target.closest('.map-layers, .leaflet-control'));
+    }
+
+    function onDown(event) {
+        if (active || onControl(event)) return;
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        const found = hit(event);
+        if (!found) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        const marker = found.marker;
+        const start = marker.getLatLng();
         marker._povDragging = true;
-        floor.map.dragging.disable();
-        const move = (ev) => marker.setLatLng(ev.latlng);
-        const up = (ev) => {
-            marker._povDragging = false;
-            floor.map.dragging.enable();
-            floor.map.off('mousemove', move);
-            floor.map.off('mouseup', up);
-            onMove(name, floor.latLngToPixel(marker.getLatLng() || ev.latlng));
+        setPan(false);
+        if (typeof container.setPointerCapture === 'function') {
+            try { container.setPointerCapture(event.pointerId); } catch (_) { /* ponteiro já encerrado */ }
+        }
+        active = {
+            pointerId: event.pointerId,
+            marker,
+            meta: found.meta,
+            origin: start ? { lat: start.lat, lng: start.lng } : null
         };
-        floor.map.on('mousemove', move);
-        floor.map.on('mouseup', up);
-    });
+    }
+
+    function onMove(event) {
+        if (!active || event.pointerId !== active.pointerId) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        if (typeof map.mouseEventToLatLng !== 'function') return;
+        active.marker.setLatLng(map.mouseEventToLatLng(event));
+    }
+
+    function release(event) {
+        if (!event || typeof container.releasePointerCapture !== 'function') return;
+        try {
+            if (typeof container.hasPointerCapture !== 'function' || container.hasPointerCapture(event.pointerId)) {
+                container.releasePointerCapture(event.pointerId);
+            }
+        } catch (_) { /* captura já solta */ }
+    }
+
+    function restore(marker, origin) {
+        if (origin && typeof marker.setLatLng === 'function') marker.setLatLng(origin);
+    }
+
+    function finish(event, cancel) {
+        if (!active || !event || event.pointerId !== active.pointerId) return;
+        const drag = active;
+        active = null;
+        setPan(true);
+        release(event);
+        if (cancel) {
+            drag.marker._povDragging = false;
+            restore(drag.marker, drag.origin);
+            return;
+        }
+        const latlng = typeof drag.marker.getLatLng === 'function' ? drag.marker.getLatLng() : null;
+        const pixel = drag.meta.floor.latLngToPixel(latlng);
+        host.settled = Promise.resolve()
+            .then(() => drag.meta.onMove(drag.meta.name, pixel))
+            .then((ok) => {
+                if (ok === false) restore(drag.marker, drag.origin);
+            })
+            .catch(() => {
+                restore(drag.marker, drag.origin);
+            })
+            .finally(() => {
+                drag.marker._povDragging = false;
+            });
+    }
+
+    container.addEventListener('pointerdown', onDown, true);
+    container.addEventListener('pointermove', onMove, true);
+    container.addEventListener('pointerup', (event) => finish(event, false), true);
+    container.addEventListener('pointercancel', (event) => finish(event, true), true);
+    container._povNodeDrag = host;
+    return host;
+}
+
+function syncManualLabel(line, poly, showManual) {
+    const manual = Boolean(showManual) && !poly.recorded;
+    const text = manual ? `Manual: ${poly.source} → ${poly.target}` : '';
+    const tip = typeof line.getTooltip === 'function' ? line.getTooltip() : null;
+    const manualTip = Boolean(tip && tip.options && String(tip.options.className || '').includes('edge-manual'));
+    if (!manual) {
+        if (manualTip && typeof line.unbindTooltip === 'function') line.unbindTooltip();
+        return;
+    }
+    if (!tip && typeof line.bindTooltip === 'function') {
+        line.bindTooltip(text, { sticky: true, className: 'cp-label edge-manual', opacity: 1 });
+        return;
+    }
+    if (manualTip && typeof tip.setContent === 'function') tip.setContent(text);
 }
 
 export function createBlueDot(floor, { label = '', cone = false, zIndex = 800 } = {} as any) {

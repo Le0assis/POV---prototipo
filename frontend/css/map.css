@@ -28,13 +28,19 @@
     box-shadow: var(--shadow);
 }
 
+.map-stage.leaflet-container,
+.map-stage .leaflet-container {
+    background-color: var(--bg);
+    background-image:
+        linear-gradient(color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px);
+    background-size: 24px 24px;
+    font-family: var(--font-sans);
+}
+
 .map-stage .leaflet-container {
     width: 100%;
     height: 100%;
-    background-color: transparent;
-    background-image: inherit;
-    background-size: 24px 24px;
-    font-family: var(--font-sans);
 }
 
 .map-toolbar {
@@ -85,14 +91,16 @@
 
 .map-layers {
     position: absolute;
-    z-index: 1000;
+    z-index: 650;
     top: 8px;
-    left: 8px;
+    right: 8px;
+    left: auto;
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: 4px;
-    max-width: calc(100% - 16px);
+    min-width: 0;
+    max-width: calc(100% - 76px);
     margin: 0;
     padding: 4px 8px;
     border: 1px solid var(--border);
@@ -100,12 +108,20 @@
     background: var(--surface);
     color: var(--text);
     box-shadow: var(--shadow);
+    box-sizing: border-box;
 }
 
-.map-layers-legend {
-    padding: 0 4px;
-    font-size: 13px;
-    font-weight: 700;
+.map-layers-toggle {
+    display: none;
+}
+
+.map-layers-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .map-layers label {
@@ -117,7 +133,54 @@
     font-size: 14px;
 }
 
+.map-stage .leaflet-bottom.leaflet-right {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-width: none;
+    display: flex;
+    justify-content: flex-end;
+    pointer-events: none;
+}
+
+.map-stage .leaflet-control-attribution {
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    height: auto;
+    white-space: normal;
+    overflow: visible;
+    box-sizing: border-box;
+}
+
 @media (max-width: 900px) {
     .map-layout { grid-template-columns: 1fr; }
     .map-stage { height: 420px; }
+
+    .map-layers-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        align-self: flex-end;
+        min-height: 40px;
+        min-width: 40px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: var(--radius);
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .map-layers:not(.is-open) .map-layers-options {
+        display: none;
+    }
+
+    .map-layers.is-open .map-layers-options {
+        max-height: min(220px, 46vh);
+        overflow: auto;
+    }
 }

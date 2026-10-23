@@ -112,10 +112,12 @@ async function onMove(name, pixel) {
         patchCheckpointPosition(state.model, name, rounded);
         paintModel();
         toast(`Posição de "${name}" salva.`, 'ok');
+        return true;
     } catch (err) {
         if (previous) patchCheckpointPosition(state.model, name, previous);
         paintModel();
         toast(err.message || 'Falha ao salvar a posição.', 'erro');
+        return false;
     }
 }
 

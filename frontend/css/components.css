@@ -557,7 +557,11 @@ summary {
     font-family: var(--font-sans);
     font-size: 16px;
     color: var(--text);
-    background: var(--bg);
+    background-color: var(--bg);
+}
+
+html.dark .leaflet-container {
+    background-color: var(--bg);
 }
 
 .leaflet-bar {
@@ -597,8 +601,11 @@ summary {
 
 .leaflet-control-attribution {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    min-width: 0;
     min-height: 48px;
+    height: auto;
     background: var(--surface);
     color: var(--text-muted);
     font-size: max(16px, var(--font-size-body));
@@ -606,7 +613,10 @@ summary {
     border-radius: var(--radius);
     border: 1px solid var(--border);
     padding: 0 var(--space-8);
-    max-width: calc(100% - 72px);
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
+    box-sizing: border-box;
 }
 
 .leaflet-container .leaflet-control-attribution a {
