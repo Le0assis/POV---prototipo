@@ -1,7 +1,4 @@
-/**
- * Única página que cria checkpoints, conexões, grava pos_x_px/pos_y_px
- * e reinicia a sessão do servidor (POST /api/reset, com senha).
- */
+/** Cria checkpoints e conexões e grava pos_x_px/pos_y_px. */
 
 import { insertTopNav } from '../components/nav.js';
 import * as api from '../core/api.js';
@@ -34,7 +31,6 @@ async function start() {
     state.floor.map.on('click', onMapClick);
     $('#form-checkpoint').addEventListener('submit', onCheckpoint);
     $('#form-edge').addEventListener('submit', onEdge);
-    $('#form-reset').addEventListener('submit', onReset);
     $('#edge-heading').addEventListener('input', paintHeading);
     paintHeading();
     await reload();
@@ -171,30 +167,10 @@ async function onEdge(event) {
     }
 }
 
-async function onReset(event) {
-    event.preventDefault();
-    const start = $('#reset-node').value;
-    if (!start) {
-        toast('Escolha o nó inicial.', 'warn');
-        return;
-    }
-    try {
-        const data = await api.reset(start);
-        const where = (data && data.start_node) || start;
-        toast((data && data.message) || `Sessão reiniciada em ${where}.`, 'ok');
-    } catch (err) {
-        toast(err.message || 'Falha ao reiniciar a sessão.', 'erro');
-    }
-}
-
 function fillNodeSelects() {
     const options = state.model.checkpoints.map((cp) => ({ id: cp.name, label: cp.name }));
     fillSelect($('#edge-source'), options, 'Origem');
     fillSelect($('#edge-target'), options, 'Destino');
-    const resetNode = $('#reset-node');
-    const previousReset = resetNode.value;
-    fillSelect(resetNode, options, 'Nó inicial');
-    if (previousReset) resetNode.value = previousReset;
 }
 
 function paintModel() {

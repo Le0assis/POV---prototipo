@@ -4,7 +4,7 @@
  *
  * Escritas protegidas enviam `X-Editor-Password` (sessionStorage, mesma chave
  * no editor, no gravador e nas rotas). Inclui process-raw, checkpoints, edges,
- * posição, map-config, POST/DELETE /api/routes e POST /api/reset.
+ * posição, map-config e POST/DELETE /api/routes.
  * 401 pede a senha de novo e tenta outra vez. 503 avisa que a senha não está
  * configurada no servidor. Leitura (viewer, locate) não pede senha.
  * A entrada na administração confere a senha com GET /api/auth/check.
@@ -332,24 +332,6 @@ export function getCompassRoute(start, end) {
     return request('/api/compass_route', { query: { start, end } });
 }
 
-export function reset(startNode) {
-    return editorWrite('/api/reset', {
-        method: 'POST',
-        query: { start_node: startNode }
-    });
-}
-
-export function localize(stepLengthM, yawRad) {
-    return request('/api/localize', {
-        method: 'POST',
-        body: { step_length_m: stepLengthM, yaw_rad: yawRad }
-    });
-}
-
-export function currentLocation() {
-    return request('/api/current_location');
-}
-
 export function saveCheckpoint(name) {
     return editorWrite('/api/checkpoints', {
         method: 'POST',
@@ -404,10 +386,10 @@ export function saveMapConfig({ plan_image, px_per_m, rotation_rad }) {
     });
 }
 
-/** Verifica se o backend responde. Nunca lança: retorna true/false. */
+/** Verifica se o backend responde, sem banco e sem rota de teste. */
 export async function ping() {
     try {
-        await request('/api/current_location', { timeout: 4000 });
+        await request('/api/health', { timeout: 4000 });
         return true;
     } catch (_) {
         return false;

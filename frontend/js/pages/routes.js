@@ -297,12 +297,6 @@ async function begin(id, mode) {
     run.offStep = run.detector.onStep(async (step) => {
         if (!state.run || state.run !== run || run.session.finished) return;
         run.session.registerStep(step.length);
-        try {
-            const resp = await api.localize(step.length, run.heading.getYawRadForBackend());
-            if (resp && resp.current_node) run.session.syncBackendNode(resp.current_node);
-        } catch (err) {
-            toast(err.message || 'Falha ao enviar o passo.', 'erro');
-        }
     });
     startPoll(run);
     paintProgress(run);
@@ -311,12 +305,7 @@ async function begin(id, mode) {
 function startPoll(run) {
     const tick = async () => {
         if (!state.run || state.run !== run || document.hidden) return;
-        try {
-            const loc = await api.currentLocation();
-            if (loc && loc.current_node) run.session.syncBackendNode(loc.current_node);
-        } catch (_) {
-            /* o próximo ciclo tenta de novo */
-        }
+        paintProgress(run);
     };
     run.poll = setInterval(tick, POLL_MS);
 }

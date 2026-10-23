@@ -113,11 +113,6 @@ async function toggle() {
     button.classList.add('is-live');
     clock = setInterval(paintClock, 250);
     paintClock();
-    try {
-        await api.reset(source);
-    } catch (err) {
-        toast(err.message || 'Não foi possível reiniciar a sessão no servidor.', 'warn');
-    }
 }
 
 function capture(event) {

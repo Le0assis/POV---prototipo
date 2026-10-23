@@ -1,11 +1,8 @@
 /**
- * RouteSimulator — reproduz uma rota já carregada em NavigationSession.
- * Cadência de 1,8 passos/s, curva curta ao trocar de segmento e, se pedido,
- * sincronização com /api/localize sem interromper a simulação em erro de rede.
+ * Reproduz uma rota já carregada. A cadência é 1,8 passos/s.
  */
 
-import * as api from '../core/api.js';
-import { bearingToBackendYaw, normalizeDeg, signedDelta } from '../sensors/angles.js';
+import { normalizeDeg, signedDelta } from '../sensors/angles.js';
 
 const STEP_HZ = 1.8;
 const TURN_MS = 600;
@@ -103,19 +100,9 @@ export class RouteSimulator extends EventTarget {
 
         const swing = (Math.random() * 2 - 1) * this._noise;
         const length = this.stepLength * (1 + swing);
-        const shown = this._publish(this._heading ?? this.session.bearingTarget(0) ?? 0);
+        this._publish(this._heading ?? this.session.bearingTarget(0) ?? 0);
 
         this.session.registerStep(length);
-
-        if (this.sync && this._running) {
-            try {
-                const resp = await api.localize(length, bearingToBackendYaw(shown, 0));
-                if (resp && resp.current_node) this.session.syncBackendNode(resp.current_node);
-            } catch (err) {
-                this._fail(err);
-            }
-        }
-
         this._busy = false;
         if (!this._running || this._paused || this.session.finished) return;
         this._scheduleStep();

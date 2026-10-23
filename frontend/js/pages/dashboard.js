@@ -106,19 +106,7 @@ async function loadRouteCount() {
 
 async function poll() {
     if (document.hidden) return;
-    try {
-        const loc = await api.currentLocation();
-        setApi(true);
-        const node = loc.current_node || null;
-        const changed = node !== state.currentNode;
-        state.currentNode = node;
-        state.visited = Array.isArray(loc.visited_path) ? loc.visited_path : [];
-        $('#kpi-node').textContent = node || '—';
-        if (changed && state.destination) await planRoute({ quiet: true });
-        draw();
-    } catch (_) {
-        setApi(false);
-    }
+    setApi(await api.ping());
 }
 
 function setApi(online) {

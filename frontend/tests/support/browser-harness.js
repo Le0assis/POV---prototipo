@@ -131,7 +131,7 @@ export async function installApiMocks(page) {
                 ]
             });
         }
-        if (url.pathname === '/api/current_location') return json(route, {});
+        if (url.pathname === '/api/health') return json(route, { status: 'ok' });
         if (url.pathname === '/api/pdr/config') return json(route, {});
         if (url.pathname === '/api/checkpoints/resolve') {
             return json(route, { checkpoint: MOCK_NODES[0] });
