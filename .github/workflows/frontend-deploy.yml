@@ -67,11 +67,13 @@ jobs:
       - name: Instalar o Chromium do Playwright
         run: npx playwright install --with-deps chromium
 
-      - name: Rodar testes do frontend
+      - name: Tipos, lint e testes do frontend
         env:
           AXE_REPORT_DIR: reports/axe
         run: |
           mkdir -p reports/axe
+          npm run typecheck
+          npm run lint
           npm test
 
       - name: Publicar relatórios de teste e axe
@@ -84,23 +86,3 @@ jobs:
           path: |
             reports/frontend-junit.xml
             reports/axe/
-
-  # JOB 3: Publica a pasta frontend na branch 'gh-pages' (Apenas no push da 'main')
-  deploy-github-pages:
-    needs: test-and-validate
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Baixar o código
-        uses: actions/checkout@v4
-
-      - name: Publicar pasta frontend na branch gh-pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./frontend
-          publish_branch: gh-pages
-          cname: pov-unimar.com
-          force_orphan: true

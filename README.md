@@ -290,7 +290,7 @@ git checkout dev
 ### CI/CD via GitHub Actions
 
 * **Disparo em `dev`:** Roda testes estáticos de compilação Python e validações de rotas para impedir erros de sintaxe ou bibliotecas ausentes.
-* **Disparo em `main`:** Executa o pipeline completo de verificação e dispara a atualização direta no servidor de produção final.
+* **Disparo em `main`:** Roda a verificação do backend e, no workflow `pages.yml`, publica o build do Vite (`frontend/dist`) no GitHub Pages. A origem em Settings → Pages precisa ser **GitHub Actions**. Os registros DNS estão em `docs/dns.md` e os passos manuais em `docs/frontend/fase-6-pages.md`.
 
 ---
 

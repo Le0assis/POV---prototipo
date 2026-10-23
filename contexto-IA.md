@@ -15,9 +15,9 @@ Base de conhecimento central do POV. Leia antes de qualquer tarefa. Atualize a s
 |---|---|
 | Backend | Python 3.10+, FastAPI + Uvicorn, NumPy, SciPy (`find_peaks`, Butterworth) |
 | Banco | MySQL (XAMPP local), acesso via `ConexaoBD` e `MapDatabaseManager` |
-| Frontend | HTML5, CSS3, JavaScript puro (ES modules, sem framework) |
+| Frontend | TypeScript, Vite, Preact (`@preact/signals`), Leaflet |
 | APIs de hardware | `DeviceMotionEvent`, `DeviceOrientationEvent`, Page Visibility |
-| Infra | Cloudflare Tunnel (`api.pov-unimar.com` → `:8000`), GitHub Pages (front, branch `gh-pages`), GitHub Actions (`.github/workflows/frontend-deploy.yml`) |
+| Infra | Cloudflare Tunnel (`api.pov-unimar.com` → `:8000`), GitHub Pages (build do Vite em `frontend/dist`, `.github/workflows/pages.yml`) |
 
 ## 3. Estrutura de pastas
 

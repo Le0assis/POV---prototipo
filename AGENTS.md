@@ -20,6 +20,7 @@ Notas para quem altera o POV. O README continua sendo o passo a passo de instala
 - Não pintar `devicemotion`, `deviceorientation` ou o marcador do visitante fora de um quadro (`requestAnimationFrame`).
 - `/api/localize`, `/api/current_location` e `/api/reset` não entram no aplicativo de produção. Ficam em teste, atrás de flag desligada no build.
 - A URL da API sai de uma config só. Em produção o padrão é `https://api.pov-unimar.com`.
+- O Pages publica `frontend/dist` pelo workflow `pages.yml`, só na `main`. Não voltar a copiar a pasta `frontend` crua para `gh-pages`.
 
 ## Fases
 
