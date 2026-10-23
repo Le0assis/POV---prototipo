@@ -13,7 +13,9 @@ export const MAP_COLOR_TOKENS = Object.freeze({
     previewStroke: ['--path-preview-stroke', '#22d3ee'],
     pathStart: ['--path-start', '#22c55e'],
     pathEnd: ['--path-end', '#8b5cf6'],
-    sparkline: ['--sparkline', '#22d3ee']
+    sparkline: ['--sparkline', '#22d3ee'],
+    checkpoint: ['--you-marker', '#2563EB'],
+    walked: ['--accent', '#14B8A6']
 });
 
 const cache = new Map();

@@ -5,7 +5,7 @@
 
 import { adaptCheckpoints } from '../core/checkpoints.js';
 import { createFloorMap, resolvePlanImage } from './floor-map.js';
-import { contentPixels, createBlueDot, renderFloorLayers } from './layers.js';
+import { checkpointStyle, contentPixels, createBlueDot, renderFloorLayers } from './layers.js';
 import { chromePadding, createRouteLayer } from './route-layer.js';
 import { loadFloorModel } from '../pages/floor-model.js';
 
@@ -112,12 +112,15 @@ export async function mountMapView(element) {
         let target = null;
         floor.checkpoints.eachLayer((marker) => {
             const on = Boolean(wanted) && marker.checkpointSlug === wanted;
-            const el = marker.getElement();
+            const el = typeof marker.getElement === 'function' ? marker.getElement() : null;
             if (el) el.classList.toggle('is-destination', on);
+            if (typeof marker.setStyle === 'function') marker.setStyle(checkpointStyle(on));
             if (typeof marker.setZIndexOffset === 'function') marker.setZIndexOffset(on ? 700 : 0);
             if (on) target = marker;
         });
-        if (target && pan) floor.map.panTo(target.getLatLng(), { animate: false });
+        if (target && pan && typeof target.getLatLng === 'function') {
+            floor.map.panTo(target.getLatLng(), { animate: false });
+        }
     }
 
     function showRoute(route, { fit = true, markOrigin = true } = {}) {
@@ -157,14 +160,34 @@ export async function mountMapView(element) {
     }
 
     function ensureWalker() {
-        if (!walker) walker = createBlueDot(floor, { label: 'você', cone: true, zIndex: 1200 });
+        if (!walker) {
+            walker = createBlueDot(floor, { label: 'você', cone: true, zIndex: 1200 });
+            if (floor.locateLayer && typeof floor.locateLayer.bringToFront === 'function') {
+                floor.locateLayer.bringToFront();
+            }
+        }
         return walker;
     }
 
     function panWalker(pixel) {
+        panIfOutside(pixel, true);
+    }
+
+    function panIfOutside(pixel, force) {
         if (!pixel) return;
         const latlng = floor.pixelToLatLng(pixel.x, pixel.y);
-        map.panTo(latlng, { animate: false });
+        if (force) {
+            map.panTo(latlng, { animate: false });
+            return;
+        }
+        const size = map.getSize();
+        if (!size || !size.x || !size.y) return;
+        const point = map.latLngToContainerPoint(latlng);
+        const marginX = size.x * 0.28;
+        const marginY = size.y * 0.28;
+        const inside = point.x >= marginX && point.y >= marginY
+            && point.x <= size.x - marginX && point.y <= size.y - marginY;
+        if (!inside) map.panTo(latlng, { animate: false });
     }
 
     function setNavActive(on) {
@@ -201,20 +224,60 @@ export async function mountMapView(element) {
         }
     }
 
+    let shownWalker = null;
+    let shownHeading = null;
+    let walkerTarget = null;
+    let walkerQueued = false;
+
     function setWalker(pixel, screenDeg) {
         if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) {
             walkerPixel = null;
+            walkerTarget = null;
+            shownWalker = null;
+            shownHeading = null;
             if (walker) walker.hide();
             return;
         }
-        walkerPixel = { x: pixel.x, y: pixel.y };
-        const dot = ensureWalker();
-        dot.setPixel(pixel.x, pixel.y);
-        if (Number.isFinite(screenDeg)) dot.setHeading(screenDeg);
-        if (floor.locateLayer && typeof floor.locateLayer.bringToFront === 'function') {
-            floor.locateLayer.bringToFront();
+        walkerTarget = {
+            x: pixel.x,
+            y: pixel.y,
+            heading: Number.isFinite(screenDeg) ? screenDeg : null
+        };
+        if (walkerQueued) return;
+        walkerQueued = true;
+        const raf = typeof window.requestAnimationFrame === 'function'
+            ? window.requestAnimationFrame.bind(window)
+            : (fn) => fn();
+        raf(drawWalker);
+    }
+
+    function drawWalker() {
+        walkerQueued = false;
+        const target = walkerTarget;
+        if (!target) return;
+        if (!shownWalker) shownWalker = { x: target.x, y: target.y };
+        else {
+            shownWalker = {
+                x: shownWalker.x + (target.x - shownWalker.x) * 0.45,
+                y: shownWalker.y + (target.y - shownWalker.y) * 0.45
+            };
         }
-        if (followWalker) panWalker(walkerPixel);
+        if (target.heading != null) {
+            shownHeading = shownHeading == null
+                ? target.heading
+                : lerpDegrees(shownHeading, target.heading, 0.45);
+        }
+        walkerPixel = { x: shownWalker.x, y: shownWalker.y };
+        const dot = ensureWalker();
+        dot.setPixel(shownWalker.x, shownWalker.y);
+        if (shownHeading != null) dot.setHeading(shownHeading);
+        if (followWalker) panIfOutside(shownWalker, false);
+        const left = Math.hypot(target.x - shownWalker.x, target.y - shownWalker.y);
+        if (left > 0.6) setWalker(target, target.heading);
+    }
+
+    function setRouteProgress(fraction) {
+        if (routeLayer && typeof routeLayer.setProgress === 'function') routeLayer.setProgress(fraction);
     }
 
     function showOrigin(slug, anchor) {
@@ -250,14 +313,22 @@ export async function mountMapView(element) {
         setNavActive,
         holdWalker,
         frameWalker,
-        setWalker
+        setWalker,
+        setRouteProgress
     };
+}
+
+function lerpDegrees(from, to, amount) {
+    const delta = ((to - from + 540) % 360) - 180;
+    return from + delta * amount;
 }
 
 function tagCheckpointMarkers(floor, checkpoints) {
     const placed = (Array.isArray(checkpoints) ? checkpoints : []).filter((cp) => cp && cp.anchor);
+    const byName = new Map(placed.map((cp) => [cp.name, cp]));
     floor.checkpoints.getLayers().forEach((marker, index) => {
-        const cp = placed[index];
-        marker.checkpointSlug = cp ? String(cp.slug || cp.name || '') : '';
+        const cp = byName.get(marker.checkpointName) || placed[index];
+        if (!cp) return;
+        marker.checkpointSlug = String(cp.slug || cp.name || '');
     });
 }

@@ -6,6 +6,8 @@
  */
 
 import { escapeHtml } from '../core/dom.js';
+import { tokenColor } from '../core/colors.js';
+import { pointsUntil, routeSignature } from './simplify.js';
 
 const PRIMARY_FALLBACK = '#2563EB';
 const OUTLINE_FALLBACK = '#FFFFFF';
@@ -31,14 +33,21 @@ export function chromePadding(mapRect, { topRect = null, bottomRect = null, flow
 export function createRouteLayer(floor) {
     const group = L.layerGroup().addTo(floor.map);
     let points = [];
+    let signature = '';
+    let walkedLine = null;
 
     function clear() {
         group.clearLayers();
         points = [];
+        signature = '';
+        walkedLine = null;
     }
 
     function show(route, { markOrigin = true } = {}) {
+        const next = routeSignature(route);
+        if (next && next === signature) return;
         clear();
+        signature = next;
         if (!route) return;
         points = Array.isArray(route.points) ? route.points.filter(finitePoint) : [];
         if (points.length >= 2) {
@@ -50,6 +59,8 @@ export function createRouteLayer(floor) {
                 lineCap: 'round',
                 lineJoin: 'round',
                 interactive: false,
+                smoothFactor: 1.5,
+                renderer: floor.renderer,
                 className: 'route-line-outline'
             }).addTo(group);
             L.polyline(latlngs, {
@@ -59,6 +70,8 @@ export function createRouteLayer(floor) {
                 lineCap: 'round',
                 lineJoin: 'round',
                 interactive: false,
+                smoothFactor: 1.5,
+                renderer: floor.renderer,
                 className: 'route-line'
             }).addTo(group);
         }
@@ -69,6 +82,25 @@ export function createRouteLayer(floor) {
         if (origin && markOrigin) addOrigin(floor, group, origin);
         if (destination) addDestination(floor, group, destination);
         bringGroupToFront(group);
+    }
+
+    function setProgress(fraction) {
+        if (points.length < 2) return;
+        const walked = pointsUntil(points, fraction);
+        const latlngs = walked.map((point) => floor.pixelToLatLng(point.x, point.y));
+        if (!walkedLine) {
+            walkedLine = L.polyline(latlngs, {
+                color: tokenColor('walked'),
+                weight: 8,
+                opacity: 1,
+                lineCap: 'round',
+                lineJoin: 'round',
+                interactive: false,
+                renderer: floor.renderer
+            }).addTo(group);
+            return;
+        }
+        walkedLine.setLatLngs(latlngs);
     }
 
     function fit(padding) {
@@ -86,7 +118,7 @@ export function createRouteLayer(floor) {
         floor.map.fitBounds(L.latLngBounds(latlngs), options);
     }
 
-    return { show, clear, fit };
+    return { show, clear, fit, setProgress };
 }
 
 function addOrigin(floor, group, checkpoint) {

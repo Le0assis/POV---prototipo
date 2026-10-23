@@ -911,6 +911,11 @@ function paintNavigation() {
         framedEpoch = navEpoch;
     }
     mapView.setWalker(pixel, screen);
+    if (typeof mapView.setRouteProgress === 'function' && navRoute && navRoute.route) {
+        const total = Number(navRoute.route.distance_m);
+        const fraction = total > 0 ? pose.alongM / total : 0;
+        mapView.setRouteProgress(fraction);
+    }
     if (pose.maneuver.kind === 'arrival' && session && session.state === State.E4) {
         queueMicrotask(() => {
             if (session && session.state === State.E4) dispatch({ type: 'arrive' });
@@ -925,10 +930,24 @@ function bindSensorCallbacks() {
         if (typeof document !== 'undefined' && document.hidden) return;
         if (!navTracker) return;
         navTracker.applyStep(step.length, currentBearing());
-        paintNavigation();
+        requestNavigationPaint();
     });
     navOffHeading = headingProvider.onHeading(() => {
         if (typeof document !== 'undefined' && document.hidden) return;
+        requestNavigationPaint();
+    });
+}
+
+let navigationPaint = 0;
+
+function requestNavigationPaint() {
+    if (navigationPaint) return;
+    navigationPaint = 1;
+    const raf = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : (fn) => setTimeout(fn, 16);
+    raf(() => {
+        navigationPaint = 0;
         paintNavigation();
     });
 }

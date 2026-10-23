@@ -3,18 +3,24 @@
  * Coordenadas de desenho são pixels da imagem (origem no canto superior esquerdo, y para baixo).
  */
 
+import { attachPerf } from './perf.js';
+
 export function createFloorMap(element) {
     if (typeof L === 'undefined') {
         throw new Error('Leaflet não carregou.');
     }
+    const renderer = L.canvas({ padding: 0.5 });
     const map = L.map(element, {
         crs: L.CRS.Simple,
+        preferCanvas: true,
+        renderer,
         minZoom: -4,
         maxZoom: 4,
         zoomSnap: 0.25,
         attributionControl: true,
         bounceAtZoomLimits: false
     });
+    attachPerf(map);
 
     const checkpoints = L.layerGroup().addTo(map);
     const connections = L.layerGroup().addTo(map);
@@ -23,6 +29,7 @@ export function createFloorMap(element) {
     let imageHeight = null;
     let imageWidth = null;
     let overlay = null;
+    let planUrl = '';
 
     function pixelToLatLng(px, py) {
         const x = Number(px);
@@ -43,9 +50,13 @@ export function createFloorMap(element) {
         }
         imageHeight = null;
         imageWidth = null;
+        planUrl = '';
     }
 
     async function setPlan(url) {
+        if (url && overlay && planUrl === url) {
+            return { width: imageWidth, height: imageHeight };
+        }
         clearPlan();
         if (!url) return null;
         const size = await loadImageSize(url);
@@ -54,7 +65,7 @@ export function createFloorMap(element) {
         const bounds = L.latLngBounds([0, 0], [imageHeight, imageWidth]);
         overlay = L.imageOverlay(url, bounds).addTo(map);
         overlay.bringToBack();
-        map.fitBounds(bounds);
+        planUrl = url;
         return { width: imageWidth, height: imageHeight };
     }
 
@@ -74,6 +85,7 @@ export function createFloorMap(element) {
 
     return {
         map,
+        renderer,
         checkpoints,
         connections,
         locateLayer,

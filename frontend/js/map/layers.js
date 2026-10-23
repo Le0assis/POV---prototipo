@@ -1,10 +1,11 @@
 /**
- * Camadas do mapa: checkpoints, polilinhas e blue dot.
- * No modo somente leitura não há arraste nem handler que grave dados.
+ * Camadas do mapa: checkpoints em circleMarker e polilinhas no canvas.
+ * Atualiza pelo id. O popup nasce no clique.
  */
 
-import { mapLineColors } from '../core/colors.js';
+import { mapLineColors, tokenColor } from '../core/colors.js';
 import { escapeHtml } from '../core/dom.js';
+import { pixelTolerance, simplifyPath } from './simplify.js';
 
 function recordedStyle() {
     return { color: mapLineColors().recorded, weight: 4, opacity: 0.95 };
@@ -14,41 +15,104 @@ function manualStyle() {
     return { color: mapLineColors().manual, weight: 3, opacity: 0.9, dashArray: '7 8' };
 }
 
+export function checkpointStyle(active) {
+    const color = tokenColor('checkpoint');
+    return {
+        radius: active ? 10 : 7,
+        weight: active ? 3 : 2,
+        color,
+        fillColor: active ? tokenColor('walked') : color,
+        fillOpacity: 1
+    };
+}
+
 export function renderFloorLayers(floor, model, { editable = false, onMove } = {}) {
-    floor.connections.clearLayers();
-    floor.checkpoints.clearLayers();
+    const index = floor.layerIndex || (floor.layerIndex = { lines: new Map(), points: new Map() });
+    syncLines(floor, index, model);
+    syncPoints(floor, index, model, { editable, onMove });
+}
 
-    model.polylines.forEach((poly) => {
-        const latlngs = poly.points.map((p) => floor.pixelToLatLng(p.x, p.y));
-        const style = poly.recorded ? recordedStyle() : manualStyle();
-        const line = L.polyline(latlngs, { ...style, interactive: true });
-        line.bindPopup(connectionPopup(poly.connection));
-        line.addTo(floor.connections);
-    });
-
-    model.checkpoints.forEach((cp) => {
-        if (!cp.anchor) return;
-        const marker = L.marker(floor.pixelToLatLng(cp.anchor.pos_x_px, cp.anchor.pos_y_px), {
-            draggable: editable,
-            icon: checkpointIcon(),
-            title: cp.name,
-            keyboard: editable
-        });
-        marker.bindTooltip(cp.name, {
-            permanent: true,
-            direction: 'top',
-            className: 'cp-label',
-            offset: [0, -8]
-        });
-        if (!editable) {
-            marker.bindPopup(`<strong>${escapeHtml(cp.name)}</strong>`);
-        }
-        if (editable && typeof onMove === 'function') {
-            marker.on('dragend', () => {
-                onMove(cp.name, floor.latLngToPixel(marker.getLatLng()));
+function syncLines(floor, index, model) {
+    const seen = new Set();
+    const tolerance = pixelTolerance(model.config && model.config.px_per_m);
+    (model.polylines || []).forEach((poly, order) => {
+        const key = poly.id != null ? `id:${poly.id}` : `pair:${poly.source}->${poly.target}:${order}`;
+        seen.add(key);
+        const points = simplifyPath(poly.points, tolerance);
+        const latlngs = points.map((point) => floor.pixelToLatLng(point.x, point.y));
+        const style = { ...(poly.recorded ? recordedStyle() : manualStyle()), smoothFactor: 1.5 };
+        let line = index.lines.get(key);
+        if (!line) {
+            line = L.polyline(latlngs, {
+                ...style,
+                interactive: true,
+                renderer: floor.renderer
             });
+            line.on('click', () => {
+                line.bindPopup(connectionPopup(line.connection)).openPopup();
+            });
+            line.addTo(floor.connections);
+            index.lines.set(key, line);
+        } else {
+            line.setLatLngs(latlngs);
+            line.setStyle(style);
         }
-        marker.addTo(floor.checkpoints);
+        line.connection = poly.connection;
+    });
+    index.lines.forEach((line, key) => {
+        if (seen.has(key)) return;
+        floor.connections.removeLayer(line);
+        index.lines.delete(key);
+    });
+}
+
+function syncPoints(floor, index, model, { editable, onMove }) {
+    const seen = new Set();
+    (model.checkpoints || []).forEach((cp) => {
+        if (!cp.anchor) return;
+        const key = cp.name;
+        seen.add(key);
+        const latlng = floor.pixelToLatLng(cp.anchor.pos_x_px, cp.anchor.pos_y_px);
+        let marker = index.points.get(key);
+        if (!marker) {
+            marker = L.circleMarker(latlng, {
+                ...checkpointStyle(false),
+                interactive: true,
+                renderer: floor.renderer
+            });
+            marker.checkpointName = cp.name;
+            marker.bindTooltip(cp.name, { direction: 'top', className: 'cp-label', offset: [0, -8] });
+            if (!editable) marker.on('click', () => marker.bindPopup(`<strong>${escapeHtml(cp.name)}</strong>`).openPopup());
+            if (editable && typeof onMove === 'function') enableDrag(marker, floor, cp.name, onMove);
+            marker.addTo(floor.checkpoints);
+            index.points.set(key, marker);
+        } else if (!marker._povDragging) {
+            marker.setLatLng(latlng);
+        }
+        marker.checkpointSlug = cp.slug || cp.name;
+    });
+    index.points.forEach((marker, key) => {
+        if (seen.has(key)) return;
+        floor.checkpoints.removeLayer(marker);
+        index.points.delete(key);
+    });
+}
+
+function enableDrag(marker, floor, name, onMove) {
+    marker.on('mousedown', (event) => {
+        if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+        marker._povDragging = true;
+        floor.map.dragging.disable();
+        const move = (ev) => marker.setLatLng(ev.latlng);
+        const up = (ev) => {
+            marker._povDragging = false;
+            floor.map.dragging.enable();
+            floor.map.off('mousemove', move);
+            floor.map.off('mouseup', up);
+            onMove(name, floor.latLngToPixel(marker.getLatLng() || ev.latlng));
+        };
+        floor.map.on('mousemove', move);
+        floor.map.on('mouseup', up);
     });
 }
 
@@ -112,15 +176,6 @@ export function contentPixels(model) {
         poly.points.forEach((p) => pts.push(p));
     });
     return pts;
-}
-
-function checkpointIcon() {
-    return L.divIcon({
-        className: 'cp-icon',
-        html: '<span class="cp-dot"></span>',
-        iconSize: [16, 16],
-        iconAnchor: [8, 8]
-    });
 }
 
 function connectionPopup(connection) {
