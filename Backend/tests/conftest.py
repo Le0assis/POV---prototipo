@@ -30,6 +30,17 @@ def _isolated_db_pool():
     drain_pool()
 
 
+@pytest.fixture(autouse=True)
+def _reset_editor_attempts():
+    from api.editor_auth import reset_attempts, set_attempt_limit
+
+    reset_attempts()
+    set_attempt_limit(8)
+    yield
+    reset_attempts()
+    set_attempt_limit(8)
+
+
 @pytest.fixture
 def detector():
     from pdr.steps import PeakStepDetector

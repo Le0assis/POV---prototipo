@@ -2,6 +2,10 @@
 
 Notas para quem altera o POV. O README continua sendo o passo a passo de instalação.
 
+## Backend
+
+- A senha do editor é uma só, em `EDITOR_PASSWORD_HASH` (argon2id). Gere com `Backend/scripts/hash_password.py`. Não commite senha nem hash.
+
 ## Frontend
 
 - A interface mora em `frontend/`. Leaflet fica no mapa (`L.CRS.Simple` e a planta em `imageOverlay`).

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 import api.app as app_module
 from api.app import app
+from api.editor_auth import make_password_hash, set_attempt_limit
 from map.MapDatabaseManager import MapDatabaseManager
 from tests.unit.test_m02_connections import _MemDB
 from tests.unit.test_m02_walk_transaction import _TxDB
@@ -18,6 +19,7 @@ from tests.unit.test_m02_walk_transaction import _TxDB
 pytestmark = pytest.mark.integration
 
 PASSWORD = "segredo-do-editor"
+PASSWORD_HASH = make_password_hash(PASSWORD)
 OK = {"X-Editor-Password": PASSWORD}
 WRONG = {"X-Editor-Password": "outra"}
 
@@ -99,7 +101,8 @@ def _send(client: TestClient, method: str, path: str, body, headers=None):
 
 
 def test_protected_writes_reject_missing_and_wrong_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    set_attempt_limit(50)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
     for method, path, body in _calls():
         missing = _send(client, method, path, body)
@@ -110,7 +113,7 @@ def test_protected_writes_reject_missing_and_wrong_password(monkeypatch):
 
 
 def test_protected_writes_fail_closed_without_env(monkeypatch):
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     client = TestClient(app)
     for method, path, body in _calls():
         response = _send(client, method, path, body, OK)
@@ -118,7 +121,7 @@ def test_protected_writes_fail_closed_without_env(monkeypatch):
 
 
 def test_protected_writes_accept_the_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     _succeed(monkeypatch)
     client = TestClient(app)
     expected = {
@@ -176,7 +179,7 @@ def test_each_http_request_uses_its_own_connection(monkeypatch):
 
 
 def test_public_gets_do_not_need_the_header(monkeypatch):
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     seen = {}
 
     def list_connections(include_path=True):
@@ -207,7 +210,7 @@ def test_public_gets_do_not_need_the_header(monkeypatch):
 
 
 def test_map_config_and_position_reject_invalid_bodies(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
     missing = client.put("/api/map-config", json={"plan_image": "assets/planta.png"}, headers=OK)
     zero = client.put("/api/map-config", json={"px_per_m": 0}, headers=OK)
@@ -245,7 +248,7 @@ class _ProcessRawDB:
 
 
 def test_process_raw_returns_500_when_the_walk_is_not_saved(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     app_module.topo_map.add_checkpoint("Quarto")
     app_module.topo_map.add_checkpoint("Sala")
 
@@ -273,7 +276,7 @@ def test_process_raw_returns_500_when_the_walk_is_not_saved(monkeypatch):
 
 
 def test_process_raw_path_is_an_array_with_origin(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     app_module.topo_map.add_checkpoint("Quarto")
     app_module.topo_map.add_checkpoint("Sala")
     monkeypatch.setattr(app_module.edge_processor, "db_manager", _ProcessRawDB())
@@ -312,25 +315,25 @@ def test_connections_include_path_defaults_to_true_and_path_is_array(monkeypatch
 
 
 def test_post_reset_requires_editor_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
     missing = client.post("/api/reset")
     wrong = client.post("/api/reset", headers=WRONG)
     assert missing.status_code == 401
     assert wrong.status_code == 401
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     closed = client.post("/api/reset", headers=OK)
     assert closed.status_code == 503
 
 
 def test_post_routes_requires_editor_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     body = {"start_node": "A", "end_node": "B", "name": "Rota"}
     client = TestClient(app)
     missing = client.post("/api/routes", json=body)
     wrong = client.post("/api/routes", json=body, headers=WRONG)
     assert missing.status_code == 401
     assert wrong.status_code == 401
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     closed = client.post("/api/routes", json=body, headers=OK)
     assert closed.status_code == 503

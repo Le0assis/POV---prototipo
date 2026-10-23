@@ -480,7 +480,7 @@ Faça esta seção andando alguns metros no prédio, com a tela desbloqueada e o
 **Resultado esperado**
 
 - Mapa em 503: o visitante não recebe os checkpoints. Sem planta utilizável, o status diz **A planta aparece quando o mapa estiver disponível.** A busca entra no mesmo aviso de falha do item offline (**Não foi possível carregar os destinos.**), mesmo com o site https://pov-unimar.com/ abrindo.
-- Auth em 503: o modo não muda para Admin. O aviso é **A senha do editor não está configurada no servidor.** O selo **HOMOLOGAÇÃO** continua na tela. O detalhe do servidor cita `EDITOR_PASSWORD`.
+- Auth em 503: o modo não muda para Admin. O aviso é **A senha do editor não está configurada no servidor.** O selo **HOMOLOGAÇÃO** continua na tela. O detalhe do servidor cita `EDITOR_PASSWORD_HASH`.
 - 503 não é o mesmo que offline: o site abre, e a aba da API mostra o status 503.
 
 **Resultado**
@@ -575,7 +575,7 @@ A entrada em Admin chama `GET /api/auth/check` com o header `X-Editor-Password`.
 
 1. Use o status já lido em ERR-02 para `GET /api/auth/check`.
 2. Se for **503**, no visitante toque **Admin**, digite qualquer texto e confirme **Entrar**.
-3. Se for **401** (senha configurada), marque **Não executado**. O caso 503 só vale num servidor sem `EDITOR_PASSWORD`.
+3. Se for **401** (senha configurada), marque **Não executado**. O caso 503 só vale num servidor sem `EDITOR_PASSWORD_HASH`.
 
 **Resultado esperado**
 

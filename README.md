@@ -144,8 +144,8 @@ Acesse o diretório `Backend` com o `venv` ativado:
 
 ```bash
 cd Backend
-# Senha do editor: só o ambiente do processo. Não usamos python-dotenv.
-export EDITOR_PASSWORD='defina-uma-senha'
+# Senha do editor: só o hash argon2id. Gere com python scripts/hash_password.py
+# e cole em .env na raiz (EDITOR_PASSWORD_HASH). Não exporte a senha em claro.
 uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 
 ```
@@ -156,12 +156,13 @@ uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 
 ### Senha do editor do mapa
 
-O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha. A API lê `EDITOR_PASSWORD` com `os.environ` e compara o header `X-Editor-Password` em tempo constante (SHA-256 + `hmac.compare_digest`).
+O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha e sem hash. Há uma senha só. No `.env` fica `EDITOR_PASSWORD_HASH`, um hash argon2id. Gere com `python scripts/hash_password.py` a partir de `Backend/` (a senha é pedida no terminal, não vai para o histórico). A API carrega o `.env` da raiz na subida; uma variável já exportada no shell não é substituída. O header continua `X-Editor-Password`. A comparação é `PasswordHasher.verify` (argon2id). Oito senhas erradas no mesmo cliente, em cinco minutos, respondem **429**. Pelo túnel o par local é 127.0.0.1; o IP usado é `CF-Connecting-IP`.
 
 | Situação | Resposta |
 | --- | --- |
-| `EDITOR_PASSWORD` ausente ou vazia | **503** em toda escrita protegida |
+| `EDITOR_PASSWORD_HASH` ausente, vazia ou inválida | **503** em toda escrita protegida |
 | Header ausente ou senha diferente | **401** |
+| Tentativas demais | **429** |
 | Senha correta | a escrita segue |
 
 Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `POST /api/routes`, `DELETE /api/routes/{id}`, `POST /api/reset`.

@@ -22,6 +22,9 @@ from map.router import TopologicalRouter
 from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
 from .editor_auth import require_editor_password
+from .envfile import load_env_file
+
+load_env_file()
 from map.MapDatabaseManager import (
     CheckpointConflictError,
     CheckpointLookupError,

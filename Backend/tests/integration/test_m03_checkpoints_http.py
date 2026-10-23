@@ -7,16 +7,18 @@ from fastapi.testclient import TestClient
 
 import api.app as app_module
 from api.app import app
+from api.editor_auth import make_password_hash
 from map.MapDatabaseManager import CheckpointConflictError, CheckpointLookupError, UnknownCategoryError
 
 pytestmark = pytest.mark.integration
 
 PASSWORD = "segredo-do-editor"
+PASSWORD_HASH = make_password_hash(PASSWORD)
 OK = {"X-Editor-Password": PASSWORD}
 
 
 def test_resolve_200_404_and_422(monkeypatch):
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
 
     def resolve(building_id, slug):
         if building_id == 1 and slug == "recepcao":
@@ -54,7 +56,7 @@ def test_resolve_200_404_and_422(monkeypatch):
 
 
 def test_patch_slug_is_422_and_does_not_write(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
 
     def refuse(*_args, **_kwargs):
         raise AssertionError("PATCH com slug não pode gravar")
@@ -70,7 +72,7 @@ def test_patch_slug_is_422_and_does_not_write(monkeypatch):
 
 
 def test_category_patch_requires_password_rejects_unknown_and_null_clears(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
 
     missing = client.patch("/api/checkpoints/Sala", json={"category_code": "atendimento"})
@@ -83,7 +85,7 @@ def test_category_patch_requires_password_rejects_unknown_and_null_clears(monkey
     assert wrong.status_code == 401
     assert missing.json()["detail"] == "Senha do editor ausente ou inválida."
 
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     closed = client.patch(
         "/api/checkpoints/Sala",
         json={"category_code": None},
@@ -91,7 +93,7 @@ def test_category_patch_requires_password_rejects_unknown_and_null_clears(monkey
     )
     assert closed.status_code == 503
 
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
 
     def update(name, category_code):
         if category_code == "inexistente":
@@ -130,7 +132,7 @@ def test_category_patch_requires_password_rejects_unknown_and_null_clears(monkey
 
 
 def test_map_and_categories_expose_slug_building_and_category(monkeypatch):
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     app_module.topo_map.add_checkpoint("M03 Recepção")
     monkeypatch.setattr(
         app_module.map_db_manager,
@@ -169,7 +171,7 @@ def test_map_and_categories_expose_slug_building_and_category(monkeypatch):
 
 
 def test_create_checkpoint_accepts_optional_category_code(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     seen = {}
 
     def save(name, category_code=None):
@@ -207,7 +209,7 @@ def test_map_returns_503_when_the_checkpoint_query_fails(monkeypatch):
 
 
 def test_create_checkpoint_conflict_is_409(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
 
     def save(name, category_code=None):
         raise CheckpointConflictError("sala")
