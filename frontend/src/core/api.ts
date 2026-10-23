@@ -27,6 +27,19 @@ export const SERVER_BUSY_MESSAGE = 'Servidor ocupado, tente de novo em instantes
 const UNCONFIGURED_DETAIL = 'editor_password_hash não está definida';
 const INVALID_HASH_DETAIL = 'não é um hash argon2id válido';
 
+/** Leitura curta. Escrita e o login esperam o 503 de lock, que chega por volta de 10s. */
+export const READ_TIMEOUT_MS = 8000;
+export const WRITE_TIMEOUT_MS = 15000;
+
+export function requestTimeout(method, path, override) {
+    if (override != null && Number.isFinite(Number(override))) return Number(override);
+    const verb = String(method || 'GET').toUpperCase();
+    const target = String(path || '').split('?')[0];
+    if (verb === 'POST' || verb === 'PATCH' || verb === 'PUT' || verb === 'DELETE') return WRITE_TIMEOUT_MS;
+    if (target === '/api/auth/check') return WRITE_TIMEOUT_MS;
+    return READ_TIMEOUT_MS;
+}
+
 function buildQueryString(query) {
     if (!query) return '';
     const params = new URLSearchParams();
@@ -65,9 +78,9 @@ function extractDetail(data, status) {
     }
 }
 
-async function request(path, { method = 'GET', body, query, timeout = 8000, password } = {} as any) {
+async function request(path, { method = 'GET', body, query, timeout, password } = {} as any) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    const timer = setTimeout(() => controller.abort(), requestTimeout(method, path, timeout));
 
     const headers = { 'Content-Type': 'application/json' };
     if (password) headers['X-Editor-Password'] = password;
