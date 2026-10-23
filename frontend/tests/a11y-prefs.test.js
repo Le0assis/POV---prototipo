@@ -38,9 +38,9 @@ function fakeRoot() {
 
 test('salva alto contraste e fonte grande e aplica as classes', () => {
     const storage = memoryStorage();
-    assert.deepEqual(readA11yPrefs(storage), { hc: false, fontLg: false, speech: false });
+    assert.deepEqual(readA11yPrefs(storage), { hc: false, fontLg: false, speech: false, dark: false });
     const saved = saveA11yPrefs({ hc: true, fontLg: true, speech: false }, storage);
-    assert.deepEqual(saved, { hc: true, fontLg: true, speech: false });
+    assert.deepEqual(saved, { hc: true, fontLg: true, speech: false, dark: false });
     assert.equal(storage.getItem(A11Y_STORAGE_KEY), JSON.stringify(saved));
     assert.deepEqual(readA11yPrefs(storage), saved);
 
@@ -48,16 +48,18 @@ test('salva alto contraste e fonte grande e aplica as classes', () => {
     applyA11yClasses(root, readA11yPrefs(storage));
     assert.equal(root.classList.contains('hc'), true);
     assert.equal(root.classList.contains('font-lg'), true);
+    assert.equal(root.classList.contains('dark'), false);
 
-    applyA11yClasses(root, saveA11yPrefs({ hc: false, fontLg: false, speech: true }, storage));
+    applyA11yClasses(root, saveA11yPrefs({ hc: false, fontLg: false, speech: true, dark: true }, storage));
     assert.equal(root.classList.contains('hc'), false);
     assert.equal(root.classList.contains('font-lg'), false);
+    assert.equal(root.classList.contains('dark'), true);
     assert.equal(readA11yPrefs(storage).speech, true);
 });
 
 test('JSON inválido não liga preferência nenhuma', () => {
     const storage = memoryStorage([[A11Y_STORAGE_KEY, '{']]);
-    assert.deepEqual(readA11yPrefs(storage), { hc: false, fontLg: false, speech: false });
+    assert.deepEqual(readA11yPrefs(storage), { hc: false, fontLg: false, speech: false, dark: false });
 });
 
 test('o script do head aplica hc e font-lg antes da folha de estilo', () => {
@@ -77,6 +79,7 @@ test('o script do head aplica hc e font-lg antes da folha de estilo', () => {
         assert.equal(styleAt > scriptAt, true, page);
         assert.match(html, /classList\.add\('hc'\)/, page);
         assert.match(html, /classList\.add\('font-lg'\)/, page);
+        assert.match(html, /classList\.add\('dark'\)/, page);
     });
     const menu = readFileSync(path.join(frontendRoot, 'admin/index.html'), 'utf8');
     assert.match(menu, /href="qrcodes\.html"/);

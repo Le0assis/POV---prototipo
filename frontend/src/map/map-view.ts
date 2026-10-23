@@ -80,6 +80,10 @@ export async function mountMapView(element) {
     renderFloorLayers(floor, model, { editable: false });
     tagCheckpointMarkers(floor, model.checkpoints);
     const routeLayer = createRouteLayer(floor);
+    floor.onLayers = (layers) => {
+        floor.layers = layers || floor.layers;
+        routeLayer.setVisible(!layers || layers.route !== false);
+    };
     let routeActive = false;
 
     function fitContent() {
@@ -109,6 +113,9 @@ export async function mountMapView(element) {
 
     function highlight(slug, { pan = true } = {} as any) {
         const wanted = slug ? String(slug) : '';
+        floor.labelFocus = floor.labelFocus || { origin: '', destination: '' };
+        floor.labelFocus.destination = wanted;
+        if (typeof floor.syncLabels === 'function') floor.syncLabels();
         let target = null;
         floor.checkpoints.eachLayer((marker) => {
             const on = Boolean(wanted) && marker.checkpointSlug === wanted;
@@ -282,6 +289,9 @@ export async function mountMapView(element) {
 
     function showOrigin(slug, anchor) {
         const wanted = slug ? String(slug) : '';
+        floor.labelFocus = floor.labelFocus || { origin: '', destination: '' };
+        floor.labelFocus.origin = wanted;
+        if (typeof floor.syncLabels === 'function') floor.syncLabels();
         if (!you) you = createBlueDot(floor, { label: 'você' });
         if (wanted && anchor && Number.isFinite(Number(anchor.pos_x_px)) && Number.isFinite(Number(anchor.pos_y_px))) {
             pins.set(wanted, { pos_x_px: Number(anchor.pos_x_px), pos_y_px: Number(anchor.pos_y_px) });

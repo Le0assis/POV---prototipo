@@ -135,6 +135,43 @@ html.font-lg h2,
 html.font-lg h3,
 html.font-lg h4 { font-size: 26px; }
 
+/* Modo escuro. O alto contraste, mais abaixo, prevalece quando os dois estão ligados. */
+html.dark {
+    color-scheme: dark;
+    --bg: #0F1724;
+    --surface: #1B2433;
+    --text: #F7F9FC;
+    --text-muted: #C5D0DE;
+    --border: #3D4C63;
+    --primary: #93C5FD;
+    --primary-soft: #1E3A5F;
+    --accent: #5EEAD4;
+    --success: #5EEAD4;
+    --success-ink: #99F6E4;
+    --success-soft: #134E4A;
+    --warning: #FBBF24;
+    --warning-ink: #FDE68A;
+    --warning-soft: #451A03;
+    --danger: #FCA5A5;
+    --danger-soft: #450A0A;
+    --on-primary: #0F1724;
+    --on-danger: #0F1724;
+    --you-marker: #93C5FD;
+    --you-halo: #1D4ED8;
+    --path-recorded: #67E8F9;
+    --path-manual: #CBD5E1;
+    --path-destination: #FBBF24;
+    --path-preview-bg: #0F1724;
+    --path-preview-muted: #C5D0DE;
+    --path-preview-stroke: #67E8F9;
+    --path-start: #5EEAD4;
+    --path-end: #C4B5FD;
+    --sparkline: #67E8F9;
+    --muted: var(--text-muted);
+    --glass: var(--surface);
+    --surface-2: var(--primary-soft);
+}
+
 /* Contraste reforçado. Texto e botões miram AAA (7:1) no branco. */
 html.hc {
     --bg: #FFFFFF;

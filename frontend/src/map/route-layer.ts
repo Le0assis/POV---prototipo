@@ -8,6 +8,7 @@
 import { escapeHtml } from '../core/dom.js';
 import { tokenColor } from '../core/colors.js';
 import { pointsUntil, routeSignature } from './simplify.js';
+import { routeWeight } from './style.js';
 
 const PRIMARY_FALLBACK = '#2563EB';
 const OUTLINE_FALLBACK = '#FFFFFF';
@@ -35,12 +36,33 @@ export function createRouteLayer(floor) {
     let points = [];
     let signature = '';
     let walkedLine = null;
+    let outlineLine = null;
+    let mainLine = null;
+    let visible = !floor.layers || floor.layers.route !== false;
 
     function clear() {
         group.clearLayers();
         points = [];
         signature = '';
         walkedLine = null;
+        outlineLine = null;
+        mainLine = null;
+    }
+
+    function applyWeight() {
+        const zoom = floor.map && typeof floor.map.getZoom === 'function' ? floor.map.getZoom() : 0;
+        const weight = routeWeight(zoom);
+        if (outlineLine) outlineLine.setStyle({ weight: weight + 6, color: cssColor('--surface', OUTLINE_FALLBACK) });
+        if (mainLine) mainLine.setStyle({ weight, color: cssColor('--primary', PRIMARY_FALLBACK) });
+        if (walkedLine) walkedLine.setStyle({ weight, color: tokenColor('walked') });
+    }
+
+    function setVisible(on) {
+        visible = on !== false;
+        if (!floor.map) return;
+        const onMap = typeof floor.map.hasLayer === 'function' && floor.map.hasLayer(group);
+        if (visible && !onMap) group.addTo(floor.map);
+        if (!visible && onMap) floor.map.removeLayer(group);
     }
 
     function show(route, { markOrigin = true } = {} as any) {
@@ -52,9 +74,10 @@ export function createRouteLayer(floor) {
         points = Array.isArray(route.points) ? route.points.filter(finitePoint) : [];
         if (points.length >= 2) {
             const latlngs = points.map((point) => floor.pixelToLatLng(point.x, point.y));
-            L.polyline(latlngs, {
+            const weight = routeWeight(floor.map && floor.map.getZoom ? floor.map.getZoom() : 0);
+            outlineLine = L.polyline(latlngs, {
                 color: cssColor('--surface', OUTLINE_FALLBACK),
-                weight: 14,
+                weight: weight + 6,
                 opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
@@ -63,9 +86,9 @@ export function createRouteLayer(floor) {
                 renderer: floor.renderer,
                 className: 'route-line-outline'
             }).addTo(group);
-            L.polyline(latlngs, {
+            mainLine = L.polyline(latlngs, {
                 color: cssColor('--primary', PRIMARY_FALLBACK),
-                weight: 8,
+                weight,
                 opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
@@ -82,6 +105,7 @@ export function createRouteLayer(floor) {
         if (origin && markOrigin) addOrigin(floor, group, origin);
         if (destination) addDestination(floor, group, destination);
         bringGroupToFront(group);
+        setVisible(floor.layers ? floor.layers.route !== false : visible);
     }
 
     function setProgress(fraction) {
@@ -91,7 +115,7 @@ export function createRouteLayer(floor) {
         if (!walkedLine) {
             walkedLine = L.polyline(latlngs, {
                 color: tokenColor('walked'),
-                weight: 8,
+                weight: routeWeight(floor.map && floor.map.getZoom ? floor.map.getZoom() : 0),
                 opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
@@ -118,7 +142,10 @@ export function createRouteLayer(floor) {
         floor.map.fitBounds(L.latLngBounds(latlngs), options);
     }
 
-    return { show, clear, fit, setProgress };
+    if (floor.map && typeof floor.map.on === 'function') floor.map.on('zoomend', applyWeight);
+    if (typeof window !== 'undefined') window.addEventListener('pov-theme', applyWeight);
+    setVisible(visible);
+    return { show, clear, fit, setProgress, setVisible };
 }
 
 function addOrigin(floor, group, checkpoint) {

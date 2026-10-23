@@ -83,6 +83,40 @@
 
 #viewer-note { margin-top: var(--space-12); }
 
+.map-layers {
+    position: absolute;
+    z-index: 1000;
+    top: 8px;
+    left: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    max-width: calc(100% - 16px);
+    margin: 0;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+}
+
+.map-layers-legend {
+    padding: 0 4px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.map-layers label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 0 6px;
+    font-size: 14px;
+}
+
 @media (max-width: 900px) {
     .map-layout { grid-template-columns: 1fr; }
     .map-stage { height: 420px; }

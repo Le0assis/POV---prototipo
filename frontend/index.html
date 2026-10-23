@@ -10,6 +10,7 @@
             var root = document.documentElement;
             if (prefs && prefs.hc) root.classList.add('hc');
             if (prefs && prefs.fontLg) root.classList.add('font-lg');
+            if (prefs && prefs.dark) root.classList.add('dark');
         } catch (e) { /* preferência ausente: segue o tema padrão */ }
     })();
     </script>
@@ -23,6 +24,7 @@
     <link rel="stylesheet" href="css/base.css">
     <link rel="stylesheet" href="css/components.css">
     <link rel="stylesheet" href="css/visitor.css">
+    <link rel="stylesheet" href="css/map.css">
 </head>
 <body class="visitor-app" data-app="visitor">
     <a class="skip-link" href="#visitor-main">Ir para o mapa</a>

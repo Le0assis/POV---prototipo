@@ -15,10 +15,12 @@ export const MAP_COLOR_TOKENS = Object.freeze({
     pathEnd: ['--path-end', '#8b5cf6'],
     sparkline: ['--sparkline', '#22d3ee'],
     checkpoint: ['--you-marker', '#2563EB'],
-    walked: ['--accent', '#14B8A6']
+    walked: ['--accent', '#14B8A6'],
+    destination: ['--path-destination', '#F59E0B']
 });
 
 const cache = new Map();
+let themeKey = '';
 
 function readCustomProperty(name) {
     if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return '';
@@ -39,10 +41,21 @@ function readCustomProperty(name) {
 }
 
 /** Cor computada do token. Sem DOM, devolve o fallback. */
+function currentTheme() {
+    if (typeof document === 'undefined') return '';
+    const root = document.documentElement;
+    return root && root.className ? root.className : '';
+}
+
 export function tokenColor(key) {
     const pair = MAP_COLOR_TOKENS[key];
     if (!pair) return '';
     const [name, fallback] = pair;
+    const theme = currentTheme();
+    if (theme !== themeKey) {
+        cache.clear();
+        themeKey = theme;
+    }
     if (cache.has(name)) return cache.get(name);
     const resolved = readCustomProperty(name);
     if (!resolved) return fallback;

@@ -724,7 +724,7 @@ body.visitor-app {
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: var(--primary);
+    background: var(--path-destination);
     border: 3px solid var(--surface);
     box-shadow: 0 0 0 6px var(--primary-soft);
 }

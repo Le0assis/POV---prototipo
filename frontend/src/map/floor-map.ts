@@ -3,7 +3,9 @@
  * Coordenadas de desenho são pixels da imagem (origem no canto superior esquerdo, y para baixo).
  */
 
+import { mountLayerControls } from './layer-controls.js';
 import { attachPerf } from './perf.js';
+import { readLayerVisibility } from './style.js';
 
 export function createFloorMap(element) {
     if (typeof L === 'undefined') {
@@ -66,7 +68,13 @@ export function createFloorMap(element) {
         overlay = L.imageOverlay(url, bounds).addTo(map);
         overlay.bringToBack();
         planUrl = url;
+        setPlanVisible(api.layers.plan !== false);
         return { width: imageWidth, height: imageHeight };
+    }
+
+    function setPlanVisible(on) {
+        if (!overlay || typeof overlay.setOpacity !== 'function') return;
+        overlay.setOpacity(on ? 1 : 0);
     }
 
     function fitToContent(pixels) {
@@ -83,18 +91,36 @@ export function createFloorMap(element) {
         map.fitBounds(bounds.pad(0.4));
     }
 
-    return {
+    const api = {
         map,
         renderer,
         checkpoints,
         connections,
         locateLayer,
+        layers: readLayerVisibility(),
+        labelFocus: { origin: '', destination: '' },
+        refreshStyle() {},
+        syncLabels() {},
+        onLayers(_next = undefined) {},
         pixelToLatLng,
         latLngToPixel,
         setPlan,
+        setPlanVisible,
         clearPlan,
         fitToContent
     };
+    mountLayerControls(element, (next) => {
+        api.layers = next;
+        setPlanVisible(next.plan !== false);
+        api.refreshStyle();
+        api.onLayers(next);
+    });
+    map.on('zoomend', () => api.refreshStyle());
+    map.on('moveend', () => api.syncLabels());
+    if (typeof window !== 'undefined') {
+        window.addEventListener('pov-theme', () => api.refreshStyle());
+    }
+    return api;
 }
 
 /**

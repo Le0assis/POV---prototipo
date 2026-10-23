@@ -8,11 +8,12 @@ export const A11Y_STORAGE_KEY = 'pov.a11y';
 export const DEFAULT_A11Y = Object.freeze({
     hc: false,
     fontLg: false,
-    speech: false
+    speech: false,
+    dark: false
 });
 
 export function emptyA11yPrefs() {
-    return { hc: false, fontLg: false, speech: false };
+    return { hc: false, fontLg: false, speech: false, dark: false };
 }
 
 export function readA11yPrefs(storage = undefined) {
@@ -25,7 +26,8 @@ export function readA11yPrefs(storage = undefined) {
         return {
             hc: Boolean(data && data.hc),
             fontLg: Boolean(data && data.fontLg),
-            speech: Boolean(data && data.speech)
+            speech: Boolean(data && data.speech),
+            dark: Boolean(data && data.dark)
         };
     } catch (_) {
         return emptyA11yPrefs();
@@ -37,18 +39,23 @@ export function saveA11yPrefs(prefs, storage = undefined) {
     const next = {
         hc: Boolean(prefs && prefs.hc),
         fontLg: Boolean(prefs && prefs.fontLg),
-        speech: Boolean(prefs && prefs.speech)
+        speech: Boolean(prefs && prefs.speech),
+        dark: Boolean(prefs && prefs.dark)
     };
     if (bag) bag.setItem(A11Y_STORAGE_KEY, JSON.stringify(next));
     return next;
 }
 
-/** Liga `html.hc` e `html.font-lg` sem esperar o restante da página. */
+/** Liga `html.hc`, `html.font-lg` e `html.dark` sem esperar o restante da página. */
 export function applyA11yClasses(root, prefs) {
     if (!root || !root.classList) return;
     const next = prefs || emptyA11yPrefs();
     root.classList.toggle('hc', Boolean(next.hc));
     root.classList.toggle('font-lg', Boolean(next.fontLg));
+    root.classList.toggle('dark', Boolean(next.dark));
+    if (typeof document !== 'undefined' && root === document.documentElement && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('pov-theme'));
+    }
 }
 
 function defaultStorage() {

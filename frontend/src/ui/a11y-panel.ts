@@ -49,6 +49,7 @@ export function mountA11yControl(slot) {
     head.append(title);
 
     const hcInput = switchInput('a11y-hc', 'Alto contraste');
+    const darkInput = switchInput('a11y-dark', 'Modo escuro');
     const fontInput = switchInput('a11y-font', 'Fonte grande');
     const speechInput = switchInput('a11y-speech', 'Ler instruções em voz alta');
     const speechHint = document.createElement('p');
@@ -65,7 +66,7 @@ export function mountA11yControl(slot) {
         speechHint.hidden = true;
     }
 
-    panel.append(head, hcInput.label, fontInput.label, speechInput.label, speechHint, close);
+    panel.append(head, hcInput.label, darkInput.label, fontInput.label, speechInput.label, speechHint, close);
     slot.append(button);
     document.body.append(panel);
 
@@ -77,6 +78,7 @@ export function mountA11yControl(slot) {
         prefs = next;
         applyA11yClasses(document.documentElement, prefs);
         hcInput.input.checked = prefs.hc;
+        darkInput.input.checked = prefs.dark;
         fontInput.input.checked = prefs.fontLg;
         speechInput.input.checked = voice && prefs.speech;
     }
@@ -84,6 +86,7 @@ export function mountA11yControl(slot) {
     function persist(partial) {
         const stored = {
             hc: partial.hc,
+            dark: partial.dark,
             fontLg: partial.fontLg,
             speech: voice ? partial.speech : prefs.speech
         };
@@ -94,6 +97,7 @@ export function mountA11yControl(slot) {
     function readForm() {
         return {
             hc: hcInput.input.checked,
+            dark: darkInput.input.checked,
             fontLg: fontInput.input.checked,
             speech: speechInput.input.checked
         };
@@ -168,6 +172,7 @@ export function mountA11yControl(slot) {
     });
     close.addEventListener('click', closePanel);
     hcInput.input.addEventListener('change', () => persist(readForm()));
+    darkInput.input.addEventListener('change', () => persist(readForm()));
     fontInput.input.addEventListener('change', () => persist(readForm()));
     speechInput.input.addEventListener('change', () => persist(readForm()));
     window.addEventListener('resize', () => {

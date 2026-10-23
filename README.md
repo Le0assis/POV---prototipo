@@ -320,3 +320,7 @@ npm test
 npm run build
 ```
 
+## 11. Frontend — fase 5
+
+Rótulos permanentes só a partir do zoom 1; origem e destino ficam sempre. A caixa Camadas (planta, gravados, manuais, rótulos, rota) grava em `pov.map.layers`. Modo escuro é `html.dark`, no mesmo painel do alto contraste. Detalhe em `docs/frontend/fase-5-mapa-visual.md`.
+

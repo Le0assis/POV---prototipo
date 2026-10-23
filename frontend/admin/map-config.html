@@ -10,6 +10,7 @@
             var root = document.documentElement;
             if (prefs && prefs.hc) root.classList.add('hc');
             if (prefs && prefs.fontLg) root.classList.add('font-lg');
+            if (prefs && prefs.dark) root.classList.add('dark');
         } catch (e) { /* preferência ausente: segue o tema padrão */ }
     })();
     </script>
