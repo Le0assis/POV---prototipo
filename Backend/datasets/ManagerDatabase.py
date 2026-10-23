@@ -11,6 +11,7 @@ contar a linha achada, mesmo quando o valor não mudou.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar
 import threading
 
@@ -33,6 +34,10 @@ request_connection: ContextVar["ConexaoBD | None"] = ContextVar(
 
 _pool_lock = threading.Lock()
 _idle: list["ConexaoBD"] = []
+
+
+class DatabaseUnavailable(Exception):
+    """O connect não abriu. A API responde 503 e não usa outra sessão."""
 
 
 def _tcp_host(host: str) -> str:
@@ -145,8 +150,17 @@ class ConexaoBD:
             print(f"Erro ao executar consulta: {exc}")
             return None
 
+    def _outside_transaction(self) -> bool:
+        """``execute_query`` e os irmãos dão commit. Dentro da transação, não."""
+        if not self._explicit:
+            return True
+        print("Comando com commit no meio da transação. Use execute_within.")
+        return False
+
     def execute_query(self, sql, params=None):
         """Um comando e commit. Não usar dentro de ``begin_transaction``."""
+        if not self._outside_transaction():
+            return False
         if not self._ready():
             print("Erro ao executar comando: sem conexão")
             return False
@@ -172,6 +186,8 @@ class ConexaoBD:
 
     def execute_update(self, sql, params=None):
         """UPDATE/DELETE. Devolve linhas casadas (FOUND_ROWS), ou None."""
+        if not self._outside_transaction():
+            return None
         if not self._ready():
             print("Erro ao executar update: sem conexão")
             return None
@@ -192,6 +208,8 @@ class ConexaoBD:
 
     def execute_insert(self, sql, params=None):
         """INSERT (ou upsert com LAST_INSERT_ID). Devolve o id, ou None se falhar."""
+        if not self._outside_transaction():
+            return None
         if not self._ready():
             print("Erro ao executar insert: sem conexão")
             return None
@@ -210,6 +228,8 @@ class ConexaoBD:
             return None
 
     def execute_many(self, sql, seq):
+        if not self._outside_transaction():
+            return False
         if not self._ready():
             print("Erro ao executar lote: sem conexão")
             return False
@@ -392,6 +412,28 @@ def checkin_connection(conn: ConexaoBD | None) -> None:
             _idle.append(conn)
             return
     conn.disconnect(announce=False)
+
+
+@contextmanager
+def request_session(template: ConexaoBD):
+    """Sessão só para este bloco de SQL. Reusa a que a task já abriu.
+
+    Connect que falha levanta ``DatabaseUnavailable``. Não devolve a
+    conexão modelo do processo.
+    """
+    current = request_connection.get()
+    if current is not None:
+        yield current
+        return
+    local = checkout_connection(template)
+    if local.connection is None:
+        raise DatabaseUnavailable("Não foi possível conectar ao MySQL.")
+    token = request_connection.set(local)
+    try:
+        yield local
+    finally:
+        request_connection.reset(token)
+        checkin_connection(local)
 
 
 def drain_pool() -> None:

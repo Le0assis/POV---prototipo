@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from datasets.ManagerDatabase import ConexaoBD, request_connection
+from datasets.ManagerDatabase import ConexaoBD, DatabaseUnavailable, request_connection
 from map.MapDatabaseManager import MapDatabaseManager
 from tests.unit.test_m02_walk_transaction import _TxDB, _built
 
@@ -33,17 +33,19 @@ def test_begin_transaction_rolls_back_an_implicit_transaction_first():
     assert database.connection.events == ["rollback", "start"]
 
 
-def test_per_request_manager_uses_the_request_connection():
+def test_per_request_manager_does_not_fall_back_to_boot():
     boot = object()
     local = object()
     manager = MapDatabaseManager(boot, per_request=True)
-    assert manager.db is boot
+    with pytest.raises(DatabaseUnavailable):
+        manager.db
     token = request_connection.set(local)
     try:
         assert manager.db is local
     finally:
         request_connection.reset(token)
-    assert manager.db is boot
+    with pytest.raises(DatabaseUnavailable):
+        manager.db
     isolated = MapDatabaseManager(boot)
     token = request_connection.set(local)
     try:

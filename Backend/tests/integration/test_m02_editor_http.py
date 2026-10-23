@@ -167,7 +167,8 @@ def test_each_http_request_uses_its_own_connection(monkeypatch):
     seen = {}
 
     def get_map_config():
-        seen["db"] = app_module.map_db_manager.db
+        with app_module.map_db_manager._session():
+            seen["db"] = app_module.map_db_manager.db
         return {"plan_image": None, "px_per_m": None, "rotation_rad": 0.0}
 
     monkeypatch.setattr(app_module.map_db_manager, "get_map_config", get_map_config)

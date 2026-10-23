@@ -1,16 +1,14 @@
 import math
-import anyio
 from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 
 from datasets.ManagerDatabase import (
     ConexaoBD,
-    checkin_connection,
-    checkout_connection,
+    DatabaseUnavailable,
     drain_pool,
-    request_connection,
+    request_session,
 )
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
@@ -72,55 +70,14 @@ def database_from_settings() -> ConexaoBD:
 db = database_from_settings()
 map_db_manager = MapDatabaseManager(db, per_request=True)
 
-# Só estas rotas pegam sessão. Estático, /api/pdr/config e a localização
-# de teste não passam por connect().
-_DB_PREFIXES = (
-    "/api/edges",
-    "/api/checkpoints",
-    "/api/routes",
-    "/api/map",
-    "/api/categories",
-    "/api/connections",
-    "/api/sensors_log",
-)
-
-
-def _route_uses_database(path: str, method: str) -> bool:
-    if method == "OPTIONS":
-        return False
-    return any(path.startswith(prefix) for prefix in _DB_PREFIXES)
-
-
-class DatabaseSessionMiddleware:
-    """Abre a sessão MySQL fora do event loop e no mesmo contexto da rota.
-
-    ``Depends`` com yield perdia o token do ContextVar (outro contexto no
-    finally) e o pedido quebrava ao devolver a conexão. O connect bloqueante
-    vai para um thread; o token é criado e limpo nesta task.
-    """
-
-    def __init__(self, app) -> None:
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not _route_uses_database(scope.get("path", ""), scope.get("method", "")):
-            await self.app(scope, receive, send)
-            return
-        local = await anyio.to_thread.run_sync(lambda: checkout_connection(db))
-        token = None
-        if local.connection is not None:
-            token = request_connection.set(local)
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            if token is not None:
-                request_connection.reset(token)
-            await anyio.to_thread.run_sync(lambda: checkin_connection(local))
-
-
-app.add_middleware(DatabaseSessionMiddleware)
-# Por fora da sessão: o preflight não abre MySQL.
+# Por fora das rotas: o preflight não abre MySQL.
 app.add_middleware(OriginCORSMiddleware)
+
+
+@app.exception_handler(DatabaseUnavailable)
+async def mysql_unavailable(_request, exc: DatabaseUnavailable):
+    """Connect falhou. Não segue com a conexão modelo do processo."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 topo_map = TopologicalMap()
@@ -128,19 +85,14 @@ router = TopologicalRouter(topo_map)
 
 def _load_map_once() -> None:
     """Carrega o grafo na subida e devolve a sessão. Não fica aberta no processo."""
-    local = checkout_connection(db)
-    if local.connection is None:
-        print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
-        return
-    token = request_connection.set(local)
     try:
-        map_db_manager.load_map_into_system(topo_map)
-        print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
+        with request_session(db):
+            map_db_manager.load_map_into_system(topo_map)
+            print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
+    except DatabaseUnavailable:
+        print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
     except Exception as exc:
         print(f"[AVISO] Falha ao carregar o mapa inicial ou banco vazio. Erro: {exc}")
-    finally:
-        request_connection.reset(token)
-        checkin_connection(local)
 
 
 _load_map_once()
@@ -409,10 +361,11 @@ def reset_session(
     visited_path = [start_node]
     return {"status": "success", "message": "Estado do PDR e sensores resetados.", "start_node": start_node}
 
-app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
-app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
-app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
-app.mount("/vendor", StaticFiles(directory=FRONTEND_DIR / "vendor"), name="vendor")
+# O front em Vite tirou frontend/js. Montar pasta ausente derruba o import da API.
+for _mount, _folder in (("/css", "css"), ("/js", "js"), ("/assets", "assets"), ("/vendor", "vendor")):
+    _directory = FRONTEND_DIR / _folder
+    if _directory.is_dir():
+        app.mount(_mount, StaticFiles(directory=_directory), name=_folder)
 
 @app.get("/api/current_location")
 def get_current_location(_test: None = Depends(require_test_routes)):

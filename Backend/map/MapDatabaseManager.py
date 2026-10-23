@@ -1,10 +1,17 @@
 import json
 import threading
+from contextlib import contextmanager
+from functools import wraps
 
 import numpy as np
 from mysql.connector import IntegrityError
 
-from datasets.ManagerDatabase import ConexaoBD, request_connection
+from datasets.ManagerDatabase import (
+    ConexaoBD,
+    DatabaseUnavailable,
+    request_connection,
+    request_session,
+)
 from map.checkpoint_slug import DEFAULT_BUILDING_ID, allocate_slug
 from map.edge_rules import group_edge_pairs
 from pdr.trajectory import (
@@ -14,6 +21,17 @@ from pdr.trajectory import (
     straight_path,
     trace_payload,
 )
+
+def _sql_method(method):
+    """Abre a sessão em volta do método. A detecção de passos fica de fora."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._session():
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
 
 class UnknownCategoryError(Exception):
     """``category_code`` não existe em ``checkpoint_categories``."""
@@ -61,12 +79,22 @@ class MapDatabaseManager:
 
     @property
     def db(self):
-        """Na API, a conexão aberta para esta requisição. Fora dela, a de boot."""
+        """Sessão desta chamada. Na API, sem sessão aberta, não usa a de boot."""
         if self._per_request:
             current = request_connection.get()
-            if current is not None:
-                return current
+            if current is None:
+                raise DatabaseUnavailable("Não foi possível conectar ao MySQL.")
+            return current
         return self._database
+
+    @contextmanager
+    def _session(self):
+        """Checkout só enquanto o método fala com o MySQL."""
+        if not self._per_request:
+            yield
+            return
+        with request_session(self._database):
+            yield
 
     def _lock_for(self, source: str, target: str) -> threading.Lock:
         key = tuple(sorted((source, target)))
@@ -98,6 +126,7 @@ class MapDatabaseManager:
         if rows is None:
             raise RuntimeError("falha ao travar checkpoints")
 
+    @_sql_method
     def save_checkpoint(self, name: str, category_code: str | None = None):
         """Salva um novo nó. O slug nasce aqui e não é recalculado depois.
 
@@ -142,6 +171,7 @@ class MapDatabaseManager:
             })
         raise CheckpointConflictError(slug)
 
+    @_sql_method
     def update_checkpoint_name(self, name: str, new_name: str) -> bool:
         """Troca o nome e mantém o slug gerado na criação."""
         cleaned = new_name.strip()
@@ -172,6 +202,7 @@ class MapDatabaseManager:
             return False
         return renamed[0]["slug"] == previous_slug
 
+    @_sql_method
     def update_checkpoint_category(self, name: str, category_code: str | None) -> dict | None:
         """Grava a categoria, ou NULL quando ``category_code`` é None. Não mexe no slug."""
         category_id = None
@@ -193,6 +224,7 @@ class MapDatabaseManager:
             return None
         return self.get_checkpoint_by_name(name)
 
+    @_sql_method
     def list_categories(self) -> list | None:
         rows = self.db.execute_search(
             "SELECT code, label, sort_order FROM checkpoint_categories "
@@ -209,6 +241,7 @@ class MapDatabaseManager:
             for row in rows
         ]
 
+    @_sql_method
     def resolve_checkpoint(self, building_id: int, slug: str) -> dict | None:
         rows = self.db.execute_search(
             _CHECKPOINT_COLUMNS + " WHERE c.building_id = %s AND c.slug = %s",
@@ -220,6 +253,7 @@ class MapDatabaseManager:
             return None
         return _public_checkpoint(rows[0])
 
+    @_sql_method
     def get_checkpoint_by_name(self, name: str) -> dict | None:
         rows = self.db.execute_search(
             _CHECKPOINT_COLUMNS + " WHERE c.name = %s",
@@ -269,26 +303,27 @@ class MapDatabaseManager:
         )
         for attempt in range(2):
             with self._lock_for(source, target):
-                self._clear_lock_error()
-                if not self.db.begin_transaction():
-                    if self._lock_conflict() and attempt == 0:
-                        continue
-                    return False
-                try:
-                    self._lock_checkpoints(source, target)
-                    for src, tgt, dist, heading in directions:
-                        self._lock_edge(src, tgt)
-                        if not self._upsert_manual_direction(src, tgt, dist, heading):
-                            raise RuntimeError("falha ao gravar um sentido da aresta")
-                    if not self.db.commit_transaction():
-                        raise RuntimeError("commit da aresta falhou")
-                    return True
-                except Exception as exc:
-                    print(f"Aresta revertida: {exc}")
-                    self.db.rollback_transaction()
-                    if self._lock_conflict() and attempt == 0:
-                        continue
-                    return False
+                with self._session():
+                    self._clear_lock_error()
+                    if not self.db.begin_transaction():
+                        if self._lock_conflict() and attempt == 0:
+                            continue
+                        return False
+                    try:
+                        self._lock_checkpoints(source, target)
+                        for src, tgt, dist, heading in directions:
+                            self._lock_edge(src, tgt)
+                            if not self._upsert_manual_direction(src, tgt, dist, heading):
+                                raise RuntimeError("falha ao gravar um sentido da aresta")
+                        if not self.db.commit_transaction():
+                            raise RuntimeError("commit da aresta falhou")
+                        return True
+                    except Exception as exc:
+                        print(f"Aresta revertida: {exc}")
+                        self.db.rollback_transaction()
+                        if self._lock_conflict() and attempt == 0:
+                            continue
+                        return False
         return False
 
     def _lock_edge(self, source: str, target: str) -> dict | None:
@@ -320,6 +355,7 @@ class MapDatabaseManager:
         """
         return bool(self.db.execute_within(sql, (source, target, distance, heading_rad)))
                 
+    @_sql_method
     def load_map_into_system(self, topo_map) -> None:
         """Carrega todos os dados persistidos no MySQL e reconstrói o grafo na memória."""
         
@@ -352,6 +388,7 @@ class MapDatabaseManager:
                     f"{row['target_node']} ({row['distance_m']}m)"
                 )
                 
+    @_sql_method
     def save_sensor_log(self, source: str, target: str, csv_data: str):
         query = """
             INSERT INTO sensors_log (source, target, steps_detected, distance_m, is_valid, message, raw_csv)
@@ -363,6 +400,7 @@ class MapDatabaseManager:
         print("Erro ao processar log")
         return None
 
+    @_sql_method
     def update_sensor_log(self, log_id: int, steps: int, distance: float, is_valid: bool, message: str) -> bool:
         query = """
             UPDATE sensors_log
@@ -377,6 +415,7 @@ class MapDatabaseManager:
             int(log_id),
         )))
         
+    @_sql_method
     def get_sensor_log_csv(self, log_id: int) -> str | None:
         """Busca o conteúdo CSV de um log específico pelo ID."""
         query = "SELECT raw_csv FROM sensors_log WHERE id = %s"
@@ -387,6 +426,7 @@ class MapDatabaseManager:
             return result[0]['raw_csv'] if isinstance(result[0], dict) else result[0][0]
         return None
 
+    @_sql_method
     def save_route(self, name: str, start_node: str, end_node: str, segments: list, path_sequence: list):
         """Salva uma rota calculada com todos os segmentos no banco de dados."""
         import json
@@ -410,6 +450,7 @@ class MapDatabaseManager:
         print(f"Erro ao salvar rota '{name}'")
         return False
 
+    @_sql_method
     def get_all_routes(self):
         """Lista todas as rotas salvas (resumo para UI)."""
         sql = """
@@ -433,6 +474,7 @@ class MapDatabaseManager:
             ]
         return []
 
+    @_sql_method
     def get_route_by_id(self, route_id: int):
         """Carrega uma rota completa com todos os segmentos para modo teste."""
         sql = """
@@ -458,6 +500,7 @@ class MapDatabaseManager:
             }
         return None
 
+    @_sql_method
     def delete_route(self, route_id: int):
         """Remove uma rota salva."""
         sql = "DELETE FROM saved_routes WHERE id = %s"
@@ -484,25 +527,26 @@ class MapDatabaseManager:
         """
         for attempt in range(2):
             with self._lock_for(source, target):
-                self._clear_lock_error()
-                if not self.db.begin_transaction():
-                    print("Erro ao abrir transação de walk_trace")
-                    if self._lock_conflict() and attempt == 0:
-                        continue
-                    return None
-                try:
-                    payload = self._write_walk(
-                        source, target, sensors_log_id, started_at, ended_at, built, bool(is_valid),
-                    )
-                    if not self.db.commit_transaction():
-                        raise RuntimeError("commit da trajetória falhou")
-                    return payload
-                except Exception as exc:
-                    print(f"Trajetória revertida: {exc}")
-                    self.db.rollback_transaction()
-                    if self._lock_conflict() and attempt == 0:
-                        continue
-                    return None
+                with self._session():
+                    self._clear_lock_error()
+                    if not self.db.begin_transaction():
+                        print("Erro ao abrir transação de walk_trace")
+                        if self._lock_conflict() and attempt == 0:
+                            continue
+                        return None
+                    try:
+                        payload = self._write_walk(
+                            source, target, sensors_log_id, started_at, ended_at, built, bool(is_valid),
+                        )
+                        if not self.db.commit_transaction():
+                            raise RuntimeError("commit da trajetória falhou")
+                        return payload
+                    except Exception as exc:
+                        print(f"Trajetória revertida: {exc}")
+                        self.db.rollback_transaction()
+                        if self._lock_conflict() and attempt == 0:
+                            continue
+                        return None
         return None
 
     def _write_walk(
@@ -711,6 +755,7 @@ class MapDatabaseManager:
             return int(found["id"])
         return int(edge_id)
 
+    @_sql_method
     def get_trace_payload(self, trace_id: int) -> dict | None:
         rows = self.db.execute_search(
             """
@@ -736,6 +781,7 @@ class MapDatabaseManager:
             return None
         return trace_payload(rows[0], steps)
 
+    @_sql_method
     def list_connections(self, include_path: bool = True) -> list[dict] | None:
         """Um item por par físico. O sentido com trajetória ativa é o listado.
 
@@ -778,6 +824,7 @@ class MapDatabaseManager:
             ))
         return connections
 
+    @_sql_method
     def get_connection(self, edge_id: int) -> dict | None:
         """O sentido pedido, mesmo que seja o reverso da lista agrupada."""
         rows = self.db.execute_search(
@@ -948,6 +995,7 @@ class MapDatabaseManager:
             grouped.setdefault(int(row["trace_id"]), []).append(row)
         return grouped
 
+    @_sql_method
     def get_checkpoint_positions(self) -> dict:
         """Posições e slug. Consulta que falha não vira mapa sem posições.
 
@@ -967,6 +1015,7 @@ class MapDatabaseManager:
             return {}
         return {row["name"]: _public_checkpoint(row) for row in rows}
 
+    @_sql_method
     def update_checkpoint_position(self, name: str, pos_x_px, pos_y_px) -> bool:
         """Um UPDATE pelo UNIQUE(name). Sem SELECT antes, que abria transação."""
         affected = self.db.execute_update(
@@ -975,6 +1024,7 @@ class MapDatabaseManager:
         )
         return bool(affected)
 
+    @_sql_method
     def get_map_config(self) -> dict | None:
         rows = self.db.execute_search(
             "SELECT id, plan_image, px_per_m, rotation_rad, updated_at FROM map_config WHERE id = 1"
@@ -998,6 +1048,7 @@ class MapDatabaseManager:
             "updated_at": _iso_or_none(row.get("updated_at")),
         }
 
+    @_sql_method
     def save_map_config(self, plan_image, px_per_m, rotation_rad: float) -> dict | None:
         sql = """
             INSERT INTO map_config (id, plan_image, px_per_m, rotation_rad)

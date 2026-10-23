@@ -25,7 +25,7 @@ def test_health_does_not_open_mysql(monkeypatch):
     def fail(*_args, **_kwargs):
         raise AssertionError("o ping não abre MySQL")
 
-    monkeypatch.setattr(app_module, "checkout_connection", fail)
+    monkeypatch.setattr("datasets.ManagerDatabase.ConexaoBD.connect", fail)
     response = TestClient(app).get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}

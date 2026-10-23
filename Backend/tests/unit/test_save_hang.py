@@ -12,8 +12,8 @@ Três causas que se somam:
 3. Um ``threading.Lock`` único cobria a transação inteira de qualquer
    corredor. Um salvamento preso segurava todos os outros.
 
-A sessão de boot não fica aberta no processo. Autocommit desligado deixava
-o SELECT do mapa numa transação até o shutdown.
+A sessão de boot não fica aberta no processo. Autocommit ligado e
+READ COMMITTED: o SELECT do mapa não segura lock até o shutdown.
 """
 
 from __future__ import annotations
@@ -239,11 +239,81 @@ def test_blocking_connect_does_not_freeze_the_other_requests(monkeypatch):
             started = time.perf_counter()
             free = await client.get("/api/pdr/config")
             elapsed = time.perf_counter() - started
-            await db_call
-            return free, elapsed
+            blocked = await db_call
+            return free, elapsed, blocked
 
     # O import do app já rodou a subida. O monkeypatch pega o connect da rota.
     assert app_module.map_db_manager is not None
-    free, elapsed = asyncio.run(scenario())
+    free, elapsed, blocked = asyncio.run(scenario())
     assert free.status_code == 200
     assert elapsed < 0.4
+    assert blocked.status_code == 503
+
+
+def test_step_detection_does_not_hold_the_connection(monkeypatch):
+    """O connect fica em volta do INSERT. A contagem de passos roda sem sessão."""
+    from fastapi import HTTPException
+
+    from datasets.ManagerDatabase import request_connection
+    from pdr.processor import RawEdgeProcessor
+
+    class _Cursor:
+        lastrowid = 3
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+        def close(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    class _Conn:
+        in_transaction = False
+        unread_result = False
+
+        def cursor(self, **_kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+        def shutdown(self):
+            return None
+
+    def connect(self, announce=True, timeout=None):
+        self.connection = _Conn()
+        self.cursor = _Cursor()
+
+    monkeypatch.setattr(ConexaoBD, "connect", connect)
+    seen: dict = {}
+
+    def detect(_samples, config=None):
+        seen["during"] = request_connection.get()
+
+        class _Result:
+            time_valid = False
+            steps_count = 0
+            distance_m = 0.0
+            valid = False
+            message = "amostra"
+            steps: list = []
+            mean_yaw_rad = 0.0
+
+        return _Result()
+
+    monkeypatch.setattr("pdr.processor.detect_steps_from_samples", detect)
+    manager = MapDatabaseManager(ConexaoBD("127.0.0.1", "POV", "root", ""), per_request=True)
+    processor = RawEdgeProcessor(manager, object())
+    samples = [{"timestamp": index / 50.0, "accel_z": 9.8} for index in range(20)]
+    with pytest.raises(HTTPException):
+        processor.process_samples("Quarto", "Sala", samples)
+    assert seen["during"] is None
+    assert request_connection.get() is None
