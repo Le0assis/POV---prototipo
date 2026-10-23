@@ -39,7 +39,10 @@ def test_production_cors_allows_only_the_pages(monkeypatch):
     local = client.get("/api/health", headers={"Origin": "http://localhost"})
     assert page.headers["access-control-allow-origin"] == "https://pov-unimar.com"
     assert www.headers["access-control-allow-origin"] == "https://www.pov-unimar.com"
+    assert page.headers["access-control-expose-headers"] == "Retry-After"
+    assert www.headers["access-control-expose-headers"] == "Retry-After"
     assert "access-control-allow-origin" not in local.headers
+    assert "access-control-expose-headers" not in local.headers
     assert "access-control-allow-credentials" not in page.headers
 
 
@@ -59,6 +62,35 @@ def test_production_preflight_allows_the_editor_header(monkeypatch):
     assert "x-editor-password" in allowed
     assert "x-injected" not in allowed
     assert "access-control-allow-credentials" not in response.headers
+    assert response.headers["access-control-expose-headers"] == "Retry-After"
+
+
+def test_cors_exposes_retry_after_on_busy_save(monkeypatch):
+    from datasets.ManagerDatabase import DatabaseBusy
+
+    _clear_cors(monkeypatch, "production")
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    app_module.topo_map.add_checkpoint("OrigemCors")
+    app_module.topo_map.add_checkpoint("DestinoCors")
+
+    def busy(*_args, **_kwargs):
+        raise DatabaseBusy()
+
+    monkeypatch.setattr(app_module.map_db_manager, "save_edge", busy)
+    response = TestClient(app).post(
+        "/api/edges",
+        headers={**OK, "Origin": "https://pov-unimar.com"},
+        json={
+            "source": "OrigemCors",
+            "target": "DestinoCors",
+            "distance_m": 1.0,
+            "heading_rad": 0.0,
+        },
+    )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.headers["access-control-expose-headers"] == "Retry-After"
+    assert response.headers["access-control-allow-origin"] == "https://pov-unimar.com"
 
 
 def test_development_cors_keeps_localhost(monkeypatch):

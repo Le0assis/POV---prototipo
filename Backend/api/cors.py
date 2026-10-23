@@ -11,6 +11,8 @@ _ALLOWED_REQUEST_HEADERS = frozenset({
     "content-type",
     "x-editor-password",
 })
+# O front no Pages lê Retry-After no 503. Sem isto o browser esconde o header.
+_EXPOSE_HEADERS = b"Retry-After"
 
 
 def _allow_headers(requested: str | None) -> str:
@@ -58,6 +60,7 @@ class OriginCORSMiddleware:
                 (b"access-control-allow-origin", encoded),
                 (b"access-control-allow-methods", b"DELETE, GET, OPTIONS, PATCH, POST, PUT"),
                 (b"access-control-allow-headers", allow_headers.encode("latin-1")),
+                (b"access-control-expose-headers", _EXPOSE_HEADERS),
                 (b"vary", b"Origin"),
                 (b"content-length", b"2"),
             ]
@@ -72,6 +75,7 @@ class OriginCORSMiddleware:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers") or [])
                 headers.append((b"access-control-allow-origin", origin.encode("latin-1")))
+                headers.append((b"access-control-expose-headers", _EXPOSE_HEADERS))
                 if not any(key.lower() == b"vary" for key, _value in headers):
                     headers.append((b"vary", b"Origin"))
                 message = {**message, "headers": headers}
