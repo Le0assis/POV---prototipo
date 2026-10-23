@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
 import {
     RESOLVE_FALLBACK_WARNING,
     RESOLVE_RETRY,
     RESOLVE_UNRECOGNIZED,
     resolveScannedCheckpoint
-} from '../js/core/checkpoints.js';
+} from '../src/core/checkpoints.ts';
 
 const reception = {
     name: 'Recepção',

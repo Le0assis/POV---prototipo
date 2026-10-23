@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { loadDestinationCatalog } from '../js/core/destination-catalog.js';
+import { loadDestinationCatalog } from '../src/core/destination-catalog.ts';
 import {
     ALL_CHIP,
     OUTROS_LABEL,
@@ -16,7 +16,7 @@ import {
     formatDistanceMeters,
     searchDestinations,
     straightLineMeters
-} from '../js/core/search.js';
+} from '../src/core/search.ts';
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -234,9 +234,9 @@ test('o texto da busca espera 100ms', async () => {
 });
 
 test('a folha, a prévia e o mapa expõem o contrato da busca', () => {
-    const sheet = readFileSync(path.join(frontendRoot, 'js/ui/search-sheet.js'), 'utf8');
+    const sheet = readFileSync(path.join(frontendRoot, 'src/ui/search-sheet.ts'), 'utf8');
     const css = readFileSync(path.join(frontendRoot, 'css/visitor.css'), 'utf8');
-    const app = readFileSync(path.join(frontendRoot, 'js/app.js'), 'utf8');
+    const app = readFileSync(path.join(frontendRoot, 'src/app.ts'), 'utf8');
     const index = readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
 
     assert.match(sheet, /SEARCH_DEBOUNCE_MS/);

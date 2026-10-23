@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const entries = ['js/pages/locate.js', 'js/pages/viewer.js'];
+const entries = ['src/pages/locate.ts', 'src/pages/viewer.ts'];
 const pages = ['locate.html', 'viewer.html'];
 
 const forbidden = [
@@ -42,9 +42,18 @@ const publicApi = new Set([
 
 function resolveImport(fromFile, spec) {
     if (!spec.startsWith('.')) return null;
-    let target = path.normalize(path.join(path.dirname(fromFile), spec));
-    if (!target.endsWith('.js')) target += '.js';
-    return target.split(path.sep).join('/');
+    const base = path.normalize(path.join(path.dirname(fromFile), spec)).split(path.sep).join('/');
+    const candidates = [];
+    if (base.endsWith('.js')) {
+        candidates.push(`${base.slice(0, -3)}.ts`, `${base.slice(0, -3)}.tsx`, base);
+    } else if (base.endsWith('.jsx')) {
+        candidates.push(`${base.slice(0, -4)}.tsx`, `${base.slice(0, -4)}.ts`, base);
+    } else if (base.endsWith('.ts') || base.endsWith('.tsx')) {
+        candidates.push(base);
+    } else {
+        candidates.push(`${base}.ts`, `${base}.tsx`, `${base}.js`);
+    }
+    return candidates.find((rel) => existsSync(path.join(frontendRoot, rel))) || null;
 }
 
 function collect(entry) {
@@ -94,7 +103,7 @@ test('locate e viewer não importam reset nem a senha do editor', () => {
     files.forEach(({ rel, text }) => {
         if (seen.has(rel)) return;
         seen.add(rel);
-        if (rel.endsWith('js/core/api.js')) return;
+        if (rel.endsWith('src/core/api.ts')) return;
 
         forbidden.forEach((token) => {
             assert.equal(text.includes(token), false, `${rel} contém ${token}`);

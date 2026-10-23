@@ -70,9 +70,6 @@ jobs:
       - name: Rodar testes do frontend
         env:
           AXE_REPORT_DIR: reports/axe
-          # O reporter precisa vir antes dos arquivos. O npm acrescenta
-          # argumentos no fim, e o Node ignora --test-reporter nessa posição.
-          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/frontend-junit.xml
         run: |
           mkdir -p reports/axe
           npm test

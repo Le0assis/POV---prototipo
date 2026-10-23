@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { pixelTolerance, pointsUntil, routeSignature, simplifyPath } from '../js/map/simplify.js';
+import { pixelTolerance, pointsUntil, routeSignature, simplifyPath } from '../src/map/simplify.ts';
 
 test('reta com vértices colineares fica com as pontas', () => {
     const points = [

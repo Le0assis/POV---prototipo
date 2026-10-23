@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { RouteError } from '../js/nav/graph.js';
+import { RouteError } from '../src/nav/graph.ts';
 import {
     computeRoute,
     estimateMinutes,
@@ -11,8 +11,8 @@ import {
     routeAnnouncement,
     selectTracePath,
     stepText
-} from '../js/nav/routing.js';
-import { chromePadding, fitPadding } from '../js/map/route-layer.js';
+} from '../src/nav/routing.ts';
+import { chromePadding, fitPadding } from '../src/map/route-layer.ts';
 
 const flat = { px_per_m: 10, rotation_rad: 0 };
 

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { SHOW_ROLE_TOGGLE } from '../js/core/config.js';
+import { SHOW_ROLE_TOGGLE } from '../src/core/config.ts';
 import {
     PASSWORD_UNCONFIGURED_MESSAGE,
     PASSWORD_WRONG_MESSAGE,
@@ -14,13 +14,13 @@ import {
     hrefForRole,
     nextRadioIndex,
     requestAdminEntry
-} from '../js/core/role-toggle.js';
+} from '../src/core/role-toggle.ts';
 import {
     clearEditorPassword,
     getEditorPassword,
     setEditorPassword,
     verifyEditorPassword
-} from '../js/core/api.js';
+} from '../src/core/api.ts';
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -255,10 +255,10 @@ test('nenhum código valida a senha com DELETE', () => {
     const files = [];
     const walk = (dir) => {
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
-            if (skip.has(entry.name)) continue;
+            if (skip.has(entry.name) || entry.name === 'dist' || entry.name === 'vendor') continue;
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) walk(full);
-            else if (/\.(js|html|css)$/.test(entry.name)) files.push(full);
+            else if (/\.(js|ts|tsx|html|css)$/.test(entry.name)) files.push(full);
         }
     };
     walk(frontendRoot);
@@ -268,24 +268,27 @@ test('nenhum código valida a senha com DELETE', () => {
         assert.equal(/DELETE\s+\/api\/routes\/2147483647/.test(text), false, file);
         assert.equal(/\/api\/routes\/2147483647/.test(text), false, file);
     });
-    const api = readFileSync(path.join(frontendRoot, 'js/core/api.js'), 'utf8');
+    const api = readFileSync(path.join(frontendRoot, 'src/core/api.ts'), 'utf8');
     assert.match(api, /request\('\/api\/auth\/check',\s*\{\s*method:\s*'GET'/);
 });
 
 test('páginas de visitante e de admin carregam o seletor', () => {
-    ['index.html', 'viewer.html', 'locate.html'].forEach((page) => {
+    const home = readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
+    const entry = readFileSync(path.join(frontendRoot, 'src/main.tsx'), 'utf8');
+    assert.match(home, /\/src\/main\.tsx/);
+    assert.match(entry, /['"]\.\/boot['"]/);
+    ['viewer.html', 'locate.html'].forEach((page) => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
-        assert.match(html, /js\/boot\.js/, page);
+        assert.match(html, /\/src\/boot\.ts/, page);
     });
     ['admin/index.html', 'admin/editor.html', 'admin/recorder.html', 'admin/map-config.html', 'admin/qrcodes.html'].forEach((page) => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
-        assert.match(html, /\.\.\/js\/boot\.js/, page);
+        assert.match(html, /\/src\/boot\.ts/, page);
         assert.match(html, /id="admin-header"/, page);
     });
     const viewer = readFileSync(path.join(frontendRoot, 'viewer.html'), 'utf8');
     const locate = readFileSync(path.join(frontendRoot, 'locate.html'), 'utf8');
-    const nav = readFileSync(path.join(frontendRoot, 'js/components/nav.js'), 'utf8');
-    const home = readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
+    const nav = readFileSync(path.join(frontendRoot, 'src/components/nav.ts'), 'utf8');
     assert.match(viewer, /Mapa do prédio/);
     assert.match(locate, /Navegar/);
     assert.match(nav, /Mapa do prédio/);

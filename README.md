@@ -298,7 +298,7 @@ git checkout dev
 
 O visitante abre `frontend/index.html`. A administração fica em `frontend/admin/` (editor, gravador, planta e QR). Rotas salvas, simulação, dashboard e as páginas da raiz que só redirecionavam saíram.
 
-**Calibração da bússola:** o heading do grafo é anti-horário e a bússola é horária. A conversão está só em `frontend/js/sensors/angles.js`.
+**Calibração da bússola:** o heading do grafo é anti-horário e a bússola é horária. A conversão está só em `frontend/src/sensors/angles.ts`.
 
 ## 9. Frontend — fase 0
 
@@ -307,5 +307,16 @@ As travadas ao salvar e no mapa 2D estão diagnosticadas em `docs/frontend/fase-
 ```bash
 npm ci
 npm test
+```
+
+## 10. Frontend — fase 4
+
+O visitante e o admin compilam com Vite a partir de `frontend/src` (TypeScript). Preact e `@preact/signals` desenham o estado do visitante; o Leaflet continua no script `frontend/vendor/leaflet` e entra pelo `MapController`, fora da árvore do Preact. A URL da API vem de `VITE_API_BASE_URL` (`frontend/.env.development` e `frontend/.env.production`). Sem a variável, o build de produção usa `https://api.pov-unimar.com`.
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run build
 ```
 

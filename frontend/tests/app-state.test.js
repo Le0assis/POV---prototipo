@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
 import {
     State,
@@ -9,7 +9,7 @@ import {
     shouldRecalibrate,
     showsRoute,
     transition
-} from '../js/app.js';
+} from '../src/app.ts';
 
 function session(partial = {}) {
     return {

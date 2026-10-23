@@ -2290,7 +2290,11 @@ var qrcode = function() {
   if (typeof define === 'function' && define.amd) {
       define([], factory);
   } else if (typeof exports === 'object') {
-      module.exports = factory();
+      try {
+          module.exports = factory();
+      } catch (err) {
+          /* o Vitest trata o arquivo como ESM; o export default abaixo vale */
+      }
   }
 }(function () {
     return qrcode;

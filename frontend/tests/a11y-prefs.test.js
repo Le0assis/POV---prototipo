@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { A11Y_STORAGE_KEY, applyA11yClasses, readA11yPrefs, saveA11yPrefs } from '../js/a11y/prefs.js';
+import { A11Y_STORAGE_KEY, applyA11yClasses, readA11yPrefs, saveA11yPrefs } from '../src/a11y/prefs.ts';
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -84,5 +84,5 @@ test('o script do head aplica hc e font-lg antes da folha de estilo', () => {
     const page = readFileSync(path.join(frontendRoot, 'admin/qrcodes.html'), 'utf8');
     assert.match(page, /Imprimir \/ Salvar PDF/);
     assert.match(page, /id="admin-header"/);
-    assert.match(page, /\.\.\/js\/boot\.js/);
+    assert.match(page, /\/src\/boot\.ts/);
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
 import {
     SESSION_KEY,
@@ -11,7 +11,7 @@ import {
     pointsFromHash,
     saveSession,
     toStored
-} from '../js/core/store.js';
+} from '../src/core/store.ts';
 
 function memoryStorage() {
     const store = new Map();

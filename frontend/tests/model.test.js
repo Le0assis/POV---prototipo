@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 
 import {
     checkpointAnchor,
@@ -8,7 +8,7 @@ import {
     pathFromProcessResponse,
     edgeIdOf,
     normalizeMapConfig
-} from '../js/route/model.js';
+} from '../src/route/model.ts';
 
 test('posição nula não vira pixel 0', () => {
     assert.equal(checkpointAnchor({ pos_x_px: null, pos_y_px: null }), null);

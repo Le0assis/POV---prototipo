@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { relativeHeadingRad } from '../js/sensors/angles.js';
-import { snapToPolylines } from '../js/route/snap.js';
-import { computeRoute, planRoute } from '../js/nav/routing.js';
+import { relativeHeadingRad } from '../src/sensors/angles.ts';
+import { snapToPolylines } from '../src/route/snap.ts';
+import { computeRoute, planRoute } from '../src/nav/routing.ts';
 import {
     ARRIVAL_M,
     NO_SENSORS_NOTICE,
@@ -17,7 +17,7 @@ import {
     resolveSensorMode,
     snapToRoute,
     turnDirection
-} from '../js/nav/positioning.js';
+} from '../src/nav/positioning.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flat = { px_per_m: 10, rotation_rad: 0 };
@@ -30,8 +30,8 @@ function close(actual, expected, epsilon = 1e-6) {
     assert.ok(Math.abs(actual - expected) < epsilon, `${actual} ≠ ${expected}`);
 }
 
-test('a conversão de heading não é duplicada fora de angles.js', () => {
-    const text = readFileSync(path.join(root, 'js/nav/positioning.js'), 'utf8');
+test('a conversão de heading não é duplicada fora de angles.ts', () => {
+    const text = readFileSync(path.join(root, 'src/nav/positioning.ts'), 'utf8');
     assert.equal(text.includes('relativeHeadingRad'), true);
     assert.equal(text.includes('HEADING_CONVENTION'), false);
     assert.equal(text.includes('/api/reset'), false);

@@ -13,7 +13,8 @@ Notas para quem altera o POV. O README continua sendo o passo a passo de instala
 
 ## Frontend
 
-- A interface mora em `frontend/`. Leaflet fica no mapa (`L.CRS.Simple` e a planta em `imageOverlay`).
+- A interface mora em `frontend/src` e o build sai de Vite (`npm run build` → `frontend/dist`). Leaflet fica no mapa (`L.CRS.Simple` e a planta em `imageOverlay`), montado por `MapController`, fora da árvore Preact.
+- O estado do visitante que o Preact observa é o signal `visitorSession`. Não renderizar de novo os contêineres que `app.ts` preenche (`#visitor-flow`, a folha de busca, o mapa).
 - Não chamar `reload()` do editor depois de um salvamento pontual: atualizar só o item devolvido pela API.
 - Não pintar `devicemotion`, `deviceorientation` ou o marcador do visitante fora de um quadro (`requestAnimationFrame`).
 - `/api/localize`, `/api/current_location` e `/api/reset` não entram no aplicativo de produção. Ficam em teste, atrás de flag desligada no build.

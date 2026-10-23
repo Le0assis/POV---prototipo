@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { effectiveSpeech, speakInstruction, speechSupported } from '../js/a11y/speech.js';
+import { effectiveSpeech, speakInstruction, speechSupported } from '../src/a11y/speech.ts';
 
 test('sem a Web Speech API a leitura fica desligada', () => {
     assert.equal(speechSupported(), false);

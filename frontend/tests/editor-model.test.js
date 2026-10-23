@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { addCheckpoint, addManualConnection, patchCheckpointPosition } from '../js/pages/editor-model.js';
-import { loadFloorModel } from '../js/pages/floor-model.js';
+import { addCheckpoint, addManualConnection, patchCheckpointPosition } from '../src/pages/editor-model.ts';
+import { loadFloorModel } from '../src/pages/floor-model.ts';
 
 function emptyModel() {
     return {

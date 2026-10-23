@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
 import { TEST_ROUTES_ENABLED, localizeBody, serverLocationPaths } from './fixtures/server-location.js';
 
@@ -21,10 +21,10 @@ test('o aplicativo não chama localize, current_location nem reset', () => {
             if (entry.name === 'vendor' || entry.name === 'node_modules') continue;
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) walk(full);
-            else if (/\.(js|html)$/.test(entry.name)) files.push(full);
+            else if (/\.(js|ts|tsx|html)$/.test(entry.name)) files.push(full);
         }
     };
-    walk(path.join(frontendRoot, 'js'));
+    walk(path.join(frontendRoot, 'src'));
     walk(path.join(frontendRoot, 'admin'));
     ['index.html', 'viewer.html', 'locate.html', 'routes.html', 'editor.html', 'recorder.html']
         .forEach((name) => {

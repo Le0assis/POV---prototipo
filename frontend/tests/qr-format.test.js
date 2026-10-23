@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
 import {
     QR_PAGE,
@@ -8,7 +8,7 @@ import {
     buildQr,
     parseQr,
     parseScanLocation
-} from '../js/qr/qr-format.js';
+} from '../src/qr/qr-format.ts';
 
 const accented = 'sala de reunião';
 
