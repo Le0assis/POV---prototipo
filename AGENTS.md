@@ -4,7 +4,7 @@ Notas para quem altera o POV. O README continua sendo o passo a passo de instala
 
 ## Backend
 
-- A senha do editor é uma só, em `EDITOR_PASSWORD_HASH` (argon2id). Gere com `Backend/scripts/hash_password.py`. Não commite senha nem hash. O limite de tentativas é atômico. `TRUSTED_PROXIES` é a lista explícita de pares que podem informar o cliente; `*` não vale. O uvicorn usa `--forwarded-allow-ips` com endereços concretos, nunca `*`.
+- A senha do editor é uma só, em `EDITOR_PASSWORD_HASH` (argon2id). Gere com `Backend/scripts/hash_password.py`. Não commite senha nem hash. O limite de tentativas é atômico e só conta senha errada. Sem vaga de argon2 a resposta é 503 com `Retry-After`, não 429. `TRUSTED_PROXIES` é a lista explícita de pares que podem informar o cliente; `*` não vale. No `X-Forwarded-For` o cliente é o endereço mais à direita fora dessa lista. Suba o uvicorn com `--no-proxy-headers` (o padrão reescreve o par do socket a partir do header).
 - `GET /api/health` responde `{"status":"ok"}` e não abre MySQL.
 - `/api/localize`, `/api/current_location` e `/api/reset` só existem com `POV_ENABLE_TEST_ROUTES` (padrão desligado). O nó `Recepcao` é fallback dessas rotas de teste.
 - Em `POV_ENV=production` o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem a variável, o padrão é desenvolvimento e o localhost continua. `CORS_ORIGINS` substitui a lista. Sem `allow_credentials`.

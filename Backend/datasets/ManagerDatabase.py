@@ -14,6 +14,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 import threading
+import time
 
 import mysql.connector
 from mysql.connector import Error, IntegrityError
@@ -24,7 +25,9 @@ CONNECT_TIMEOUT_S = 5
 # Comando SQL. O conector zera o timeout do socket depois do login.
 COMMAND_TIMEOUT_S = 30
 POOL_MAX_IDLE = 8
-POOL_MAX_TOTAL = 16
+POOL_MAX_TOTAL = 32
+# Espera uma sessão livre antes de responder 503. Rajada curta não falha na hora.
+POOL_WAIT_S = 2.5
 
 # Conexão da requisição atual. Fora de uma requisição o valor é None:
 # o processo não guarda uma sessão aberta só para pingar a cada GET.
@@ -34,6 +37,7 @@ request_connection: ContextVar["ConexaoBD | None"] = ContextVar(
 )
 
 _pool_lock = threading.Lock()
+_pool_ready = threading.Condition(_pool_lock)
 _idle: list["ConexaoBD"] = []
 _open = 0
 
@@ -396,21 +400,32 @@ def _release_slot() -> None:
     with _pool_lock:
         if _open > 0:
             _open -= 1
+        _pool_ready.notify()
 
 
 def checkout_connection(template: ConexaoBD) -> ConexaoBD:
-    """Pega uma sessão ociosa ou abre outra, até ``POOL_MAX_TOTAL``."""
+    """Pega uma sessão ociosa ou abre outra, até ``POOL_MAX_TOTAL``.
+
+    Com o pool cheio, espera até ``POOL_WAIT_S`` por uma devolução.
+    ``DatabaseBusy`` só depois dessa espera.
+    """
     global _open
-    with _pool_lock:
-        while _idle:
-            cached = _idle.pop()
-            if cached.connection is not None and cached.cursor is not None:
-                return cached
-            _open = max(0, _open - 1)
-            cached.disconnect(announce=False)
-        if _open >= POOL_MAX_TOTAL:
-            raise DatabaseBusy("Não há conexão livre no pool.")
-        _open += 1
+    deadline = time.monotonic() + POOL_WAIT_S
+    while True:
+        with _pool_lock:
+            while _idle:
+                cached = _idle.pop()
+                if cached.connection is not None and cached.cursor is not None:
+                    return cached
+                _open = max(0, _open - 1)
+                cached.disconnect(announce=False)
+            if _open < POOL_MAX_TOTAL:
+                _open += 1
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DatabaseBusy("Não há conexão livre no pool.")
+            _pool_ready.wait(timeout=remaining)
     opened = ConexaoBD(
         template.host,
         template.database,
@@ -439,6 +454,7 @@ def checkin_connection(conn: ConexaoBD | None) -> None:
     with _pool_lock:
         if len(_idle) < POOL_MAX_IDLE:
             _idle.append(conn)
+            _pool_ready.notify()
             return
     conn.disconnect(announce=False)
     _release_slot()

@@ -6,6 +6,8 @@ default true, reset e routes pedem senha, map-config sem px_per_m é 422.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -326,6 +328,22 @@ def test_wrong_password_does_not_open_mysql(monkeypatch):
     monkeypatch.setattr("datasets.ManagerDatabase.ConexaoBD.connect", fail)
     response = TestClient(app).post("/api/checkpoints", json={"name": "Novo"})
     assert response.status_code == 401
+
+
+def test_sixty_parallel_correct_saves_all_succeed(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setattr(app_module.map_db_manager, "save_checkpoint", lambda *_args, **_kwargs: True)
+
+    def once(index: int) -> int:
+        return TestClient(app).post(
+            "/api/checkpoints",
+            headers=OK,
+            json={"name": f"Paralelo{index}"},
+        ).status_code
+
+    with ThreadPoolExecutor(max_workers=60) as pool:
+        codes = list(pool.map(once, range(60)))
+    assert codes == [201] * 60
 
 
 def test_lock_conflict_after_retry_is_503(monkeypatch):

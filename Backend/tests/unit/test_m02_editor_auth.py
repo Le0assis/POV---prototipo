@@ -14,8 +14,10 @@ from fastapi import HTTPException
 
 from argon2 import PasswordHasher
 
+import api.editor_auth as editor_auth
 from api.editor_auth import (
     BAD_HASH_DETAIL,
+    BUSY_DETAIL,
     LOCKED_DETAIL,
     MISSING_HASH_DETAIL,
     VERIFY_SLOTS,
@@ -174,9 +176,22 @@ def test_trusted_proxy_list_is_explicit(monkeypatch):
     monkeypatch.setenv("TRUSTED_PROXIES", "*")
     assert client_key(request) == "127.0.0.1"
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "--forwarded-allow-ips" in readme
+    assert "--no-proxy-headers" in readme
+    assert "forwarded-allow-ips=127.0.0.1" not in readme
     assert "forwarded-allow-ips=*" not in readme
     assert "forwarded-allow-ips *" not in readme
+
+
+def test_forwarded_for_uses_rightmost_untrusted(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1, 10.0.0.8")
+    chained = _Client("127.0.0.1", {
+        "x-forwarded-for": "203.0.113.9, 198.51.100.20, 10.0.0.8",
+    })
+    assert client_key(chained) == "198.51.100.20"
+    spoofed_left = _Client("127.0.0.1", {
+        "x-forwarded-for": "203.0.113.9, 198.51.100.20",
+    })
+    assert client_key(spoofed_left) == "198.51.100.20"
 
 
 def test_rotating_forwarded_headers_do_not_bypass_429(monkeypatch):
@@ -200,9 +215,26 @@ def test_rotating_forwarded_headers_do_not_bypass_429(monkeypatch):
     assert locked.value.status_code == 429
 
 
-def test_forty_parallel_bad_attempts_yield_429(monkeypatch):
+def test_cached_password_skips_argon2(monkeypatch):
+    _use_hash(monkeypatch)
+    request = _Client("203.0.113.70")
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+
+    def boom(_encoded, _password):
+        raise AssertionError("senha já conferida não repete o argon2")
+
+    class _Hasher:
+        def verify(self, encoded, password):
+            boom(encoded, password)
+
+    monkeypatch.setattr("api.editor_auth._hasher", _Hasher())
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+
+
+def test_forty_parallel_bad_attempts_do_not_count_slot_miss(monkeypatch):
     _use_hash(monkeypatch)
     set_attempt_limit(8)
+    monkeypatch.setattr("api.editor_auth.SLOT_WAIT_S", 0.25)
     gate = threading.Event()
     inside = threading.Semaphore(0)
 
@@ -218,12 +250,12 @@ def test_forty_parallel_bad_attempts_yield_429(monkeypatch):
     monkeypatch.setattr("api.editor_auth._hasher", _SlowHasher())
     request = _Client("203.0.113.40")
 
-    def once() -> int:
+    def once() -> HTTPException | None:
         try:
             require_editor_password(request, x_editor_password="errada")
         except HTTPException as exc:
-            return exc.status_code
-        return 200
+            return exc
+        return None
 
     with ThreadPoolExecutor(max_workers=40) as pool:
         pending = [pool.submit(once) for _ in range(40)]
@@ -235,10 +267,18 @@ def test_forty_parallel_bad_attempts_yield_429(monkeypatch):
                 break
             time.sleep(0.01)
         gate.set()
-        codes = [item.result(timeout=5) for item in pending]
+        outcomes = [item.result(timeout=5) for item in pending]
+    codes = [200 if item is None else item.status_code for item in outcomes]
     assert codes.count(200) == 0
-    assert codes.count(401) <= VERIFY_SLOTS
-    assert codes.count(429) >= 40 - 8
+    assert codes.count(401) == VERIFY_SLOTS
+    assert codes.count(429) == 0
+    assert codes.count(503) == 40 - VERIFY_SLOTS
+    for item in outcomes:
+        if item is not None and item.status_code == 503:
+            assert item.detail == BUSY_DETAIL
+            assert item.headers is not None
+            assert item.headers["Retry-After"] == str(max(1, int(round(editor_auth.SLOT_WAIT_S))))
+    assert too_many_attempts("203.0.113.40") is False
 
 
 def test_failure_log_is_bounded():

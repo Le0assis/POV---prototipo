@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -39,3 +41,14 @@ def test_unset_editor_password_is_503(monkeypatch):
     response = TestClient(app).get("/api/auth/check", headers=OK)
     assert response.status_code == 503
     assert response.json()["detail"] == MISSING_HASH_DETAIL
+
+
+def test_twenty_parallel_correct_logins_all_succeed(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+
+    def once() -> int:
+        return TestClient(app).get("/api/auth/check", headers=OK).status_code
+
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        codes = list(pool.map(lambda _index: once(), range(20)))
+    assert codes == [204] * 20

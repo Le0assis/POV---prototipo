@@ -145,7 +145,7 @@ Acesse o diretório `Backend` com o `venv` ativado:
 cd Backend
 # Senha do editor: só o hash argon2id. Gere com python scripts/hash_password.py
 # e cole em .env na raiz (EDITOR_PASSWORD_HASH). Não exporte a senha em claro.
-uvicorn api.app:app --reload --host 127.0.0.1 --port 8000 --forwarded-allow-ips=127.0.0.1
+uvicorn api.app:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
 
 ```
 
@@ -155,13 +155,14 @@ uvicorn api.app:app --reload --host 127.0.0.1 --port 8000 --forwarded-allow-ips=
 
 ### Senha do editor do mapa
 
-O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha e sem hash. Há uma senha só. No `.env` fica `EDITOR_PASSWORD_HASH`, um hash argon2id. Gere com `python scripts/hash_password.py` a partir de `Backend/` (a senha é pedida no terminal, não vai para o histórico). A API carrega o `.env` da raiz na subida; uma variável já exportada no shell não é substituída. O header continua `X-Editor-Password`. A comparação é `PasswordHasher.verify` (argon2id). Oito senhas erradas no mesmo cliente, em cinco minutos, respondem **429**. A contagem e o incremento usam o mesmo lock. No máximo quatro conferências argon2 ao mesmo tempo; o excesso também é **429**, sem esperar na fila. `CF-Connecting-IP` e `X-Forwarded-For` só entram se o par do socket estiver em `TRUSTED_PROXIES` (lista separada por vírgula; `*` é ignorado). Sem essa variável, os headers não mudam o cliente. O comando do uvicorn acima fixa `--forwarded-allow-ips=127.0.0.1`. Não use `*`.
+O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, sem senha e sem hash. Há uma senha só. No `.env` fica `EDITOR_PASSWORD_HASH`, um hash argon2id. Gere com `python scripts/hash_password.py` a partir de `Backend/` (a senha é pedida no terminal, não vai para o histórico). A API carrega o `.env` da raiz na subida; uma variável já exportada no shell não é substituída. O header continua `X-Editor-Password`. A comparação é `PasswordHasher.verify` (argon2id). Oito senhas erradas no mesmo cliente, em cinco minutos, respondem **429**. A contagem e o incremento usam o mesmo lock, e só uma senha que o argon2 recusou entra nessa conta. No máximo quatro conferências argon2 ao mesmo tempo. Quem não pega vaga em cerca de 2s responde **503** com `Retry-After`; essa espera não é falha. Uma senha que acabou de conferir fica em cache por cerca de 60s, e as outras requisições certas não repetem o argon2. `CF-Connecting-IP` e `X-Forwarded-For` só entram se o par do socket estiver em `TRUSTED_PROXIES` (lista separada por vírgula; `*` é ignorado). No `X-Forwarded-For` vale o endereço mais à direita que não está nessa lista: o da esquerda pode ser forjado. Sem essa variável, os headers não mudam o cliente. O uvicorn, no padrão, trata `127.0.0.1` como proxy e reescreve o par a partir de `X-Forwarded-For`. O comando acima usa `--no-proxy-headers` para o par continuar sendo o socket. Não use `*`.
 
 | Situação | Resposta |
 | --- | --- |
 | `EDITOR_PASSWORD_HASH` ausente, vazia ou inválida | **503** em toda escrita protegida |
 | Header ausente ou senha diferente | **401** |
-| Tentativas demais | **429** |
+| Tentativas demais (senha errada) | **429** |
+| Sem vaga de argon2 depois da espera | **503** com `Retry-After` |
 | Senha correta | a escrita segue |
 
 Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `POST /api/routes`, `DELETE /api/routes/{id}`. `POST /api/reset` também, e só responde se `POV_ENABLE_TEST_ROUTES` estiver ligada; sem a flag é **404**. `GET /api/sensors_log/{id}/csv` exige a mesma senha.
