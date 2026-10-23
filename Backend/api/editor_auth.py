@@ -4,13 +4,15 @@ No ambiente fica só ``EDITOR_PASSWORD_HASH`` (argon2id). A senha em claro
 não é aceita. Sem o hash, a escrita responde 503. Header ausente ou
 diferente: 401. Hash malformado: 503.
 
-O limite (8 a cada 5 minutos) e o incremento acontecem no mesmo lock, e
-só depois de um argon2 que recusou a senha. No máximo quatro ``verify``
-ao mesmo tempo. Quem não pega vaga em cerca de 2s responde 503 com
-``Retry-After`` e essa espera não conta como falha. Uma senha que acabou
-de conferir fica em cache por cerca de 60s (HMAC comparado em tempo
-constante); as outras requisições certas não repetem o argon2. A senha
-é conferida antes de qualquer conexão MySQL.
+O limite (8 a cada 5 minutos) reserva a tentativa no mesmo lock antes
+do argon2: entram as que estão em curso e as que já falharam. No
+limite a resposta é 429, sem conferir. Senha certa ou 503 devolve a
+reserva; senha errada fica contada. No máximo quatro ``verify`` ao
+mesmo tempo. Quem não pega vaga em cerca de 2s responde 503 com
+``Retry-After``. Uma senha que acabou de conferir fica em cache por
+cerca de 60s, na chave do HMAC dela: só a mesma senha confere, em
+tempo constante, e senha ausente ou vazia nunca passa pelo cache. A
+senha é conferida antes de qualquer conexão MySQL.
 
 ``CF-Connecting-IP`` e ``X-Forwarded-For`` só valem se o par do socket
 estiver em ``TRUSTED_PROXIES`` (lista explícita; ``*`` não entra). No
@@ -41,7 +43,11 @@ VERIFY_SLOTS = 4
 SLOT_WAIT_S = 2.0
 VERIFIED_TTL_S = 60.0
 _failures: dict[str, list[float]] = {}
+# token -> HMAC da senha em curso (None se o header veio vazio).
+_pending: dict[str, dict[int, bytes | None]] = {}
+_pending_seq = 0
 _guard = threading.Lock()
+_waiters = threading.Condition(_guard)
 _verify_slots = threading.BoundedSemaphore(VERIFY_SLOTS)
 _cache_key = secrets.token_bytes(32)
 _verified_digest: bytes | None = None
@@ -64,9 +70,11 @@ def reset_attempts() -> None:
     global _verified_digest, _verified_until, _verified_for
     with _guard:
         _failures.clear()
+        _pending.clear()
         _verified_digest = None
         _verified_until = 0.0
         _verified_for = None
+        _waiters.notify_all()
 
 
 def set_attempt_limit(limit: int) -> None:
@@ -176,35 +184,111 @@ def _password_fingerprint(password: str) -> bytes:
     return hmac.new(_cache_key, password.encode("utf-8"), hashlib.sha256).digest()
 
 
-def _cached_password_ok(provided: str) -> bool:
+def _cache_hit_locked(provided: str) -> bool:
+    """True só se ``provided`` é a senha que o argon2 acabou de aceitar.
+
+    Header ausente ou vazio não entra. A chave é o HMAC dessa senha, não
+    um flag de "já passou alguém".
+    """
     if not provided:
         return False
     expected = os_hash()
-    if not expected:
+    if (
+        not expected
+        or _verified_digest is None
+        or _verified_for != expected
+        or time.monotonic() >= _verified_until
+    ):
         return False
     candidate = _password_fingerprint(provided)
+    return hmac.compare_digest(_verified_digest, candidate)
+
+
+def _cached_password_ok(provided: str) -> bool:
     with _guard:
-        if (
-            _verified_digest is None
-            or _verified_for != expected
-            or time.monotonic() >= _verified_until
-        ):
-            return False
-        return hmac.compare_digest(_verified_digest, candidate)
+        return _cache_hit_locked(provided)
 
 
-def _remember_verified(provided: str) -> None:
+def _remember_verified_locked(provided: str) -> None:
+    global _verified_digest, _verified_until, _verified_for
     if not provided:
         return
     expected = os_hash()
     if not expected:
         return
-    digest = _password_fingerprint(provided)
-    global _verified_digest, _verified_until, _verified_for
+    _verified_digest = _password_fingerprint(provided)
+    _verified_until = time.monotonic() + VERIFIED_TTL_S
+    _verified_for = expected
+
+
+def _used_locked(ip: str) -> int:
+    return len(_failures.get(ip, [])) + len(_pending.get(ip, {}))
+
+
+def _reserve_attempt(ip: str, fingerprint: bytes | None) -> int | None:
+    """Ocupa uma vaga (em curso + falhas). None se o limite já fechou."""
+    global _pending_seq
     with _guard:
-        _verified_digest = digest
-        _verified_until = time.monotonic() + VERIFIED_TTL_S
-        _verified_for = expected
+        _prune_locked(time.monotonic())
+        pending = _pending.get(ip, {})
+        if _used_locked(ip) >= _MAX_ATTEMPTS:
+            return None
+        _pending_seq += 1
+        token = _pending_seq
+        pending = dict(pending)
+        pending[token] = fingerprint
+        _pending[ip] = pending
+        return token
+
+
+def _drop_pending_locked(ip: str, token: int) -> None:
+    pending = _pending.get(ip)
+    if not pending or token not in pending:
+        return
+    pending = dict(pending)
+    pending.pop(token, None)
+    if pending:
+        _pending[ip] = pending
+    else:
+        _pending.pop(ip, None)
+
+
+def _release_reservation(ip: str, token: int) -> None:
+    with _guard:
+        _drop_pending_locked(ip, token)
+        _waiters.notify_all()
+
+
+def _commit_failure(ip: str, token: int) -> None:
+    with _guard:
+        _drop_pending_locked(ip, token)
+        current = time.monotonic()
+        _prune_locked(current)
+        recent = list(_failures.get(ip, []))
+        recent.append(current)
+        _failures[ip] = recent
+        _cap_locked()
+        _waiters.notify_all()
+
+
+def _inflight_locked(ip: str, fingerprint: bytes) -> bool:
+    return any(item == fingerprint for item in _pending.get(ip, {}).values())
+
+
+def _wait_for_same_password(ip: str, provided: str, deadline: float) -> bool:
+    """Espera a mesma senha terminar de conferir. Não chama o argon2."""
+    fingerprint = _password_fingerprint(provided)
+    with _guard:
+        while True:
+            if _cache_hit_locked(provided):
+                _failures.pop(ip, None)
+                return True
+            if not _inflight_locked(ip, fingerprint):
+                return False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            _waiters.wait(timeout=remaining)
 
 
 def check_editor_password(provided: str | None) -> None:
@@ -241,39 +325,60 @@ def require_editor_password(
 ) -> None:
     """Confere a senha antes de qualquer sessão MySQL da rota.
 
-    Senha errada é a única coisa que entra no 429. Sem vaga de argon2 a
-    reserva não fica: espera até ``SLOT_WAIT_S`` e, se o cache não
-    cobrir, responde 503.
+    A vaga (em curso + falhas) é reservada antes do argon2. Senha errada
+    converte a reserva em falha. Senha certa, ou 503 por falta de vaga
+    de argon2, devolve a reserva. O cache só aceita a mesma senha.
     """
     ip = client_key(request)
     given = x_editor_password if isinstance(x_editor_password, str) else ""
-    if too_many_attempts(ip):
-        raise HTTPException(status_code=429, detail=LOCKED_DETAIL)
-    if _cached_password_ok(given):
+    if given and _cached_password_ok(given):
         clear_failures(ip)
         return
-    deadline = time.monotonic() + SLOT_WAIT_S
-    while True:
-        if _cached_password_ok(given):
-            clear_failures(ip)
+    fingerprint = _password_fingerprint(given) if given else None
+    token = _reserve_attempt(ip, fingerprint)
+    if token is None:
+        if given and _wait_for_same_password(ip, given, time.monotonic() + SLOT_WAIT_S):
             return
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise _slot_busy()
-        if not _verify_slots.acquire(timeout=min(0.05, remaining)):
-            continue
-        try:
-            if _cached_password_ok(given):
+        raise HTTPException(status_code=429, detail=LOCKED_DETAIL)
+    try:
+        deadline = time.monotonic() + SLOT_WAIT_S
+        while True:
+            if given and _cached_password_ok(given):
+                _release_reservation(ip, token)
                 clear_failures(ip)
+                token = None
                 return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _release_reservation(ip, token)
+                token = None
+                raise _slot_busy()
+            if not _verify_slots.acquire(timeout=min(0.05, remaining)):
+                continue
             try:
-                check_editor_password(x_editor_password)
-            except HTTPException as exc:
-                if exc.status_code == 401:
-                    note_failure(ip)
-                raise
-            clear_failures(ip)
-            _remember_verified(given)
-            return
-        finally:
-            _verify_slots.release()
+                if given and _cached_password_ok(given):
+                    _release_reservation(ip, token)
+                    clear_failures(ip)
+                    token = None
+                    return
+                try:
+                    check_editor_password(x_editor_password)
+                except HTTPException as exc:
+                    if exc.status_code == 401:
+                        _commit_failure(ip, token)
+                    else:
+                        _release_reservation(ip, token)
+                    token = None
+                    raise
+                with _guard:
+                    _remember_verified_locked(given)
+                    _drop_pending_locked(ip, token)
+                    _failures.pop(ip, None)
+                    _waiters.notify_all()
+                token = None
+                return
+            finally:
+                _verify_slots.release()
+    finally:
+        if token is not None:
+            _release_reservation(ip, token)
