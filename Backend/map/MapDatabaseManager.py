@@ -344,7 +344,7 @@ class MapDatabaseManager:
             """
             SELECT id, distance_m, heading_rad, origin
             FROM edges
-            WHERE source_node = %s AND target_node = %s
+            WHERE source_node = %s AND target_node = %s AND dup_rank = 0
             FOR UPDATE
             """,
             (source, target),
@@ -390,7 +390,7 @@ class MapDatabaseManager:
         # Cada linha já é um sentido. Não criar a volta aqui: isso duplicaria a aresta.
         sql_edges = (
             "SELECT id, source_node, target_node, distance_m, heading_rad "
-            "FROM edges ORDER BY id"
+            "FROM edges WHERE dup_rank = 0 ORDER BY id"
         )
         rows_edges = self.db.execute_search(sql_edges)
         if rows_edges is None:
@@ -743,7 +743,7 @@ class MapDatabaseManager:
             """
             SELECT id, distance_m, heading_rad, origin
             FROM edges
-            WHERE source_node = %s AND target_node = %s
+            WHERE source_node = %s AND target_node = %s AND dup_rank = 0
             """,
             (source, target),
         )
@@ -830,6 +830,7 @@ class MapDatabaseManager:
             SELECT id, source_node, target_node, distance_m, heading_rad,
                    origin, active_trace_id, samples_count
             FROM edges
+            WHERE dup_rank = 0
             ORDER BY id
             """
         )
@@ -881,7 +882,7 @@ class MapDatabaseManager:
         reverse = self.db.execute_search(
             """
             SELECT id FROM edges
-            WHERE source_node = %s AND target_node = %s
+            WHERE source_node = %s AND target_node = %s AND dup_rank = 0
             ORDER BY id
             """,
             (row["target_node"], row["source_node"]),

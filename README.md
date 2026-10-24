@@ -151,7 +151,7 @@ uvicorn api.app:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
 
 > **Status de Sucesso:** API pronta em `[http://127.0.0.1:8000](http://127.0.0.1:8000)` e Swagger em `[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)`.
 
-`python -m datasets.create_tables` também aplica a migração idempotente `datasets/migrations/002_walk_traces.py` (dedupe de `edges`, trajetória e planta). Se `edges_backup_m02` já existe, ela não é recriada. `GET /api/map-config` responde **500** com a mensagem pedindo essa migração quando a tabela ainda não existe.
+`python -m datasets.create_tables` cria o schema de `DB_NAME` se ele não existir (`CREATE DATABASE IF NOT EXISTS`, utf8mb4) e aplica as migrações. Não apaga tabela nem linha. Ver a seção **Aplicar o banco** abaixo. `GET /api/map-config` responde **500** com a mensagem pedindo essa migração quando a tabela ainda não existe.
 
 ### Senha do editor do mapa
 
@@ -173,11 +173,37 @@ Leituras públicas, entre elas `GET /api/health`, `GET /api/map`, `GET /api/map-
 
 A API de produção é `https://api.pov-unimar.com`. Com `POV_ENV=production`, o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem `POV_ENV`, o padrão é desenvolvimento: `localhost` e `127.0.0.1` nas portas do uvicorn (8000), do Live Server (5500) e da 3000. `CORS_ORIGINS` (vírgulas) substitui essa lista. A resposta não manda `Access-Control-Allow-Credentials`. Os registros DNS estão em `docs/dns.md`.
 
-O MySQL continua o do XAMPP. `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD` têm padrão `localhost`, `3306`, `POV`, `root` e senha vazia. `localhost` na conexão vira `127.0.0.1`.
+O MySQL continua o do XAMPP. `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD` têm padrão `localhost`, `3306`, `POV`, `root` e senha vazia. `localhost` na conexão vira `127.0.0.1`. O nome do schema é exatamente `POV`: no Linux, `pov` é outro banco. A API com `DB_NAME=POV` responde `1049 Unknown database` enquanto esse schema não foi criado.
+
+### Aplicar o banco
+
+Na raiz do repositório, com o `.env` apontando para o servidor (ou os padrões do XAMPP). Quem cria o schema precisa poder `CREATE DATABASE`. No XAMPP isso é o `root` com senha vazia. A API em si pode usar o usuário `pov`.
+
+```bash
+cd Backend
+# opcional, se o root não for o padrão:
+# export DB_ADMIN_USER=root
+# export DB_ADMIN_PASSWORD=
+# export DB_POV_PASSWORD='senha-do-pov'   # só se a conta pov ainda não existe
+python -m datasets.create_tables
+python others/seed_map.py
+```
+
+O que isso faz, e o que não faz:
+
+- `CREATE DATABASE IF NOT EXISTS POV` com `utf8mb4` / `utf8mb4_unicode_ci`. Schema que já existe não é recriado nem esvaziado.
+- `GRANT` de `POV.*` para `pov@localhost` e `pov@127.0.0.1` (a API liga em `127.0.0.1`). Conta que já existe não troca de senha. Sem `DB_POV_PASSWORD` (e sem `DB_USER=pov`), a conta nova não é criada; o GRANT avisa e segue.
+- Tabelas com `CREATE TABLE IF NOT EXISTS`. Coluna e índice novos só entram depois de olhar o `information_schema`.
+- Migração 002 não dá `DELETE` em `edges`. Cópias do mesmo sentido (inclusive `Sala` e `sala`, que o unique trata como iguais) ficam na tabela: a de maior `id` permanece com `dup_rank` 0 e as outras ganham 1, 2, … O mapa e o upsert usam só `dup_rank` 0.
+- Rode `create_tables` antes de subir esta versão da API. A leitura filtra `dup_rank`. A coluna nasce na migração, com default 0. Sem ela o SELECT do mapa falha; com ela, a linha antiga continua no mapa.
+- Seed (`others/seed_map.py`) usa o mesmo `DB_NAME`. `INSERT ... ON DUPLICATE KEY UPDATE` não muda checkpoint nem distância que já existam.
+- Rodar o comando de novo é seguro. Não há `DROP`, `TRUNCATE` nem `DELETE` de dado de mapa.
+
+`pov_save_repro` e qualquer outro schema que não seja o `DB_NAME` ficam intocados. Se o mapa real estiver num nome diferente de `POV`, ajuste `DB_NAME` para esse nome antes de rodar. Não copie à mão e não apague o antigo.
 
 ### Mapa, arestas e trajetória
 
-- `edges` é a única fonte do grafo: uma linha por sentido (`UNIQUE (source_node, target_node)`). `saved_routes` é histórico e não entra no mapa.
+- `edges` é a única fonte do grafo: uma linha canônica por sentido (`dup_rank` 0; o unique é `(source_node, target_node)` ou, se já havia cópia, `(source_node, target_node, dup_rank)`). `saved_routes` é histórico e não entra no mapa.
 - `origin` no banco e na API é `manual` ou `recorded` (o exemplo do contrato do front usa a palavra `recording`; o valor gravado é `recorded`).
 - Aresta antiga: ao criar a coluna, `origin='recorded'` se existir qualquer `sensors_log` do par source/target, mesmo com `is_valid=0` (logs antigos não preenchiam o campo). Sem log, fica `manual`. A classificação não roda de novo. `is_valid` vale só para gravações novas: mediana, `samples_count` e `active_trace_id`.
 - `origin='manual'` conserva distância e heading. Sem manual, a distância é a mediana das `walk_traces` válidas daquele sentido e o heading é a média circular. `active_trace_id` aponta a válida mais recente. `samples_count` é quantas trajetórias válidas aquele sentido tem, e sobe mesmo quando a distância manual permanece.

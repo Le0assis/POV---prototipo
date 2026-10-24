@@ -1,12 +1,18 @@
 """Migração idempotente 002: aresta única por sentido e trajetória da gravação.
 
 Não há ferramenta de migração no projeto. ``create_tables`` chama ``apply``.
-Rodar de novo não recria o snapshot nem apaga aresta que já é única.
+Rodar de novo não recria o snapshot nem mexe em aresta que já é única.
 
 Causa dos duplicados (confirmada no código, não em saved_routes):
 ``edges`` não tinha UNIQUE (source_node, target_node); ``save_edge`` só
 insería e gravava os dois sentidos; ``load_map_into_system`` chamava
 ``connect_checkpoints``, que espelhava cada linha de novo.
+
+O unique usa a collation da coluna. ``Sala`` e ``sala`` são a mesma chave
+em utf8mb4_unicode_ci e o Python não via. O ALTER caía em 1062 depois de
+já ter apagado as cópias exatas. Agora nenhuma linha sai de ``edges``:
+a de maior id do grupo (a comparação é a do banco) fica com ``dup_rank`` 0
+e as outras recebem 1, 2, ... O unique inclui ``dup_rank`` quando há extra.
 
 ``sensors_log_id ON DELETE CASCADE`` é intencional: a trajetória é derivada
 do log bruto. ``source_node``/``target_node`` copiam o tipo exato de
@@ -25,8 +31,6 @@ classificação.
 from __future__ import annotations
 
 import re
-
-from map.edge_rules import split_duplicate_edges
 
 _VARCHAR = re.compile(r"^varchar\(\d+\)$", re.IGNORECASE)
 _IDENT = re.compile(r"^[A-Za-z0-9_]+$")
@@ -58,6 +62,28 @@ SQL_SELECT_EDGES = (
     "SELECT id, source_node, target_node, distance_m, heading_rad "
     "FROM edges ORDER BY id"
 )
+SQL_ENGINE = (
+    "SELECT ENGINE AS engine FROM information_schema.tables "
+    "WHERE table_schema = DATABASE() AND table_name = 'sensors_log'"
+)
+SQL_DUP_GROUPS = (
+    "SELECT e.id AS id, e.source_node AS source_node, e.target_node AS target_node, "
+    "k.keep_id AS keep_id "
+    "FROM edges e "
+    "JOIN ("
+    "SELECT source_node, target_node, MAX(id) AS keep_id "
+    "FROM edges GROUP BY source_node, target_node HAVING COUNT(*) > 1"
+    ") k ON k.source_node = e.source_node AND k.target_node = e.target_node "
+    "ORDER BY k.keep_id, e.id"
+)
+SQL_SET_RANK = "UPDATE edges SET dup_rank = %s WHERE id = %s AND dup_rank = 0"
+SQL_UNIQUE_PAIR = (
+    "ALTER TABLE edges ADD UNIQUE KEY uq_edges_direction (source_node, target_node)"
+)
+SQL_UNIQUE_RANKED = (
+    "ALTER TABLE edges ADD UNIQUE KEY uq_edges_direction "
+    "(source_node, target_node, dup_rank)"
+)
 SQL_BACKUP = "CREATE TABLE edges_backup_m02 AS SELECT * FROM edges"
 SQL_INNODB = "ALTER TABLE sensors_log ENGINE=InnoDB"
 SQL_MAP_EXISTS_ROW = "SELECT id FROM map_config WHERE id = 1"
@@ -72,7 +98,7 @@ CREATE TABLE IF NOT EXISTS map_config (
     px_per_m DOUBLE NULL,
     rotation_rad DOUBLE NOT NULL DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci
 """
 # origin='recorded' se existir qualquer sensors_log do par, válido ou não.
 # Logs antigos ficaram com is_valid=0 porque o campo não era preenchido.
@@ -150,7 +176,7 @@ def walk_traces_sql(node_sql: str) -> str:
             FOREIGN KEY (target_node) REFERENCES checkpoints(name) ON DELETE CASCADE,
         INDEX idx_trace_pair (source_node, target_node),
         INDEX idx_trace_edge (edge_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci
     """
 
 
@@ -168,7 +194,7 @@ def walk_steps_sql() -> str:
         UNIQUE KEY uq_trace_step (trace_id, step_index),
         CONSTRAINT fk_walk_steps_trace
             FOREIGN KEY (trace_id) REFERENCES walk_traces(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci
     """
 
 
@@ -187,42 +213,64 @@ def _add_column(db, table: str, column: str, definition: str) -> bool:
 
 
 def backup_edges_once(db) -> None:
-    """Snapshot anterior ao dedupe. Tabela já existente conta como confirmada."""
+    """Snapshot anterior ao dup_rank. Tabela já existente conta como confirmada."""
     if _table_exists(db, "edges_backup_m02"):
         print("[M02] edges_backup_m02 já existe; snapshot original preservado.")
         return
     _exec(db, SQL_BACKUP)
     if not _table_exists(db, "edges_backup_m02"):
         raise RuntimeError(
-            "edges_backup_m02 não foi confirmada após o CREATE. Dedupe abortado."
+            "edges_backup_m02 não foi confirmada após o CREATE. Ajuste abortado."
         )
-    print("[M02] Snapshot edges_backup_m02 criado antes do dedupe.")
+    print("[M02] Snapshot edges_backup_m02 criado. Nenhuma aresta é apagada.")
 
 
-def dedupe_edges(db) -> list[dict]:
-    rows = _fetch(db, SQL_SELECT_EDGES)
-    _kept, removed = split_duplicate_edges(rows)
-    for row in removed:
-        print(
-            "[M02] removida edges "
-            f"id={row['id']} {row['source_node']}->{row['target_node']} "
-            f"distance_m={row['distance_m']} heading_rad={row['heading_rad']} "
-            "(mantido o maior id do sentido)"
-        )
-    if removed:
-        ids = tuple(int(row["id"]) for row in removed)
-        placeholders = ", ".join(["%s"] * len(ids))
-        _exec(db, f"DELETE FROM edges WHERE id IN ({placeholders})", ids)
-    return removed
+def preserve_duplicate_edges(db) -> list[dict]:
+    """Numera cópias do mesmo sentido. Não apaga linha.
+
+    O grupo é o do banco (collation), não o do Python. A de maior id fica
+    com dup_rank 0, que é a linha do mapa e do upsert.
+    """
+    _add_column(db, "edges", "dup_rank", "dup_rank INT NOT NULL DEFAULT 0")
+    if _fetch(db, SQL_UNIQUE_EXISTS):
+        return []
+    grouped = _fetch(db, SQL_DUP_GROUPS)
+    by_keep: dict[int, list[dict]] = {}
+    for row in grouped:
+        by_keep.setdefault(int(row["keep_id"]), []).append(row)
+    preserved: list[dict] = []
+    for keep_id, group in by_keep.items():
+        rank = 1
+        for row in sorted(group, key=lambda item: int(item["id"])):
+            if int(row["id"]) == keep_id:
+                continue
+            _exec(db, SQL_SET_RANK, (rank, int(row["id"])))
+            print(
+                "[M02] edges "
+                f"id={row['id']} {row['source_node']}->{row['target_node']} "
+                f"permanece com dup_rank={rank} (canônica id={keep_id})"
+            )
+            preserved.append(row)
+            rank += 1
+    if grouped:
+        _exec(db, SQL_UNIQUE_RANKED)
+    else:
+        _exec(db, SQL_UNIQUE_PAIR)
+    return preserved
 
 
 def apply(db) -> list[dict]:
-    """Aplica a migração. Devolve as linhas de ``edges`` apagadas nesta execução.
+    """Aplica a migração. Devolve as arestas extras numeradas nesta execução.
 
-    Qualquer DDL que não confirme aborta. O dedupe só roda com
-    ``edges_backup_m02`` já existente (criada agora ou numa execução anterior).
+    Nenhuma linha de ``edges`` é apagada. Qualquer DDL que não confirme aborta.
+    O ajuste só roda com ``edges_backup_m02`` já existente.
     """
-    _exec(db, SQL_INNODB)
+    engine_rows = _fetch(db, SQL_ENGINE)
+    if not engine_rows:
+        raise RuntimeError("sensors_log não existe. Crie a tabela antes da migração 002.")
+    engine = next(iter(engine_rows[0].values()))
+    if str(engine).lower() != "innodb":
+        _exec(db, SQL_INNODB)
     backup_edges_once(db)
 
     _add_column(db, "checkpoints", "pos_x_px", "pos_x_px DOUBLE NULL")
@@ -253,13 +301,7 @@ def apply(db) -> list[dict]:
         "samples_count INT NOT NULL DEFAULT 0",
     )
 
-    removed = dedupe_edges(db)
-
-    if not _fetch(db, SQL_UNIQUE_EXISTS):
-        _exec(
-            db,
-            "ALTER TABLE edges ADD UNIQUE KEY uq_edges_direction (source_node, target_node)",
-        )
+    preserved = preserve_duplicate_edges(db)
 
     meta_rows = _fetch(db, SQL_COLUMN_META)
     if not meta_rows:
@@ -286,4 +328,4 @@ def apply(db) -> list[dict]:
     if not _fetch(db, SQL_MAP_EXISTS_ROW):
         _exec(db, SQL_MAP_INSERT)
 
-    return removed
+    return preserved

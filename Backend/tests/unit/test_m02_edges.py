@@ -158,6 +158,27 @@ class _MigrationDB:
             return [{"ok": 1}] if self.fk else []
         if sql == module.SQL_SELECT_EDGES:
             return [dict(row) for row in self.edges]
+        if sql == module.SQL_ENGINE:
+            if "sensors_log" not in self.tables:
+                return []
+            return [{"engine": "InnoDB"}]
+        if sql == module.SQL_DUP_GROUPS:
+            grouped: dict[tuple, list] = {}
+            for row in self.edges:
+                grouped.setdefault((row["source_node"], row["target_node"]), []).append(row)
+            found = []
+            for group in grouped.values():
+                if len(group) < 2:
+                    continue
+                keep_id = max(int(item["id"]) for item in group)
+                for item in group:
+                    found.append({
+                        "id": item["id"],
+                        "source_node": item["source_node"],
+                        "target_node": item["target_node"],
+                        "keep_id": keep_id,
+                    })
+            return found
         if sql == module.SQL_MAP_EXISTS_ROW:
             return [{"id": 1}] if self.map_row else []
         return []
@@ -172,9 +193,12 @@ class _MigrationDB:
         if sql == module.SQL_BACKUP:
             self.backup = [dict(row) for row in self.edges]
             self.tables.add("edges_backup_m02")
-        if sql.startswith("DELETE FROM edges"):
-            dropped = set(params)
-            self.edges = [row for row in self.edges if row["id"] not in dropped]
+        if sql == module.SQL_SET_RANK:
+            rank, edge_id = params
+            for row in self.edges:
+                if row["id"] == edge_id and int(row.get("dup_rank") or 0) == 0:
+                    row["dup_rank"] = rank
+            return True
         if "ADD COLUMN" in sql:
             if "pos_x_px" in sql:
                 self.columns.add(("checkpoints", "pos_x_px"))
@@ -188,6 +212,10 @@ class _MigrationDB:
                 self.columns.add(("edges", "active_trace_id"))
             if "samples_count" in sql:
                 self.columns.add(("edges", "samples_count"))
+            if "dup_rank" in sql:
+                self.columns.add(("edges", "dup_rank"))
+                for row in self.edges:
+                    row.setdefault("dup_rank", 0)
         if "uq_edges_direction" in sql:
             self.unique = True
         if "walk_traces" in sql and "CREATE TABLE" in sql:
@@ -203,16 +231,19 @@ class _MigrationDB:
         return True
 
 
-def test_migration_backs_up_then_dedupes_and_is_idempotent():
+def test_migration_backs_up_then_keeps_duplicates_and_is_idempotent():
     module = _migration()
     db = _MigrationDB()
-    removed = module.apply(db)
-    assert [row["id"] for row in removed] == [1, 2]
+    preserved = module.apply(db)
+    assert [row["id"] for row in preserved] == [1, 2]
+    assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert db.backup is not None and [row["id"] for row in db.backup] == [1, 2, 3, 4]
-    assert [row["id"] for row in db.edges] == [3, 4]
+    by_id = {row["id"]: int(row.get("dup_rank") or 0) for row in db.edges}
+    assert by_id == {1: 1, 2: 1, 3: 0, 4: 0}
     creates = [sql for sql, _params in db.statements if sql == module.SQL_BACKUP]
-    deletes = [sql for sql, _params in db.statements if sql.startswith("DELETE FROM edges")]
-    assert len(creates) == 1 and len(deletes) == 1
+    deletes = [sql for sql, _params in db.statements if sql.startswith("DELETE FROM")]
+    assert len(creates) == 1 and deletes == []
+    assert module.SQL_UNIQUE_RANKED in [sql for sql, _params in db.statements]
     walk_sql = next(sql for sql, _params in db.statements if "CREATE TABLE IF NOT EXISTS walk_traces" in sql)
     assert "varchar(100)" in walk_sql
     assert "sensors_log_id) REFERENCES sensors_log(id) ON DELETE CASCADE" in walk_sql
@@ -226,12 +257,12 @@ def test_migration_backs_up_then_dedupes_and_is_idempotent():
 
     module.apply(db)
     creates = [sql for sql, _params in db.statements if sql == module.SQL_BACKUP]
-    deletes = [sql for sql, _params in db.statements if sql.startswith("DELETE FROM edges")]
+    ranks = [sql for sql, _params in db.statements if sql == module.SQL_SET_RANK]
     classify = [sql for sql, _params in db.statements if sql == module.SQL_CLASSIFY_RECORDED]
     assert len(creates) == 1
-    assert len(deletes) == 1
+    assert len(ranks) == 2
     assert classify == [module.SQL_CLASSIFY_RECORDED]
-    assert [row["id"] for row in db.edges] == [3, 4]
+    assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
 
 
 def test_migration_aborts_when_backup_fails_and_does_not_dedupe():
@@ -240,7 +271,7 @@ def test_migration_aborts_when_backup_fails_and_does_not_dedupe():
     db.fail_exact.add(module.SQL_BACKUP)
     with pytest.raises(RuntimeError):
         module.apply(db)
-    assert not any(sql.startswith("DELETE FROM edges") for sql, _params in db.statements)
+    assert not any(sql == module.SQL_SET_RANK for sql, _params in db.statements)
     assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert "edges_backup_m02" not in db.tables
 
@@ -251,7 +282,7 @@ def test_migration_aborts_when_backup_is_not_confirmed():
     db.hide_backup = True
     with pytest.raises(RuntimeError):
         module.apply(db)
-    assert not any(sql.startswith("DELETE FROM edges") for sql, _params in db.statements)
+    assert not any(sql == module.SQL_SET_RANK for sql, _params in db.statements)
     assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
 
 
@@ -261,17 +292,18 @@ def test_migration_aborts_when_column_add_fails_before_dedupe():
     db.fail_parts = ("origin ENUM",)
     with pytest.raises(RuntimeError):
         module.apply(db)
-    assert not any(sql.startswith("DELETE FROM edges") for sql, _params in db.statements)
+    assert not any(sql == module.SQL_SET_RANK for sql, _params in db.statements)
     assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert "edges_backup_m02" in db.tables
 
 
-def test_existing_backup_is_enough_to_dedupe():
+def test_existing_backup_is_enough_to_rank_duplicates():
     module = _migration()
     db = _MigrationDB()
     db.tables.add("edges_backup_m02")
-    removed = module.apply(db)
-    assert [row["id"] for row in removed] == [1, 2]
+    preserved = module.apply(db)
+    assert [row["id"] for row in preserved] == [1, 2]
+    assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert module.SQL_BACKUP not in [sql for sql, _params in db.statements]
 
 
