@@ -144,8 +144,18 @@ export function createRouteLayer(floor) {
 
     if (floor.map && typeof floor.map.on === 'function') floor.map.on('zoomend', applyWeight);
     if (typeof window !== 'undefined') window.addEventListener('pov-theme', applyWeight);
+
+    function destroy() {
+        if (floor.map && typeof floor.map.off === 'function') floor.map.off('zoomend', applyWeight);
+        if (typeof window !== 'undefined') window.removeEventListener('pov-theme', applyWeight);
+        clear();
+        if (floor.map && typeof floor.map.hasLayer === 'function' && floor.map.hasLayer(group)) {
+            floor.map.removeLayer(group);
+        }
+    }
+
     setVisible(visible);
-    return { show, clear, fit, setProgress, setVisible };
+    return { show, clear, fit, setProgress, setVisible, destroy };
 }
 
 function addOrigin(floor, group, checkpoint) {

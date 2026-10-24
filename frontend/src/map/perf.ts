@@ -34,16 +34,19 @@ export function attachPerf(map) {
         requestAnimationFrame(tick);
     }
 
-    map.on('zoom move', () => {
+    const onActivity = () => {
         const started = performance.now();
         requestAnimationFrame(() => {
             renderMs = performance.now() - started;
         });
-    });
-    requestAnimationFrame(tick);
+    };
+    map.on('zoom move', onActivity);
+    const rafId = requestAnimationFrame(tick);
     return {
         stop() {
             running = false;
+            if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
+            if (typeof map.off === 'function') map.off('zoom move', onActivity);
             label.remove();
         }
     };

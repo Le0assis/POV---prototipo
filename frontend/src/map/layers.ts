@@ -36,6 +36,7 @@ export function renderFloorLayers(floor, model, { editable = false, onMove, show
         if (floor._styleModel) renderFloorLayers(floor, floor._styleModel, floor._styleOptions || {});
     };
     floor.syncLabels = () => syncLabels(floor);
+    floor.applyZoomStyle = () => applyLineWeights(floor);
     syncLines(floor, index, model);
     syncPoints(floor, index, model, { editable, onMove });
     syncLabels(floor);
@@ -48,14 +49,14 @@ function syncLines(floor, index, model) {
     (model.polylines || []).forEach((poly, order) => {
         const key = poly.id != null ? `id:${poly.id}` : `pair:${poly.source}->${poly.target}:${order}`;
         seen.add(key);
-        const points = simplifyPath(poly.points, tolerance);
-        const latlngs = points.map((point) => floor.pixelToLatLng(point.x, point.y));
+        const geom = geometryKey(poly.points, tolerance);
         const zoom = floor.map && typeof floor.map.getZoom === 'function' ? floor.map.getZoom() : 0;
         const layers = floor.layers || defaultLayerVisibility();
         const shown = poly.recorded ? layers.recorded !== false : layers.manual !== false;
         const style = { ...(poly.recorded ? recordedStyle(zoom) : manualStyle(zoom)), smoothFactor: 1.5 };
         let line = index.lines.get(key);
         if (!line) {
+            const latlngs = simplifiedLatLngs(floor, poly.points, tolerance);
             line = L.polyline(latlngs, {
                 ...style,
                 interactive: true,
@@ -64,11 +65,16 @@ function syncLines(floor, index, model) {
             line.on('click', () => {
                 line.bindPopup(connectionPopup(line.connection)).openPopup();
             });
+            line._povGeomKey = geom;
             index.lines.set(key, line);
         } else {
-            line.setLatLngs(latlngs);
+            if (line._povGeomKey !== geom) {
+                line.setLatLngs(simplifiedLatLngs(floor, poly.points, tolerance));
+                line._povGeomKey = geom;
+            }
             line.setStyle(style);
         }
+        line._povRecorded = Boolean(poly.recorded);
         line.connection = poly.connection;
         syncManualLabel(line, poly, showManual);
         if (shown) {
@@ -79,9 +85,38 @@ function syncLines(floor, index, model) {
     });
     index.lines.forEach((line, key) => {
         if (seen.has(key)) return;
+        if (typeof line.off === 'function') line.off();
         floor.connections.removeLayer(line);
         index.lines.delete(key);
     });
+}
+
+function simplifiedLatLngs(floor, points, tolerance) {
+    return simplifyPath(points, tolerance).map((point) => floor.pixelToLatLng(point.x, point.y));
+}
+
+function geometryKey(points, tolerance) {
+    const list = Array.isArray(points) ? points : [];
+    let acc = list.length;
+    const step = Math.max(1, Math.floor(list.length / 8));
+    for (let i = 0; i < list.length; i += step) {
+        const point = list[i] || {};
+        acc = (Math.imul(acc, 33) + Math.round(Number(point.x) || 0) + Math.imul(Math.round(Number(point.y) || 0), 131)) | 0;
+    }
+    const last = list.length ? list[list.length - 1] : null;
+    if (last) acc = (Math.imul(acc, 33) + Math.round(Number(last.x) || 0) + Math.imul(Math.round(Number(last.y) || 0), 17)) | 0;
+    return `${tolerance}:${list.length}:${acc}`;
+}
+
+function applyLineWeights(floor) {
+    const index = floor.layerIndex;
+    if (!index) return;
+    const zoom = floor.map && typeof floor.map.getZoom === 'function' ? floor.map.getZoom() : 0;
+    index.lines.forEach((line) => {
+        const style = line._povRecorded ? recordedStyle(zoom) : manualStyle(zoom);
+        if (typeof line.setStyle === 'function') line.setStyle({ ...style, smoothFactor: 1.5 });
+    });
+    syncLabels(floor);
 }
 
 function syncPoints(floor, index, model, { editable, onMove }) {
@@ -202,7 +237,8 @@ function dragHost(container, map) {
         track(marker, floor, name, onMove) {
             markers.set(marker, { floor, name, onMove });
             marker._povDragOff = () => markers.delete(marker);
-        }
+        },
+        destroy() {}
     };
 
     function pointOf(event) {
@@ -316,10 +352,22 @@ function dragHost(container, map) {
             });
     }
 
+    function onUp(event) { finish(event, false); }
+    function onCancel(event) { finish(event, true); }
+
     container.addEventListener('pointerdown', onDown, true);
     container.addEventListener('pointermove', onMove, true);
-    container.addEventListener('pointerup', (event) => finish(event, false), true);
-    container.addEventListener('pointercancel', (event) => finish(event, true), true);
+    container.addEventListener('pointerup', onUp, true);
+    container.addEventListener('pointercancel', onCancel, true);
+    host.destroy = () => {
+        container.removeEventListener('pointerdown', onDown, true);
+        container.removeEventListener('pointermove', onMove, true);
+        container.removeEventListener('pointerup', onUp, true);
+        container.removeEventListener('pointercancel', onCancel, true);
+        markers.clear();
+        active = null;
+        if (container._povNodeDrag === host) delete container._povNodeDrag;
+    };
     container._povNodeDrag = host;
     return host;
 }

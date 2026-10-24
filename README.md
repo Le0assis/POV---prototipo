@@ -339,7 +339,11 @@ npm test
 
 ## 10. Frontend — fase 4
 
-O visitante e o admin compilam com Vite a partir de `frontend/src` (TypeScript). Preact e `@preact/signals` desenham o estado do visitante; o Leaflet continua no script `frontend/vendor/leaflet` e entra pelo `MapController`, fora da árvore do Preact. A URL da API vem de `VITE_API_BASE_URL` (`frontend/.env.development` e `frontend/.env.production`). Sem a variável, o build de produção usa `https://api.pov-unimar.com`.
+O visitante e o admin compilam com Vite a partir de `frontend/src` (TypeScript). Preact e `@preact/signals` desenham o estado do visitante; o Leaflet continua no script `frontend/vendor/leaflet` e entra pelo `MapController`, fora da árvore do Preact.
+
+A URL da API é uma só, em `frontend/src/core/config.ts`. O Vite lê `VITE_API_URL`. Se ela faltar, vale `VITE_API_BASE_URL` (o workflow do Pages define as duas como `https://api.pov-unimar.com`). Sem as duas, o build de produção usa `https://api.pov-unimar.com` e o `npm run dev` usa `http://127.0.0.1:8000`. Os arquivos versionados são `frontend/.env.development` e `frontend/.env.production`. Um override local fica em `frontend/.env.local` (não entra no git). O exemplo está no `.env.example` da raiz.
+
+`/api/localize`, `/api/current_location` e `/api/reset` não fazem parte do aplicativo. O corpo desses pedidos de teste está só em `frontend/tests/fixtures/server-location.js`. `VITE_ENABLE_TEST_ROUTES=1` não liga essas chamadas no build de produção: a flag em `testRoutesEnabled` exige desenvolvimento e exige que não seja produção. O bundle de `npm run build` não contém esses caminhos.
 
 ```bash
 npm run typecheck

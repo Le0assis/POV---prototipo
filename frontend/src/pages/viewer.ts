@@ -7,6 +7,7 @@ import { $ } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels } from '../map/layers.js';
+import { floorNotice, mountMapStatus } from '../map/map-status.js';
 import { loadFloorModel } from './floor-model.js';
 
 if (typeof document !== 'undefined') {
@@ -29,16 +30,42 @@ export function viewerNote(model) {
 
 async function init() {
     insertTopNav('viewer');
-    const floor = createFloorMap($('#floor-map'));
-    const model = await loadFloorModel({ toast });
-    if (model.config && model.config.plan_image) {
-        try {
-            await floor.setPlan(resolvePlanImage(model.config.plan_image));
-        } catch (err) {
-            toast(err.message || 'Planta indisponível.', 'warn');
-        }
+    const host = $('#floor-map');
+    const status = mountMapStatus(host);
+    let floor;
+    try {
+        floor = createFloorMap(host);
+    } catch (err) {
+        status.show(err && err.message ? err.message : 'Não foi possível abrir o mapa.', {
+            error: true,
+            host
+        });
+        return;
     }
-    renderFloorLayers(floor, model, { editable: false, showManual: true });
-    floor.fitToContent(contentPixels(model));
-    $('#viewer-note').textContent = viewerNote(model);
+    await showModel();
+
+    async function showModel() {
+        status.show('Carregando o mapa…', { busy: true, host });
+        const model = await loadFloorModel({ toast: () => {} });
+        let planError = '';
+        if (model.config && model.config.plan_image) {
+            try {
+                await floor.setPlan(resolvePlanImage(model.config.plan_image));
+            } catch (err) {
+                planError = err && err.message ? err.message : 'Não foi possível carregar a planta.';
+            }
+        } else if (typeof floor.clearPlan === 'function') {
+            floor.clearPlan();
+        }
+        renderFloorLayers(floor, model, { editable: false, showManual: true });
+        floor.fitToContent(contentPixels(model));
+        const notice = floorNotice(model, planError);
+        status.show(notice.message, {
+            error: notice.error,
+            host,
+            onRetry: notice.retry ? () => { void showModel(); } : null
+        });
+        const note = $('#viewer-note');
+        if (note) note.textContent = viewerNote(model);
+    }
 }

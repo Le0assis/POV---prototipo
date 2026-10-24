@@ -13,7 +13,7 @@ export const DEFAULT_A11Y = Object.freeze({
 });
 
 export function emptyA11yPrefs() {
-    return { hc: false, fontLg: false, speech: false, dark: false };
+    return { ...DEFAULT_A11Y };
 }
 
 export function readA11yPrefs(storage = undefined) {

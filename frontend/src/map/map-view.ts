@@ -6,22 +6,36 @@
 import { adaptCheckpoints } from '../core/checkpoints.js';
 import { createFloorMap, resolvePlanImage } from './floor-map.js';
 import { checkpointStyle, contentPixels, createBlueDot, renderFloorLayers } from './layers.js';
+import { floorNotice, mountMapStatus } from './map-status.js';
 import { chromePadding, createRouteLayer } from './route-layer.js';
 import { loadFloorModel } from '../pages/floor-model.js';
 
 export async function mountMapView(element) {
-    const floor = createFloorMap(element);
+    if (element && element._povMapView && typeof element._povMapView.destroy === 'function') {
+        element._povMapView.destroy();
+    }
+    const frame = element.parentElement && element.parentElement.classList.contains('visitor-map')
+        ? element.parentElement
+        : element;
+    const status = mountMapStatus(frame);
+    let floor;
+    try {
+        floor = createFloorMap(element);
+    } catch (err) {
+        status.show(err && err.message ? err.message : 'Não foi possível abrir o mapa.', {
+            error: true,
+            host: element
+        });
+        throw err;
+    }
     const map = floor.map;
-    if (map.zoomControl) map.zoomControl.remove();
+    if (map.zoomControl && typeof map.zoomControl.setPosition === 'function') {
+        map.zoomControl.setPosition('bottomleft');
+    }
     if (map.attributionControl) map.attributionControl.remove();
     if (typeof map.touchRotate !== 'undefined' && map.touchRotate) map.touchRotate.disable();
     if (typeof map.rotate !== 'undefined' && map.rotate) map.rotate.disable();
     if (typeof map.setBearing === 'function') map.setBearing(0);
-
-    const status = document.createElement('p');
-    status.className = 'map-status';
-    status.setAttribute('role', 'status');
-    status.hidden = true;
 
     const recenter = document.createElement('button');
     recenter.type = 'button';
@@ -29,23 +43,72 @@ export async function mountMapView(element) {
     recenter.textContent = 'Recentralizar';
     recenter.setAttribute('aria-label', 'Recentralizar');
 
-    const frame = element.parentElement && element.parentElement.classList.contains('visitor-map')
-        ? element.parentElement
-        : element;
-    frame.append(status, recenter);
+    frame.append(recenter);
 
-    let model = {
+    const model = {
         checkpoints: [],
         polylines: [],
-        config: null
+        config: null,
+        connections: [],
+        problems: [],
+        byName: null,
+        missingAnchor: []
     };
+    let destroyed = false;
+    let loadGen = 0;
+    let view = null;
 
-    function showStatus(message) {
-        status.hidden = !message;
-        status.textContent = message || '';
+    function scaleOf() {
+        const scale = model.config && Number(model.config.px_per_m);
+        return Number.isFinite(scale) ? scale : null;
     }
 
-    recenter.addEventListener('click', () => {
+    function adopt(next) {
+        model.checkpoints = adaptCheckpoints(next && next.checkpoints);
+        model.polylines = (next && next.polylines) || [];
+        model.config = (next && next.config) || null;
+        model.connections = (next && next.connections) || [];
+        model.byName = next && next.byName;
+        model.missingAnchor = next && next.missingAnchor;
+        model.problems = (next && next.problems) || [];
+        if (view) view.pxPerM = scaleOf();
+    }
+
+    function paintNotice(planError) {
+        if (destroyed) return;
+        const notice = floorNotice(model, planError);
+        status.show(notice.message, {
+            error: notice.error,
+            host: element,
+            onRetry: notice.retry ? () => { void loadMap(); } : null
+        });
+    }
+
+    async function loadMap() {
+        const gen = ++loadGen;
+        status.show('Carregando o mapa…', { busy: true, host: element });
+        const next = await loadFloorModel({ toast: () => {} });
+        if (destroyed || gen !== loadGen) return null;
+        adopt(next);
+        let planError = '';
+        if (model.config && model.config.plan_image) {
+            try {
+                await floor.setPlan(resolvePlanImage(model.config.plan_image));
+            } catch (err) {
+                planError = err && err.message ? err.message : 'Não foi possível carregar a planta.';
+            }
+        } else if (typeof floor.clearPlan === 'function') {
+            floor.clearPlan();
+        }
+        if (destroyed || gen !== loadGen) return null;
+        renderFloorLayers(floor, model, { editable: false });
+        tagCheckpointMarkers(floor, model.checkpoints);
+        paintNotice(planError);
+        return model;
+    }
+
+    recenter.addEventListener('click', onRecenter);
+    function onRecenter() {
         if (navActive) {
             followWalker = true;
             syncRecenter();
@@ -53,32 +116,10 @@ export async function mountMapView(element) {
             return;
         }
         fitContent();
-    });
-
-    try {
-        model = await loadFloorModel({ toast: () => {} });
-    } catch (_) {
-        model = { checkpoints: [], polylines: [], config: null };
     }
 
-    model.checkpoints = adaptCheckpoints(model.checkpoints);
-    const pxPerM = model.config && Number.isFinite(Number(model.config.px_per_m))
-        ? Number(model.config.px_per_m)
-        : null;
+    await loadMap();
 
-    if (model.config && model.config.plan_image) {
-        try {
-            await floor.setPlan(resolvePlanImage(model.config.plan_image));
-            showStatus('');
-        } catch (err) {
-            showStatus(err && err.message ? err.message : 'Não foi possível carregar a planta.');
-        }
-    } else {
-        showStatus('A planta aparece quando o mapa estiver disponível.');
-    }
-
-    renderFloorLayers(floor, model, { editable: false });
-    tagCheckpointMarkers(floor, model.checkpoints);
     const routeLayer = createRouteLayer(floor);
     floor.onLayers = (layers) => {
         floor.layers = layers || floor.layers;
@@ -156,11 +197,12 @@ export async function mountMapView(element) {
     let walkerPixel = null;
     const pins = new Map();
 
-    map.on('dragstart', () => {
+    function onDragStart() {
         if (!followWalker) return;
         followWalker = false;
         syncRecenter();
-    });
+    }
+    map.on('dragstart', onDragStart);
 
     function syncRecenter() {
         recenter.classList.toggle('needs-recenter', navActive && !followWalker);
@@ -235,6 +277,7 @@ export async function mountMapView(element) {
     let shownHeading = null;
     let walkerTarget = null;
     let walkerQueued = false;
+    let walkerFrame = 0;
 
     function setWalker(pixel, screenDeg) {
         if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) {
@@ -255,7 +298,7 @@ export async function mountMapView(element) {
         const raf = typeof window.requestAnimationFrame === 'function'
             ? window.requestAnimationFrame.bind(window)
             : (fn) => fn();
-        raf(drawWalker);
+        walkerFrame = raf(drawWalker) || 0;
     }
 
     function drawWalker() {
@@ -311,10 +354,23 @@ export async function mountMapView(element) {
         }
     }
 
-    return {
+    function destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        if (walkerFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(walkerFrame);
+        recenter.removeEventListener('click', onRecenter);
+        if (typeof map.off === 'function') map.off('dragstart', onDragStart);
+        recenter.remove();
+        status.destroy();
+        if (routeLayer && typeof routeLayer.destroy === 'function') routeLayer.destroy();
+        if (floor && typeof floor.destroy === 'function') floor.destroy();
+        if (element && element._povMapView === view) delete element._povMapView;
+    }
+
+    view = {
         floor,
         model,
-        pxPerM,
+        pxPerM: scaleOf(),
         recenter: fitContent,
         highlight,
         showOrigin,
@@ -324,8 +380,11 @@ export async function mountMapView(element) {
         holdWalker,
         frameWalker,
         setWalker,
-        setRouteProgress
+        setRouteProgress,
+        destroy
     };
+    if (element) element._povMapView = view;
+    return view;
 }
 
 function lerpDegrees(from, to, amount) {

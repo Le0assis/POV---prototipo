@@ -39,6 +39,7 @@ jobs:
 
       - name: Build do Vite
         env:
+          VITE_API_URL: https://api.pov-unimar.com
           VITE_API_BASE_URL: https://api.pov-unimar.com
         run: npm run build
 
