@@ -8,6 +8,8 @@ origin. Rode depois de ``python -m datasets.create_tables``.
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -155,12 +157,48 @@ def seed(db) -> None:
     print("Mapa de exemplo garantido. Linha que já existia não foi alterada.")
 
 
+_DSN_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
+_PASSWORD_RE = re.compile(r"(?i)\b(password|pwd|passwd)\s*[:=]\s*\S+")
+
+
+def _secrets(db) -> list[str]:
+    """Senha do ambiente e a da conexão. Vazio não entra: apagaria o texto."""
+    found = []
+    for value in (os.environ.get("DB_PASSWORD", ""), getattr(db, "password", "")):
+        secret = str(value or "")
+        if secret and secret not in found:
+            found.append(secret)
+    return found
+
+
+def _short_error(exc: BaseException, db) -> str:
+    """Tipo e mensagem, numa linha. Sem traceback, senha ou DSN."""
+    text = " ".join(str(exc).split())
+    for secret in _secrets(db):
+        text = text.replace(secret, "***")
+    text = _DSN_RE.sub("[DSN omitido]", text)
+    text = _PASSWORD_RE.sub(r"\1=***", text)
+    trace_at = text.find("Traceback (most recent call last)")
+    if trace_at != -1:
+        text = text[:trace_at].rstrip()
+    name = type(exc).__name__
+    return f"{name}: {text}" if text else name
+
+
 def cli(db) -> int:
-    """Conflito de caixa: código 1 e só a mensagem. O traceback fica de fora."""
+    """Erro: código 1 e uma linha no stderr. O traceback fica de fora.
+
+    Conflito de caixa mantém a mensagem já combinada. Qualquer outra
+    exceção vira tipo + mensagem, sem senha e sem DSN. O rollback
+    continua em ``seed`` antes de a exceção chegar aqui.
+    """
     try:
         seed(db)
     except SeedConflict as exc:
         print(exc, file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(_short_error(exc, db), file=sys.stderr)
         return 1
     return 0
 

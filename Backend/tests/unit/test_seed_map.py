@@ -211,13 +211,49 @@ def test_cli_conflict_exits_with_only_the_message(capsys):
     assert "raise SystemExit(code)" in text
 
 
-def test_cli_lets_other_errors_propagate(capsys):
-    db = _SeedDB([{"name": "Recepcao", "slug": "recepcao"}], fail_edges=True)
-    with pytest.raises(RuntimeError, match="Não gravou a aresta"):
-        cli(db)
+def test_cli_generic_error_exits_with_type_and_message(capsys):
+    original = [{"name": "Recepcao", "slug": "recepcao"}]
+    db = _SeedDB(original, fail_edges=True)
+    assert cli(db) == 1
     captured = capsys.readouterr()
+    assert captured.err == (
+        "RuntimeError: Não gravou a aresta Recepcao->Corredor A. Nada foi gravado.\n"
+    )
     assert "Traceback" not in captured.err
-    assert db.rows == [{"name": "Recepcao", "slug": "recepcao"}]
+    assert "Traceback" not in captured.out
+    assert _tx(db) == ["begin", "rollback"]
+    assert db.rows == original
+
+
+def test_cli_hides_secrets_and_dsn(capsys, monkeypatch):
+    secret = "senha-super-secreta"
+    monkeypatch.setenv("DB_PASSWORD", secret)
+
+    class _Leaky(_SeedDB):
+        def execute_search(self, sql, params=None):
+            raise OSError(
+                "mysql://pov:"
+                + secret
+                + "@127.0.0.1:3306/POV password="
+                + secret
+                + " e tambem mysql://root:outra-senha@db.internal/POV"
+                " Traceback (most recent call last): File secret.py"
+            )
+
+    db = _Leaky([])
+    db.password = secret
+    assert cli(db) == 1
+    captured = capsys.readouterr()
+    assert captured.err == (
+        "OSError: [DSN omitido] password=*** e tambem [DSN omitido]\n"
+    )
+    assert secret not in captured.err
+    assert "outra-senha" not in captured.err
+    assert "mysql://" not in captured.err
+    assert "127.0.0.1" not in captured.err
+    assert "db.internal" not in captured.err
+    assert "Traceback" not in captured.err
+    assert "File " not in captured.err
 
 
 def test_cli_success_returns_zero(capsys):
