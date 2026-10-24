@@ -8,6 +8,9 @@ a variável e a próxima chamada vê o valor novo.
 from __future__ import annotations
 
 import os
+import sys
+from collections.abc import Callable
+from typing import TypeVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -84,7 +87,8 @@ def assert_production_database() -> None:
     12 caracteres. Fora de produção a senha curta continua válida. A
     mensagem não mostra o valor.
     """
-    if get_settings().pov_env.strip().lower() != "production":
+    # Não passa por Settings: DB_PORT=abc não pode virar ValidationError aqui.
+    if os.environ.get("POV_ENV", "development").strip().lower() != "production":
         return
     missing: list[str] = []
     for key in _PRODUCTION_DB_KEYS:
@@ -99,9 +103,10 @@ def assert_production_database() -> None:
     if user.casefold() == "root":
         refused.append("DB_USER=root")
     if "DB_PASSWORD" in os.environ and "DB_PASSWORD" not in missing:
-        if not str(password).strip():
+        stripped_password = str(password).strip()
+        if not stripped_password:
             refused.append("DB_PASSWORD vazia")
-        elif len(password) < _MIN_PRODUCTION_PASSWORD:
+        elif len(stripped_password) < _MIN_PRODUCTION_PASSWORD:
             refused.append(
                 f"DB_PASSWORD com menos de {_MIN_PRODUCTION_PASSWORD} caracteres"
             )
@@ -116,3 +121,15 @@ def assert_production_database() -> None:
         f"precisa de {_MIN_PRODUCTION_PASSWORD} caracteres ou mais. "
         "A API não lê DB_ADMIN_*."
     )
+
+
+_T = TypeVar("_T")
+
+
+def boot_or_exit(load: Callable[[], _T]) -> _T:
+    """Sobe a conta. Configuração inválida em produção sai com a mensagem, sem traceback."""
+    try:
+        return load()
+    except DatabaseConfigError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from None

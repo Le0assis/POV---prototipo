@@ -68,6 +68,41 @@ def test_production_refuses_a_short_database_password(monkeypatch):
     assert len(os.environ["DB_PASSWORD"]) == 12
     assert_production_database()
 
+    padded = "  abcdefghijk"
+    assert len(padded.strip()) == 11
+    monkeypatch.setenv("DB_PASSWORD", padded)
+    with pytest.raises(DatabaseConfigError) as padded_exc:
+        assert_production_database()
+    assert padded not in str(padded_exc.value)
+    assert padded.strip() not in str(padded_exc.value)
+    monkeypatch.setenv("DB_PASSWORD", "  abcdefghijkl")
+    assert len(os.environ["DB_PASSWORD"].strip()) == 12
+    assert_production_database()
+
+
+def test_boot_refuses_a_short_password_without_a_traceback(monkeypatch, capsys):
+    from api.settings import assert_production_database, boot_or_exit
+
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setenv("DB_HOST", "db.internal")
+    monkeypatch.setenv("DB_PORT", "3306")
+    monkeypatch.setenv("DB_NAME", "POV")
+    monkeypatch.setenv("DB_USER", "pov")
+    short = "abcdefghijk"
+    monkeypatch.setenv("DB_PASSWORD", short)
+
+    def load() -> None:
+        assert_production_database()
+
+    with pytest.raises(SystemExit) as exc:
+        boot_or_exit(load)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1
+    assert "Traceback" not in err
+    assert short not in err
+    assert "12" in err
+
 
 def test_development_and_test_accept_a_short_database_password(monkeypatch):
     from api.settings import assert_production_database

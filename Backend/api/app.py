@@ -24,7 +24,7 @@ from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
 from .editor_auth import client_key, require_editor_password
 from .envfile import load_env_file
-from .settings import assert_production_database, get_settings
+from .settings import assert_production_database, boot_or_exit, get_settings
 from .walk_session import (
     SESSION_LIMIT_DETAIL,
     InvalidSessionId,
@@ -107,7 +107,7 @@ def database_from_settings() -> ConexaoBD:
     )
 
 
-db = database_from_settings()
+db = boot_or_exit(database_from_settings)
 map_db_manager = MapDatabaseManager(db, per_request=True)
 
 # Por fora das rotas: o preflight não abre MySQL.

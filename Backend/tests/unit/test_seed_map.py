@@ -267,6 +267,49 @@ def _env_without_dotenv(monkeypatch, **values: str) -> str:
     return secret
 
 
+def test_cli_refuses_a_short_production_password(monkeypatch, capsys):
+    short = "abcdefghijk"
+    _env_without_dotenv(
+        monkeypatch,
+        DB_HOST="127.0.0.1",
+        DB_PORT="3306",
+        DB_NAME="POV",
+        DB_USER="pov",
+        DB_PASSWORD=short,
+    )
+    monkeypatch.setenv("POV_ENV", "production")
+    assert cli() == 1
+    captured = capsys.readouterr()
+    assert captured.err.count("\n") == 1
+    assert "Traceback" not in captured.err
+    assert short not in captured.err
+    assert "12" in captured.err
+    assert captured.out == ""
+
+
+def test_create_tables_refuses_a_short_production_password(monkeypatch, capsys):
+    from datasets.create_tables import main
+
+    short = "abcdefghijk"
+    _env_without_dotenv(
+        monkeypatch,
+        DB_HOST="127.0.0.1",
+        DB_PORT="3306",
+        DB_NAME="POV",
+        DB_USER="pov",
+        DB_PASSWORD=short,
+    )
+    monkeypatch.setenv("POV_ENV", "production")
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.err.count("\n") == 1
+    assert "Traceback" not in captured.err
+    assert short not in captured.err
+    assert "12" in captured.err
+
+
 def test_cli_reports_invalid_port_on_one_line(monkeypatch, capsys):
     secret = _env_without_dotenv(
         monkeypatch,

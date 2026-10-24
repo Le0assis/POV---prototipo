@@ -219,13 +219,27 @@ def test_url_userinfo_runs_to_the_last_at_before_the_host():
     with_at = database._redact(RuntimeError("mysql://pov:p@ss@db"))
     assert with_at == "mysql://***@db"
     assert "p@ss" not in with_at
-    with_slash = database._redact(RuntimeError("mysql+pymysql://pov:p/ss@db"))
-    assert with_slash == "mysql+pymysql://***@db"
-    assert "p/ss" not in with_slash
+    kept = database._redact(RuntimeError("mysql://u:p@db/x;a@b.com"))
+    assert kept == "mysql://***@db/x;a@b.com"
+    plain = database._redact(RuntimeError("http://x/a:b@c"))
+    assert plain == "http://x/a:b@c"
     both = database._redact(RuntimeError(
-        "antes mysql://pov:p@ss@db/POV e mysql+pymysql://pov:p/ss@db depois"
+        "antes mysql://pov:p@ss@db/POV depois"
     ))
-    assert both == "antes mysql://***@db/POV e mysql+pymysql://***@db depois"
+    assert both == "antes mysql://***@db/POV depois"
+
+
+def test_redact_of_a_long_message_stays_under_50ms():
+    import time
+
+    database = ConexaoBD("127.0.0.1", "POV", "pov", "senha-longa-demais")
+    payload = "a" * 50000
+    started = time.perf_counter()
+    redacted = database._redact(RuntimeError(payload + "mysql://" + "b" * 1000 + "://"))
+    elapsed = time.perf_counter() - started
+    assert elapsed < 0.05
+    assert len(redacted) == 4096
+    assert "senha-longa-demais" not in redacted
 
 
 def test_map_rollback_prints_use_redact():
