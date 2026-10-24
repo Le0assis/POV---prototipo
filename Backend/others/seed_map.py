@@ -59,6 +59,14 @@ def _inverse_heading(heading: float) -> float:
     return (heading + math.pi) % (2 * math.pi)
 
 
+def _exact_checkpoint(db, name: str):
+    """Linha cujo nome é o texto exato. Outra caixa não conta."""
+    rows = db.execute_search(SQL_NAME, (name,))
+    if rows is None:
+        raise RuntimeError(f"Não leu o checkpoint {name}.")
+    return rows
+
+
 def seed(db) -> None:
     rows = db.execute_search(SQL_SLUGS, (DEFAULT_BUILDING_ID,))
     if rows is None:
@@ -66,9 +74,7 @@ def seed(db) -> None:
     taken = {row["slug"] for row in rows if row.get("slug")}
     print("Inserindo checkpoints...")
     for name in CHECKPOINTS:
-        current = db.execute_search(SQL_NAME, (name,))
-        if current is None:
-            raise RuntimeError(f"Não leu o checkpoint {name}.")
+        current = _exact_checkpoint(db, name)
         if current:
             if current[0].get("slug"):
                 taken.add(current[0]["slug"])
@@ -76,6 +82,14 @@ def seed(db) -> None:
         slug = allocate_slug(name, taken)
         if not db.execute_query(SQL_CHECKPOINT, (name, DEFAULT_BUILDING_ID, slug)):
             raise RuntimeError(f"Não gravou o checkpoint {name}. Nada foi apagado.")
+        # A unique de name segue a collation: recepcao ocupa a chave de
+        # Recepcao e o ON DUPLICATE KEY UPDATE name = name não troca a caixa.
+        if not _exact_checkpoint(db, name):
+            raise RuntimeError(
+                f"Conflito de maiúsculas: '{name}' não foi gravado. "
+                "A unique de checkpoints.name ignora caixa e manteve a outra grafia. "
+                "Nenhuma aresta foi criada."
+            )
         taken.add(slug)
     print("Inserindo conexões...")
     for source, target, distance, heading in EDGES:

@@ -40,7 +40,14 @@ class _SeedDB:
         raise AssertionError(sql)
 
     def execute_query(self, sql, params=None):
-        self.calls.append((sql, params or ()))
+        params = params or ()
+        self.calls.append((sql, params))
+        if sql.startswith("INSERT INTO checkpoints"):
+            name, _building_id, slug = params
+            for row in self.rows:
+                if row["name"].casefold() == name.casefold():
+                    return True
+            self.rows.append({"name": name, "slug": slug})
         return True
 
 
@@ -52,19 +59,34 @@ def _inserted(db: _SeedDB) -> list[str]:
     ]
 
 
+def _edge_calls(db: _SeedDB) -> list[tuple]:
+    return [params for sql, params in db.calls if sql.startswith("INSERT INTO edges")]
+
+
 def test_seed_name_lookup_is_binary():
     assert "CAST(name AS BINARY) = CAST(%s AS BINARY)" in SQL_NAME
     assert "WHERE name = %s" not in SQL_NAME
     text = (BACKEND_ROOT / "others" / "seed_map.py").read_text(encoding="utf-8")
     assert "WHERE name = %s" not in text
 
-    different_case = _SeedDB([{"name": "recepcao", "slug": "recepcao"}])
-    seed(different_case)
-    assert "Recepcao" in _inserted(different_case)
-
     exact = _SeedDB([{"name": "Recepcao", "slug": "recepcao"}])
     seed(exact)
     assert "Recepcao" not in _inserted(exact)
+    assert _edge_calls(exact)
+    assert _edge_calls(exact)[0][0] == "Recepcao"
+
+
+def test_case_conflict_stops_before_the_edge():
+    different_case = _SeedDB([{"name": "recepcao", "slug": "recepcao"}])
+    with pytest.raises(RuntimeError) as exc:
+        seed(different_case)
+    message = str(exc.value)
+    assert "Conflito de maiúsculas" in message
+    assert "Recepcao" in message
+    assert "aresta" in message
+    assert "Recepcao" in _inserted(different_case)
+    assert _edge_calls(different_case) == []
+    assert different_case.rows == [{"name": "recepcao", "slug": "recepcao"}]
 
 
 def test_resolve_by_slug_stays_on_the_column_collation():
