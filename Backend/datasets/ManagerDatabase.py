@@ -65,11 +65,38 @@ _LOCK_ERRNOS = (1205, 1213)
 _MIN_SECRET_LEN = 6
 # Corta depois de redigir. O corte antes deixava um pedaço da senha.
 _REDACT_MAX_CHARS = 4096
-# Esquema ancorado. O userinfo segue no scanner, não nesta expressão.
-_URL_SCHEME = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://")
+# Caracteres de esquema (RFC 3986): letra, dígito, + . -
+_SCHEME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+.-")
 # Delimitador só encerra o userinfo quando vem depois de um @.
 # Antes do @, / ; espaço ( , ' ? # < ainda podem ser a senha.
 _URL_DELIMS = frozenset("/;()<>," + "'" + '" \t\r\n?#')
+_WORD = re.compile(r"\w")
+
+
+def _scheme_starts(text: str) -> list[tuple[int, int]]:
+    """Início do esquema e fim de ``://`` para cada URL, em tempo linear.
+
+    Equivale a ``\\b[A-Za-z][A-Za-z0-9+.-]*://``: para cada ``://`` volta só
+    pela corrida de caracteres de esquema logo antes dele. As corridas não se
+    sobrepõem (não contêm ``:`` nem ``/``), então o total é O(n).
+    """
+    found: list[tuple[int, int]] = []
+    search = 0
+    while True:
+        sep = text.find("://", search)
+        if sep < 0:
+            return found
+        search = sep + 3
+        run = sep
+        while run > 0 and text[run - 1] in _SCHEME_CHARS:
+            run -= 1
+        for start in range(run, sep):
+            char = text[start]
+            if not char.isascii() or not char.isalpha():
+                continue
+            if start == 0 or not _WORD.match(text[start - 1]):
+                found.append((start, sep + 3))
+                break
 
 
 def _mask_url_userinfo(text: str) -> str:
@@ -78,36 +105,46 @@ def _mask_url_userinfo(text: str) -> str:
     A senha vai até o último ``@`` antes do primeiro delimitador que aparece
     depois de um ``@``. ``mysql://u:p@db/x;a@b.com`` preserva host e caminho.
     ``http://x/a:b@c`` não tem credencial e fica como está.
+
+    Linear: tabelas de próximo ``@``, ``:`` e delimitador, e do último ``@``,
+    calculadas uma vez. Antes cada esquema varria até o fim do texto (O(n²)).
     """
+    size = len(text)
+    if "://" not in text:
+        return text
+    next_at = [size] * (size + 1)
+    next_colon = [size] * (size + 1)
+    next_delim = [size] * (size + 1)
+    for index in range(size - 1, -1, -1):
+        char = text[index]
+        next_at[index] = index if char == "@" else next_at[index + 1]
+        next_colon[index] = index if char == ":" else next_colon[index + 1]
+        next_delim[index] = index if char in _URL_DELIMS else next_delim[index + 1]
+    prev_at = [-1] * size
+    last = -1
+    for index in range(size):
+        if text[index] == "@":
+            last = index
+        prev_at[index] = last
+
     pieces: list[str] = []
     cursor = 0
-    for match in _URL_SCHEME.finditer(text):
-        if match.start() < cursor:
+    for start, body in _scheme_starts(text):
+        if start < cursor:
             continue
-        seen_colon = False
-        seen_at = False
-        last_at = -1
-        abandon = False
-        for index in range(match.end(), len(text)):
-            char = text[index]
-            if char == "@":
-                seen_at = True
-                last_at = index
-                continue
-            if char == ":":
-                seen_colon = True
-            if char not in _URL_DELIMS:
-                continue
-            if not seen_at:
-                if not seen_colon:
-                    abandon = True
-                else:
-                    continue
-            break
-        if abandon or not seen_at or not seen_colon or last_at < match.end():
+        first_at = next_at[body]
+        if first_at >= size:
             continue
-        pieces.append(text[cursor:match.start()])
-        pieces.append(match.group(0))
+        first_delim = next_delim[body]
+        # Delimitador antes do @ só vale se já houve ``:`` (pode ser a senha).
+        if first_delim < first_at and next_colon[body] > first_delim:
+            continue
+        stop = next_delim[first_at + 1]
+        if next_colon[body] >= stop:
+            continue
+        last_at = prev_at[stop - 1]
+        pieces.append(text[cursor:start])
+        pieces.append(text[start:body])
         pieces.append("***@")
         cursor = last_at + 1
     pieces.append(text[cursor:])

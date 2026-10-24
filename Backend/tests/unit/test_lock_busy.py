@@ -364,3 +364,23 @@ def test_delete_and_position_zero_rows_stay_absent():
     manager = MapDatabaseManager(_Rows(0))
     assert manager.delete_route(4) is False
     assert manager.update_checkpoint_position("Ninguem", 1, 2) is False
+
+
+def test_redact_scan_is_linear_and_still_masks_before_the_cut(monkeypatch):
+    """Muitos ``esquema://`` sem @ não podem custar O(n²): antes eram ~40s."""
+    import time
+
+    monkeypatch.delenv("DB_PASSWORD", raising=False)
+    database = ConexaoBD("127.0.0.1", "POV", "pov", "ab")
+    hostile = "a://" * 50_000
+    started = time.perf_counter()
+    assert database._redact(RuntimeError(hostile)) == hostile[:4096]
+    dotted = "a." * 50_000 + "b"
+    assert database._redact(RuntimeError(dotted)) == dotted[:4096]
+    assert time.perf_counter() - started < 2.0
+    # A credencial depois de muito ruído e cruzando o corte ainda some inteira.
+    secret_tail = "S3gr3d0Long" * 600
+    raw = "x" * 4000 + " mysql://pov:" + secret_tail + "@db/POV"
+    masked = database._redact(RuntimeError(raw))
+    assert "S3gr3d0" not in masked
+    assert ("x" * 4000 + " mysql://***@db/POV")[:4096] == masked
