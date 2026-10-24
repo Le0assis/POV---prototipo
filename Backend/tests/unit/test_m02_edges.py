@@ -199,6 +199,17 @@ class _MigrationDB:
             return [{"ok": 1}] if self.fk else []
         if sql == module.SQL_SELECT_EDGES:
             return [dict(row) for row in self.edges]
+        if sql == module.SQL_EXTRAS:
+            return [
+                {
+                    "id": row["id"],
+                    "source_node": row["source_node"],
+                    "target_node": row["target_node"],
+                    "dup_rank": int(row.get("dup_rank") or 0),
+                }
+                for row in sorted(self.edges, key=lambda item: int(item["id"]))
+                if int(row.get("dup_rank") or 0) > 0
+            ]
         if sql == module.SQL_ENGINE:
             if "sensors_log" not in self.tables:
                 return []
@@ -310,7 +321,8 @@ def test_migration_backs_up_then_keeps_duplicates_and_is_idempotent():
     assert any(sql == module.SQL_BACKFILL_SAMPLES for sql, _params in db.statements)
     assert ("edges", "samples_count") in db.columns
 
-    module.apply(db)
+    again = module.apply(db)
+    assert [row["id"] for row in again] == [1, 2]
     creates = [sql for sql, _params in db.statements if sql == module.SQL_BACKUP]
     ranks = [sql for sql, _params in db.statements if sql == module.SQL_SET_RANK]
     classify = [sql for sql, _params in db.statements if sql == module.SQL_CLASSIFY_RECORDED]
@@ -401,7 +413,8 @@ def test_rerank_is_idempotent_when_the_old_canonical_was_the_lowercase_copy():
     assert by_id == {1: 0, 2: 1}
     parked = [params for sql, params in db.statements if sql == module.SQL_SET_RANK and params[0] < 0]
     assert {params[1] for params in parked} == {1, 2}
-    module.apply(db)
+    again = module.apply(db)
+    assert [row["id"] for row in again] == [2]
     assert {row["id"]: int(row["dup_rank"]) for row in db.edges} == {1: 0, 2: 1}
     assert len([sql for sql, _params in db.statements if sql == module.SQL_SET_RANK]) == 4
 

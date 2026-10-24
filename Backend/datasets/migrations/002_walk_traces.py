@@ -88,6 +88,10 @@ SQL_DUP_GROUPS = (
     "ORDER BY k.group_id, e.id"
 )
 SQL_SET_RANK = "UPDATE edges SET dup_rank = %s WHERE id = %s"
+SQL_EXTRAS = (
+    "SELECT id, source_node, target_node, dup_rank "
+    "FROM edges WHERE dup_rank > 0 ORDER BY id"
+)
 SQL_UNIQUE_HAS_RANK = (
     "SELECT 1 AS ok FROM information_schema.statistics "
     "WHERE table_schema = DATABASE() AND table_name = 'edges' "
@@ -327,11 +331,17 @@ def preserve_duplicate_edges(db) -> list[dict]:
             _exec(db, SQL_UNIQUE_RANKED)
         else:
             _exec(db, SQL_UNIQUE_PAIR)
+    renumbered = len(preserved)
+    preserved = _fetch(db, SQL_EXTRAS)
+    print(
+        "[M02] Arestas extras preservadas com dup_rank>0: "
+        f"{len(preserved)}. Renumeradas nesta execução: {renumbered}."
+    )
     return preserved
 
 
 def apply(db) -> list[dict]:
-    """Aplica a migração. Devolve as arestas extras numeradas nesta execução.
+    """Aplica a migração. Devolve as arestas que estão com dup_rank maior que 0.
 
     Nenhuma linha de ``edges`` é apagada. Qualquer DDL que não confirme aborta.
     O ajuste só roda com ``edges_backup_m02`` já existente.
