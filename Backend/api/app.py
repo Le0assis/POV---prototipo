@@ -230,7 +230,7 @@ def health():
 
 
 def _canonical_pair(source: str, target: str, *, missing: str) -> tuple[str, str]:
-    """Nomes do checkpoint. Caixa diferente não é outro nó; acerto exato não muda."""
+    """Nomes exatos do checkpoint. ``Sala`` não casa com ``sala``."""
     resolved_source = topo_map.canonical_name(source)
     resolved_target = topo_map.canonical_name(target)
     if resolved_source is None or resolved_target is None:

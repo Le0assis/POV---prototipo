@@ -28,8 +28,6 @@ def _restore_map(snapshot):
     topo.nodes.clear()
     topo.nodes.update(snapshot["nodes"])
     topo.edges[:] = snapshot["edges"]
-    topo._folded.clear()
-    topo._folded.update(snapshot["folded"])
     app_module.map_load.set(*snapshot["load"])
 
 
@@ -38,7 +36,6 @@ def _snapshot_map():
     return {
         "nodes": dict(topo.nodes),
         "edges": list(topo.edges),
-        "folded": dict(topo._folded),
         "load": (app_module.map_load.status, app_module.map_load.detail),
     }
 
@@ -92,7 +89,6 @@ def test_production_does_not_start_when_the_graph_is_empty_or_failed(monkeypatch
     def empty_load(target):
         target.nodes.clear()
         target.edges.clear()
-        target._folded.clear()
 
     def broken_load(_target):
         raise RuntimeError("segredo-do-banco")

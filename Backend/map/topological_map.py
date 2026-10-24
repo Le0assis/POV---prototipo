@@ -19,42 +19,35 @@ class TopologicalEdge:
     distance_m: float # Distância física real entre eles (mapeada por você antes)
     heading_rad: float # Ângulo absoluto (Yaw) desse corredor em relação ao Norte magnético
 
-def _casefold_node(name: str) -> str:
-    """Mesma ideia da collation utf8mb4_unicode_ci: ignora maiúsculas, não o acento."""
-    return str(name).casefold()
-
-
 class TopologicalMap:
     """O Grafo que gerencia os nós e as conexões do prédio mapeado."""
     
     def __init__(self) -> None:
         self.nodes: dict[str, SemanticNode] = {}
         self.edges: list[TopologicalEdge] = []
-        # casefold → grafia gravada no checkpoint. O acerto exato não passa por aqui.
-        self._folded: dict[str, str] = {}
 
     def canonical_name(self, name: str) -> str | None:
-        """Grafia de ``checkpoints.name``. ``Sala`` e ``sala`` são o mesmo nó.
+        """Nome exato de ``checkpoints.name``, como ``CAST(... AS BINARY)``.
 
-        Se o texto já é a chave, devolve essa mesma string. Acento continua
-        distinto: ``Recepção`` não é ``Recepcao``.
+        ``Sala`` não é ``sala``. A collation do MySQL junta as duas; a aresta
+        canônica da migração 002 não. Acento também continua distinto.
         """
         if name in self.nodes:
             return name
-        return self._folded.get(_casefold_node(name))
+        return None
 
     def add_checkpoint(self, name: str) -> None:
-        """Adiciona um novo nó semântico ao mapa. A primeira grafia fica."""
-        if self.canonical_name(name) is not None:
+        """Adiciona um nó. A mesma string não duplica; outra caixa é outro nome."""
+        if name in self.nodes:
             return
         self.nodes[name] = SemanticNode(name=name)
-        self._folded[_casefold_node(name)] = name
         print(f"Checkpoint {name} ")
 
     def upsert_directed_edge(self, source: str, target: str, distance_m: float, heading_rad: float) -> None:
         """Uma aresta em memória por sentido. Não cria a volta.
 
-        A ponta grava o nome do checkpoint, não a caixa da aresta antiga.
+        As pontas têm de ser o nome exato do checkpoint. Outra caixa não
+        reescreve a aresta canônica.
         """
         source_name = self.canonical_name(source)
         target_name = self.canonical_name(target)
