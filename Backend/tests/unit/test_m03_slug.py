@@ -44,9 +44,9 @@ class _Store:
                 for row in self.checkpoints
                 if row["building_id"] == building_id and row["slug"]
             ]
-        if "SELECT slug FROM checkpoints WHERE name = %s" in sql:
+        if "SELECT slug FROM checkpoints WHERE" in sql and "CAST(name AS BINARY)" in sql:
             return [{"slug": row["slug"]} for row in self.checkpoints if row["name"] == params[0]]
-        if "SELECT name FROM checkpoints WHERE name = %s" in sql:
+        if "SELECT name FROM checkpoints WHERE" in sql and "CAST(name AS BINARY)" in sql:
             return [{"name": row["name"]} for row in self.checkpoints if row["name"] == params[0]]
         if "WHERE c.building_id = %s AND c.slug = %s" in sql:
             building_id, slug = params
@@ -55,7 +55,7 @@ class _Store:
                 for row in self.checkpoints
                 if row["building_id"] == building_id and row["slug"] == slug
             ]
-        if "WHERE c.name = %s" in sql:
+        if "CAST(c.name AS BINARY)" in sql:
             return [self._joined(row) for row in self.checkpoints if row["name"] == params[0]]
         if "FROM checkpoints c" in sql:
             return [self._joined(row) for row in self.checkpoints]

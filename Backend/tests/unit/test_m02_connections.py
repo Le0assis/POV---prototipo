@@ -96,7 +96,7 @@ class _MemDB:
             ]
         if "FROM edges" in sql and "WHERE id = %s" in sql:
             return [row for row in self.edges if row["id"] == params[0]]
-        if "FROM edges" in sql and "WHERE source_node" in sql:
+        if "FROM edges" in sql and "CAST(source_node AS BINARY)" in sql:
             return [
                 row for row in self.edges
                 if row["source_node"] == params[0] and row["target_node"] == params[1]

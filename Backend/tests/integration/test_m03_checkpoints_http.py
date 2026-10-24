@@ -8,7 +8,13 @@ from fastapi.testclient import TestClient
 import api.app as app_module
 from api.app import app
 from api.editor_auth import make_password_hash
-from map.MapDatabaseManager import CheckpointConflictError, CheckpointLookupError, UnknownCategoryError
+from map.MapDatabaseManager import (
+    CheckpointConflictError,
+    CheckpointLookupError,
+    MapDatabaseManager,
+    UnknownCategoryError,
+)
+from tests.unit.test_checkpoint_name_sql import CollationStore
 
 pytestmark = pytest.mark.integration
 
@@ -285,3 +291,31 @@ def test_create_checkpoint_conflict_is_409(monkeypatch):
     response = TestClient(app).post("/api/checkpoints", json={"name": "Sala"}, headers=OK)
     assert response.status_code == 409
     assert response.status_code != 500
+
+
+def test_checkpoint_routes_404_when_the_name_case_differs(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    store = CollationStore()
+    monkeypatch.setattr(app_module, "map_db_manager", MapDatabaseManager(store))
+    client = TestClient(app)
+    position = client.patch(
+        "/api/checkpoints/sala/position",
+        json={"pos_x_px": 9.0, "pos_y_px": 8.0},
+        headers=OK,
+    )
+    category = client.patch(
+        "/api/checkpoints/sala",
+        json={"category_code": None},
+        headers=OK,
+    )
+    assert position.status_code == 404
+    assert category.status_code == 404
+    assert store.checkpoint["pos_x_px"] == 1.0
+    saved = client.patch(
+        "/api/checkpoints/Sala/position",
+        json={"pos_x_px": 9.0, "pos_y_px": 8.0},
+        headers=OK,
+    )
+    assert saved.status_code == 200
+    assert saved.json()["checkpoint"]["name"] == "Sala"
+    assert store.checkpoint["pos_x_px"] == 9.0

@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 from contextlib import contextmanager
 from functools import wraps
@@ -62,6 +63,26 @@ _CHECKPOINT_COLUMNS = """
     LEFT JOIN checkpoint_categories cat ON cat.id = c.category_id
 """
 
+_NAME_COLUMN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+
+
+def _exact_name(column: str) -> str:
+    """Nome exato, como o ``CAST AS BINARY`` da migração 002. ``Sala`` não é ``sala``."""
+    if not _NAME_COLUMN.fullmatch(column):
+        raise ValueError(column)
+    return f"CAST({column} AS BINARY) = CAST(%s AS BINARY)"
+
+
+def _exact_names(column: str, count: int) -> str:
+    """Vários nomes, cada um comparado byte a byte."""
+    if count < 1 or not _NAME_COLUMN.fullmatch(column):
+        raise ValueError(column)
+    casts = ", ".join(["CAST(%s AS BINARY)"] * count)
+    return f"CAST({column} AS BINARY) IN ({casts})"
+
+
+_EXACT_DIRECTION = f"{_exact_name('source_node')} AND {_exact_name('target_node')}"
+
 
 class MapDatabaseManager:
     """Responsável por salvar e carregar o grafo diretamente do MySQL do XAMPP."""
@@ -122,7 +143,9 @@ class MapDatabaseManager:
         """X lock nos dois checkpoints, sempre na ordem do nome no banco."""
         first, second = sorted((source, target))
         rows = self.db.execute_search(
-            "SELECT name FROM checkpoints WHERE name IN (%s, %s) ORDER BY name FOR UPDATE",
+            "SELECT name FROM checkpoints WHERE "
+            + _exact_names("name", 2)
+            + " ORDER BY name FOR UPDATE",
             (first, second),
         )
         if rows is None:
@@ -180,7 +203,7 @@ class MapDatabaseManager:
         if not cleaned:
             return False
         current = self.db.execute_search(
-            "SELECT slug FROM checkpoints WHERE name = %s",
+            "SELECT slug FROM checkpoints WHERE " + _exact_name("name"),
             (name,),
         )
         if current is None:
@@ -189,13 +212,13 @@ class MapDatabaseManager:
             return False
         previous_slug = current[0]["slug"]
         updated = self.db.execute_query(
-            "UPDATE checkpoints SET name = %s WHERE name = %s",
+            "UPDATE checkpoints SET name = %s WHERE " + _exact_name("name"),
             (cleaned, name),
         )
         if not updated:
             raise DatabaseQueryError("Falha ao renomear o checkpoint.")
         renamed = self.db.execute_search(
-            "SELECT slug FROM checkpoints WHERE name = %s",
+            "SELECT slug FROM checkpoints WHERE " + _exact_name("name"),
             (cleaned,),
         )
         if renamed is None:
@@ -211,7 +234,7 @@ class MapDatabaseManager:
         if category_code is not None:
             category_id = int(self._require_category(category_code)["id"])
         found = self.db.execute_search(
-            "SELECT name FROM checkpoints WHERE name = %s",
+            "SELECT name FROM checkpoints WHERE " + _exact_name("name"),
             (name,),
         )
         if found is None:
@@ -219,7 +242,7 @@ class MapDatabaseManager:
         if not found:
             return None
         updated = self.db.execute_query(
-            "UPDATE checkpoints SET category_id = %s WHERE name = %s",
+            "UPDATE checkpoints SET category_id = %s WHERE " + _exact_name("name"),
             (category_id, name),
         )
         if not updated:
@@ -258,7 +281,7 @@ class MapDatabaseManager:
     @_sql_method
     def get_checkpoint_by_name(self, name: str) -> dict | None:
         rows = self.db.execute_search(
-            _CHECKPOINT_COLUMNS + " WHERE c.name = %s",
+            _CHECKPOINT_COLUMNS + " WHERE " + _exact_name("c.name"),
             (name,),
         )
         if rows is None:
@@ -344,7 +367,7 @@ class MapDatabaseManager:
             """
             SELECT id, distance_m, heading_rad, origin
             FROM edges
-            WHERE source_node = %s AND target_node = %s AND dup_rank = 0
+            WHERE """ + _EXACT_DIRECTION + """ AND dup_rank = 0
             FOR UPDATE
             """,
             (source, target),
@@ -692,7 +715,7 @@ class MapDatabaseManager:
                        SUM(COS(COALESCE(net_heading_rad, 0)))
                    ) AS heading_rad
             FROM walk_traces
-            WHERE source_node = %s AND target_node = %s AND is_valid = 1
+            WHERE """ + _EXACT_DIRECTION + """ AND is_valid = 1
             """,
             (source, target),
         )
@@ -706,7 +729,7 @@ class MapDatabaseManager:
             """
             SELECT id
             FROM walk_traces
-            WHERE source_node = %s AND target_node = %s AND is_valid = 1
+            WHERE """ + _EXACT_DIRECTION + """ AND is_valid = 1
             ORDER BY started_at DESC, id DESC
             LIMIT 1
             """,
@@ -724,11 +747,12 @@ class MapDatabaseManager:
         else:
             offset = samples_count // 2 - 1
             limit = 2
+        where = _EXACT_DIRECTION + " AND is_valid = 1"
         rows = self.db.execute_search(
             f"""
             SELECT total_distance_m
             FROM walk_traces
-            WHERE source_node = %s AND target_node = %s AND is_valid = 1
+            WHERE {where}
             ORDER BY total_distance_m
             LIMIT {int(limit)} OFFSET {int(offset)}
             """,
@@ -743,7 +767,7 @@ class MapDatabaseManager:
             """
             SELECT id, distance_m, heading_rad, origin
             FROM edges
-            WHERE source_node = %s AND target_node = %s AND dup_rank = 0
+            WHERE """ + _EXACT_DIRECTION + """ AND dup_rank = 0
             """,
             (source, target),
         )
@@ -882,7 +906,7 @@ class MapDatabaseManager:
         reverse = self.db.execute_search(
             """
             SELECT id FROM edges
-            WHERE source_node = %s AND target_node = %s AND dup_rank = 0
+            WHERE """ + _EXACT_DIRECTION + """ AND dup_rank = 0
             ORDER BY id
             """,
             (row["target_node"], row["source_node"]),
@@ -984,7 +1008,7 @@ class MapDatabaseManager:
             """
             SELECT id, started_at, total_steps, total_distance_m, is_valid, polyline_json
             FROM walk_traces
-            WHERE source_node = %s AND target_node = %s
+            WHERE """ + _EXACT_DIRECTION + """
             ORDER BY started_at, id
             """,
             (source, target),
@@ -1070,7 +1094,7 @@ class MapDatabaseManager:
     def update_checkpoint_position(self, name: str, pos_x_px, pos_y_px) -> bool:
         """Um UPDATE pelo UNIQUE(name). Sem SELECT antes, que abria transação."""
         affected = self.db.execute_update(
-            "UPDATE checkpoints SET pos_x_px = %s, pos_y_px = %s WHERE name = %s",
+            "UPDATE checkpoints SET pos_x_px = %s, pos_y_px = %s WHERE " + _exact_name("name"),
             (pos_x_px, pos_y_px, name),
         )
         if affected is None:
