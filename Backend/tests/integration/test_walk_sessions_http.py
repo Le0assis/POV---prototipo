@@ -132,6 +132,53 @@ def test_concurrent_sessions_do_not_add_each_others_steps():
     assert second["visited_path"] == [NODE_A]
 
 
+def _open(client: TestClient, session_id: str, headers: dict | None = None):
+    sent = {"X-Pov-Session": session_id}
+    if headers:
+        sent.update(headers)
+    return client.get("/api/current_location", headers=sent)
+
+
+def test_ninth_session_from_one_ip_is_429_and_the_other_ip_stays(monkeypatch):
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    first = TestClient(app, client=("203.0.113.10", 50000))
+    for index in range(8):
+        opened = _open(first, f"device-a-{index:02d}")
+        assert opened.status_code == 200, opened.text
+    blocked = _open(first, "device-a-09")
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"]
+    assert int(blocked.headers["retry-after"]) >= 1
+    spoofed = _open(first, "device-a-10", {
+        "X-Forwarded-For": "198.51.100.20",
+        "CF-Connecting-IP": "198.51.100.21",
+    })
+    assert spoofed.status_code == 429
+    other = TestClient(app, client=("203.0.113.11", 50000))
+    assert _open(other, "device-b-01").status_code == 200
+    assert _open(first, "device-a-00").status_code == 200
+    assert len(app_module.walk_sessions) == 9
+
+
+def test_trusted_proxy_counts_the_forwarded_client(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "203.0.113.10")
+    proxy = TestClient(app, client=("203.0.113.10", 50000))
+    forwarded = {"X-Forwarded-For": "198.51.100.20"}
+    for index in range(8):
+        opened = _open(proxy, f"device-p-{index:02d}", forwarded)
+        assert opened.status_code == 200, opened.text
+    assert _open(proxy, "device-p-09", forwarded).status_code == 429
+    spoofed_left = _open(proxy, "device-p-10", {
+        "X-Forwarded-For": "203.0.113.99, 198.51.100.20",
+    })
+    assert spoofed_left.status_code == 429
+    neighbor = _open(proxy, "device-q-01", {
+        "X-Forwarded-For": "203.0.113.9, 198.51.100.30",
+    })
+    assert neighbor.status_code == 200
+    assert len(app_module.walk_sessions) == 9
+
+
 def test_missing_or_invalid_session_is_400_and_stores_nothing():
     client = TestClient(app)
     missing = client.post("/api/localize", json={"step_length_m": 0.4, "yaw_rad": 0.0})

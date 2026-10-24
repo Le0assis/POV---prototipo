@@ -1,8 +1,9 @@
 import logging
 import math
+from contextlib import contextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path as ApiPath, Query, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Path as ApiPath, Query, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
@@ -21,10 +22,16 @@ from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
-from .editor_auth import require_editor_password
+from .editor_auth import client_key, require_editor_password
 from .envfile import load_env_file
 from .settings import assert_production_database, get_settings
-from .walk_session import InvalidSessionId, WalkSessions, parse_session_id
+from .walk_session import (
+    SESSION_LIMIT_DETAIL,
+    InvalidSessionId,
+    SessionLimit,
+    WalkSessions,
+    parse_session_id,
+)
 
 load_env_file()
 
@@ -222,6 +229,20 @@ def require_session_id(x_pov_session: str | None = Header(default=None)) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@contextmanager
+def hold_session(session_id: str, request: Request, **kwargs):
+    """Sessão deste IP. O IP é o mesmo do limite de senha. Cheio responde 429."""
+    try:
+        with walk_sessions.hold(session_id, client_ip=client_key(request), **kwargs) as state:
+            yield state
+    except SessionLimit as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=SESSION_LIMIT_DETAIL,
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
+
 @app.get("/health")
 @app.get("/api/health")
 def health():
@@ -347,6 +368,7 @@ def create_edge(
 @app.post("/api/localize", status_code=status.HTTP_200_OK)
 def localize_user(
     sensor_data: StepSensorSchema,
+    request: Request,
     _test: None = Depends(require_test_routes),
     session_id: str = Depends(require_session_id),
 ):
@@ -355,7 +377,7 @@ def localize_user(
 
     try:
         step_event = StepEventAdapter(step_length_m=sensor_data.step_length_m)
-        with walk_sessions.hold(session_id) as state:
+        with hold_session(session_id, request) as state:
             current_node = state.matcher.process_step(
                 step=step_event,
                 current_yaw_rad=sensor_data.yaw_rad,
@@ -512,6 +534,7 @@ def delete_route(
 # Modificar reset para aceitar start_node dinâmico
 @app.post("/api/reset")
 def reset_session(
+    request: Request,
     start_node: str = Query(default="Recepcao", max_length=NAME_MAX),
     _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
@@ -523,7 +546,7 @@ def reset_session(
         start_node = next(iter(topo_map.nodes), starting_node)
     else:
         start_node = resolved_start
-    with walk_sessions.hold(session_id, reset=True, start_node=start_node) as state:
+    with hold_session(session_id, request, reset=True, start_node=start_node) as state:
         started = state.visited_path[0]
     return {
         "status": "success",
@@ -539,10 +562,11 @@ for _mount, _folder in (("/css", "css"), ("/js", "js"), ("/assets", "assets"), (
 
 @app.get("/api/current_location")
 def get_current_location(
+    request: Request,
     _test: None = Depends(require_test_routes),
     session_id: str = Depends(require_session_id),
 ):
-    with walk_sessions.hold(session_id) as state:
+    with hold_session(session_id, request) as state:
         return {
             "current_node": state.matcher.current_node,
             "accumulated_distance_m": state.matcher.accumulated_distance,
