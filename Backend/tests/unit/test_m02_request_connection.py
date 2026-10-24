@@ -148,6 +148,92 @@ def test_pool_waits_for_a_free_connection_before_503(monkeypatch):
         _zero_pool()
 
 
+def test_connect_error_does_not_print_the_password(monkeypatch, capsys):
+    secret = "segredo-que-nao-sai"
+
+    def boom(*_args, **_kwargs):
+        from mysql.connector import Error
+
+        raise Error(msg=f"Access denied for {secret}")
+
+    monkeypatch.setattr(db.mysql.connector, "connect", boom)
+    database = ConexaoBD("127.0.0.1", "POV", "pov", secret)
+    database.connect(announce=True)
+    printed = capsys.readouterr().out
+    assert secret not in printed
+    assert "***" in printed
+    assert database.connection is None
+
+
+def test_ensure_live_pings_then_reconnects_once(monkeypatch):
+    secret = "segredo-que-nao-sai"
+    database = ConexaoBD("127.0.0.1", "POV", "pov", secret)
+    pings: list[bool] = []
+
+    class _Conn:
+        unread_result = False
+        in_transaction = False
+
+        def ping(self, reconnect=False, attempts=1, delay=0):
+            pings.append(bool(reconnect))
+            from mysql.connector import Error
+
+            raise Error(msg=f"lost {secret}")
+
+        def close(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    class _Cursor:
+        unread_result = False
+
+        def close(self):
+            return None
+
+    database.connection = _Conn()
+    database.cursor = _Cursor()
+
+    def connect(self, announce=True, timeout=None):
+        self.connection = object()
+        self.cursor = object()
+
+    monkeypatch.setattr(ConexaoBD, "connect", connect)
+    assert database.ensure_live() is True
+    assert pings == [False]
+    assert database.connection is not None
+    assert database.cursor is not None
+
+
+def test_checkout_drops_a_dead_session_and_opens_another(monkeypatch):
+    _zero_pool()
+    secret = "segredo-que-nao-sai"
+    dead = ConexaoBD("127.0.0.1", "POV", "pov", secret)
+    dead.connection = object()
+    dead.cursor = object()
+    dead.ensure_live = lambda: False
+    closed: list[str] = []
+    dead.disconnect = lambda announce=True: closed.append("dead")
+
+    def connect(self, announce=True, timeout=None):
+        self.connection = object()
+        self.cursor = object()
+
+    monkeypatch.setattr(ConexaoBD, "connect", connect)
+    with db._pool_lock:
+        db._idle.append(dead)
+        db._open = 1
+    try:
+        got = db.checkout_connection(ConexaoBD("127.0.0.1", "POV", "pov", secret))
+        assert got is not dead
+        assert got.connection is not None
+        assert closed == ["dead"]
+        assert db._open == 1
+    finally:
+        _zero_pool()
+
+
 def test_pool_busy_only_after_the_wait(monkeypatch):
     monkeypatch.setattr(db, "POOL_MAX_TOTAL", 1)
     monkeypatch.setattr(db, "POOL_WAIT_S", 0.4)

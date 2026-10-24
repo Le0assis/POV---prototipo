@@ -20,7 +20,7 @@ from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
 from .editor_auth import require_editor_password
 from .envfile import load_env_file
-from .settings import get_settings
+from .settings import assert_production_database, get_settings
 from .walk_session import InvalidSessionId, WalkSessions, parse_session_id
 
 load_env_file()
@@ -76,11 +76,13 @@ FRONTEND_DIR = (BASE_DIR / "../../frontend").resolve()
 
 
 def database_from_settings() -> ConexaoBD:
-    """Sessão da API com DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.
+    """Sessão modelo com DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.
 
-    Sem ambiente a conta é pov no XAMPP local, não root. CREATE DATABASE
-    e GRANT ficam no create_tables (DB_ADMIN_*). Esta função não lê isso.
+    Em desenvolvimento, sem ambiente, a conta é pov. Em produção as cinco
+    variáveis são obrigatórias: falta alguma e a subida para, sem citar a
+    senha. CREATE DATABASE e GRANT ficam no create_tables (DB_ADMIN_*).
     """
+    assert_production_database()
     cfg = get_settings()
     return ConexaoBD(
         host=cfg.db_host,

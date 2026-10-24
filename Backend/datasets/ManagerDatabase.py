@@ -126,7 +126,7 @@ class ConexaoBD:
                 except (Error, OSError):
                     pass
             if announce:
-                print(f"Erro ao conectar ao banco de dados: {exc}")
+                print(f"Erro ao conectar ao banco de dados: {self._redact(exc)}")
 
     def _note_error(self, exc: BaseException) -> None:
         self.last_errno = getattr(exc, "errno", None)
@@ -423,8 +423,51 @@ class ConexaoBD:
 
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
 
+    def _redact(self, exc: BaseException) -> str:
+        """Texto de erro sem a senha. Log e print passam por aqui."""
+        text = str(exc)
+        secret = str(self.password or "")
+        if secret:
+            text = text.replace(secret, "***")
+        return text
+
+    def ensure_live(self) -> bool:
+        """Ping da sessão ociosa. Se caiu, abre outra no mesmo objeto."""
+        if self._ping():
+            return self._cursor_ready()
+        self.disconnect(announce=False)
+        self.connect(announce=False)
+        return self.connection is not None and self.cursor is not None
+
+    def _ping(self) -> bool:
+        connection = self.connection
+        if connection is None:
+            return False
+        ping = getattr(connection, "ping", None)
+        if not callable(ping):
+            # Dobro de teste, sem COM_PING. Sessão real do conector tem ping.
+            return self.cursor is not None
+        try:
+            self._drain_unread()
+            ping(reconnect=False, attempts=1, delay=0)
+            return True
+        except (Error, OSError):
+            return False
+
+    def _cursor_ready(self) -> bool:
+        if self.cursor is not None:
+            return True
+        connection = self.connection
+        if connection is None:
+            return False
+        try:
+            self.cursor = connection.cursor(dictionary=True, buffered=True)
+            return self.cursor is not None
+        except (Error, OSError):
+            return False
+
     def reset_for_pool(self) -> bool:
-        """Deixa a sessão limpa para outro request. Não manda PING antes."""
+        """Deixa a sessão limpa para outro request. O ping é no checkout."""
         if not self._ready():
             return False
         try:
@@ -482,44 +525,59 @@ def _release_slot() -> None:
         _pool_ready.notify()
 
 
+def _reusable(conn: ConexaoBD) -> bool:
+    """Ping e, se preciso, uma reconexão. Objeto de teste sem o método só checa o cursor."""
+    ensure = getattr(conn, "ensure_live", None)
+    if not callable(ensure):
+        return conn.connection is not None and conn.cursor is not None
+    return bool(ensure())
+
+
 def checkout_connection(template: ConexaoBD) -> ConexaoBD:
     """Pega uma sessão ociosa ou abre outra, até ``POOL_MAX_TOTAL``.
 
-    Com o pool cheio, espera até ``POOL_WAIT_S`` por uma devolução.
-    ``DatabaseBusy`` só depois dessa espera.
+    A ociosa faz ping fora do lock. Se caiu, reconecta uma vez; se ainda
+    falhar, o lugar é liberado e abre outra, até o teto. Com o pool cheio,
+    espera até ``POOL_WAIT_S``. ``DatabaseBusy`` só depois dessa espera.
     """
     global _open
     deadline = time.monotonic() + POOL_WAIT_S
     while True:
         with _pool_lock:
-            while _idle:
+            if _idle:
                 cached = _idle.pop()
-                if cached.connection is not None and cached.cursor is not None:
-                    return cached
-                _open = max(0, _open - 1)
-                cached.disconnect(announce=False)
-            if _open < POOL_MAX_TOTAL:
+                opening = False
+            elif _open < POOL_MAX_TOTAL:
                 _open += 1
-                break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise DatabaseBusy("Não há conexão livre no pool.")
-            _pool_ready.wait(timeout=remaining)
-    opened = ConexaoBD(
-        template.host,
-        template.database,
-        template.user,
-        template.password,
-        template.port,
-    )
-    try:
-        opened.connect(announce=False)
-    except Exception:
-        _release_slot()
-        raise
-    if opened.connection is None:
-        _release_slot()
-    return opened
+                cached = None
+                opening = True
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DatabaseBusy("Não há conexão livre no pool.")
+                _pool_ready.wait(timeout=remaining)
+                continue
+        if not opening:
+            if _reusable(cached):
+                return cached
+            cached.disconnect(announce=False)
+            _release_slot()
+            continue
+        opened = ConexaoBD(
+            template.host,
+            template.database,
+            template.user,
+            template.password,
+            template.port,
+        )
+        try:
+            opened.connect(announce=False)
+        except Exception:
+            _release_slot()
+            raise
+        if opened.connection is None:
+            _release_slot()
+        return opened
 
 
 def checkin_connection(conn: ConexaoBD | None) -> None:

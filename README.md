@@ -173,7 +173,7 @@ Leituras públicas, entre elas `GET /api/health`, `GET /api/map`, `GET /api/map-
 
 A API de produção é `https://api.pov-unimar.com`. Com `POV_ENV=production`, o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem `POV_ENV`, o padrão é desenvolvimento: `localhost` e `127.0.0.1` nas portas do uvicorn (8000), do Live Server (5500) e da 3000. `CORS_ORIGINS` (vírgulas) substitui essa lista. A resposta não manda `Access-Control-Allow-Credentials`. Os registros DNS estão em `docs/dns.md`.
 
-O MySQL continua o do XAMPP. `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD` têm padrão `localhost`, `3306`, `POV`, `pov` e senha vazia. A API não lê `DB_ADMIN_USER` nem `DB_ADMIN_PASSWORD`. `localhost` na conexão vira `127.0.0.1`. O nome do schema é exatamente `POV`: no Linux, `pov` é outro banco. A API com `DB_NAME=POV` responde `1049 Unknown database` enquanto esse schema não foi criado.
+O MySQL continua o do XAMPP. A API lê `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD`. Em desenvolvimento, sem essas variáveis, o padrão é `localhost`, `3306`, `POV`, `pov` e senha vazia. Não há usuário `root` por omissão. Com `POV_ENV=production` as cinco são obrigatórias: se faltar alguma, o processo para na subida e a mensagem não contém a senha. A API não lê `DB_ADMIN_USER` nem `DB_ADMIN_PASSWORD`. O pool tem no máximo 8 sessões ociosas e 32 abertas. Antes de reusar, faz ping; se a sessão caiu, reconecta uma vez. Pool esgotado continua **503** com `Retry-After`. Erro de SQL continua **500** genérico. `localhost` na conexão vira `127.0.0.1`. O nome do schema é exatamente `POV`: no Linux, `pov` é outro banco. A API com `DB_NAME=POV` responde `1049 Unknown database` enquanto esse schema não foi criado.
 
 ### Aplicar o banco
 

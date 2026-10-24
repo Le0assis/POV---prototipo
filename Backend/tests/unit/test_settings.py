@@ -9,6 +9,30 @@ from api.settings import DEV_ORIGINS, PRODUCTION_ORIGINS, get_settings
 pytestmark = pytest.mark.unit
 
 
+def test_production_refuses_to_start_without_the_database_account(monkeypatch):
+    from api.settings import DatabaseConfigError, assert_production_database
+
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setenv("DB_PASSWORD", "segredo-que-nao-sai")
+    for name in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(DatabaseConfigError) as exc:
+        assert_production_database()
+    text = str(exc.value)
+    assert "DB_HOST" in text and "DB_USER" in text
+    assert "segredo-que-nao-sai" not in text
+    assert "root" not in text.split("Não há usuário root")[0]
+
+    for name, value in (
+        ("DB_HOST", "db.internal"),
+        ("DB_PORT", "3306"),
+        ("DB_NAME", "POV"),
+        ("DB_USER", "pov"),
+    ):
+        monkeypatch.setenv(name, value)
+    assert_production_database()
+
+
 def test_unset_env_is_development_with_xampp_defaults(monkeypatch):
     for name in (
         "POV_ENV",

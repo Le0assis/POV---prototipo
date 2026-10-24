@@ -182,6 +182,27 @@ def test_database_from_settings_reads_the_env(monkeypatch):
     assert conn.connection is None
 
 
+def test_production_startup_requires_the_database_env(monkeypatch):
+    from api.settings import DatabaseConfigError
+
+    secret = "segredo-que-nao-sai"
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setenv("DB_PASSWORD", secret)
+    for name in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(DatabaseConfigError) as exc:
+        app_module.database_from_settings()
+    assert secret not in str(exc.value)
+    monkeypatch.setenv("DB_HOST", "db.internal")
+    monkeypatch.setenv("DB_PORT", "3306")
+    monkeypatch.setenv("DB_NAME", "POV")
+    monkeypatch.setenv("DB_USER", "pov")
+    conn = app_module.database_from_settings()
+    assert conn.user == "pov"
+    assert conn.password == secret
+    assert conn.connection is None
+
+
 def test_database_from_settings_defaults_to_pov_and_ignores_admin(monkeypatch):
     for name in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
