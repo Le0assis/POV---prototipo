@@ -218,6 +218,7 @@ def require_session_id(x_pov_session: str | None = Header(default=None)) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/health")
 @app.get("/api/health")
 def health():
     """Grafo carregado na subida. Não abre MySQL. Vazio ou erro é 503."""

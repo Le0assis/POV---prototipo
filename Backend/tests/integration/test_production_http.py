@@ -48,22 +48,25 @@ def test_health_reports_the_graph_without_opening_mysql(monkeypatch):
     snapshot = _snapshot_map()
     try:
         app_module.map_load.set("ok", "ok")
-        response = TestClient(app).get("/api/health")
-        assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        for path in ("/health", "/api/health"):
+            response = TestClient(app).get(path)
+            assert response.status_code == 200
+            assert response.json() == {"status": "ok"}
 
         app_module.map_load.set("empty", "Grafo vazio.")
-        empty = TestClient(app).get("/api/health")
-        assert empty.status_code == 503
-        assert empty.json() == {"status": "empty", "detail": "Grafo vazio."}
+        for path in ("/health", "/api/health"):
+            empty = TestClient(app).get(path)
+            assert empty.status_code == 503
+            assert empty.json() == {"status": "empty", "detail": "Grafo vazio."}
 
         app_module.map_load.set("error", "Falha ao carregar o grafo.")
-        failed = TestClient(app).get("/api/health")
-        assert failed.status_code == 503
-        body = failed.json()
-        assert body["status"] == "error"
-        assert body["detail"] == "Falha ao carregar o grafo."
-        assert "senha" not in failed.text.lower()
+        for path in ("/health", "/api/health"):
+            failed = TestClient(app).get(path)
+            assert failed.status_code == 503
+            body = failed.json()
+            assert body["status"] == "error"
+            assert body["detail"] == "Falha ao carregar o grafo."
+            assert "senha" not in failed.text.lower()
     finally:
         _restore_map(snapshot)
 
