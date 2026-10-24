@@ -54,6 +54,10 @@ export function mountLayerControls(host, onChange) {
     });
     host.append(box);
 
+    function destroy() {
+        box.remove();
+    }
+
     function readForm() {
         const next = {};
         FIELDS.forEach(([key]) => {
@@ -62,5 +66,5 @@ export function mountLayerControls(host, onChange) {
         return next;
     }
 
-    return { layers, box };
+    return { layers, box, destroy };
 }

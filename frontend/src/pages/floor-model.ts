@@ -22,23 +22,31 @@ export async function loadFloorModel({ toast, includePath = true, api } = {} as 
     let config = null;
     let connections = [];
 
+    const problems = [];
+
     if (mapResult.ok) {
         nodes = Array.isArray(mapResult.value.nodes) ? mapResult.value.nodes : [];
     } else {
-        notify(mapResult.error.message || 'Falha ao carregar o mapa.', 'erro');
+        const message = failureText(mapResult.error, 'Falha ao carregar o mapa.');
+        problems.push(message);
+        notify(message, 'erro');
     }
 
     if (configResult.ok) {
         config = normalizeMapConfig(configResult.value);
     } else {
-        notify(configResult.error.message || 'Planta ainda não configurada.', 'warn');
+        const message = failureText(configResult.error, 'Planta ainda não configurada.');
+        problems.push(message);
+        notify(message, 'warn');
     }
 
     if (connectionResult.ok) {
         const data = connectionResult.value;
         connections = Array.isArray(data.connections) ? data.connections : [];
     } else {
-        notify(connectionResult.error.message || 'Falha ao carregar as conexões.', 'erro');
+        const message = failureText(connectionResult.error, 'Falha ao carregar as conexões.');
+        problems.push(message);
+        notify(message, 'erro');
     }
 
     const indexed = indexCheckpoints(nodes);
@@ -49,8 +57,14 @@ export async function loadFloorModel({ toast, includePath = true, api } = {} as 
         config,
         connections,
         polylines: built.polylines,
-        missingAnchor: built.missingAnchor
+        missingAnchor: built.missingAnchor,
+        problems
     };
+}
+
+function failureText(error, fallback) {
+    const message = error && error.message;
+    return message || fallback;
 }
 
 async function settle(promise) {

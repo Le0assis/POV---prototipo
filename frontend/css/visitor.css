@@ -302,27 +302,14 @@ html.dark .visitor-map .leaflet-container {
     font-family: var(--font-sans);
 }
 
-.map-status {
-    position: absolute;
-    top: var(--space-8);
-    left: var(--space-8);
-    z-index: 500;
-    max-width: calc(100% - 16px);
-    margin: 0;
-    padding: var(--space-8) var(--space-12);
-    color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-}
-
 .map-recenter {
     position: absolute;
-    right: var(--space-8);
-    bottom: var(--space-8);
+    right: max(var(--space-8), env(safe-area-inset-right));
+    bottom: max(var(--space-8), env(safe-area-inset-bottom));
     z-index: 500;
     width: auto;
+    min-width: 44px;
+    min-height: 44px;
     padding: var(--space-8) var(--space-12);
     box-shadow: var(--shadow);
 }
@@ -791,11 +778,13 @@ html.dark .visitor-map .leaflet-container {
     display: none !important;
 }
 
-.visitor-shell[data-state="E4"] .map-recenter {
+.visitor-shell[data-state="E4"] .map-recenter,
+.visitor-shell[data-state="E4"] .leaflet-bottom.leaflet-left {
     bottom: 96px;
 }
 
-.visitor-shell[data-state="E5"] .map-recenter {
+.visitor-shell[data-state="E5"] .map-recenter,
+.visitor-shell[data-state="E5"] .leaflet-bottom.leaflet-left {
     bottom: 200px;
 }
 

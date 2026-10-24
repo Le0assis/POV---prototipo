@@ -50,10 +50,6 @@ const ICONS = {
     ]
 };
 
-export function hasLucideIcon(name) {
-    return Boolean(name && ICONS[String(name).trim().toLowerCase()]);
-}
-
 export function lucideIcon(name) {
     const spec = name ? ICONS[String(name).trim().toLowerCase()] : null;
     if (!spec || typeof document === 'undefined') return null;

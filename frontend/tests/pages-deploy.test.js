@@ -17,6 +17,7 @@ test('o Pages publica o build do Vite no domínio próprio', () => {
     assert.match(pages, /actions\/deploy-pages/);
     assert.match(pages, /actions\/upload-pages-artifact/);
     assert.match(pages, /frontend\/dist/);
+    assert.match(pages, /VITE_API_URL:\s*https:\/\/api\.pov-unimar\.com/);
     assert.match(pages, /VITE_API_BASE_URL:\s*https:\/\/api\.pov-unimar\.com/);
     assert.match(pages, /branches:\s*\["main"\]/);
     assert.doesNotMatch(pages, /feat\/pov-refatoracao/);

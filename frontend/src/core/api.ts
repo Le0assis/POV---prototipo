@@ -398,10 +398,6 @@ export function getConnections({ includePath = true } = {} as any) {
     });
 }
 
-export function getConnection(edgeId) {
-    return request(`/api/connections/${encodeURIComponent(edgeId)}`);
-}
-
 export function getPdrConfig() {
     return request('/api/pdr/config');
 }

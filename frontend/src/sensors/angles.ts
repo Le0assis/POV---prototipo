@@ -52,38 +52,7 @@ export function circularEma(prev, next, alpha) {
     return normalizeDeg(radToDeg(Math.atan2(s, c)));
 }
 
-/**
- * Devolve um ângulo contínuo (sem saltos de 360°) a partir do último valor
- * contínuo e de uma nova leitura em graus. O passo entre amostras nunca excede 180°.
- */
-export function unwrap(prevContinuous, newDeg) {
-    if (!Number.isFinite(prevContinuous)) return newDeg;
-    return prevContinuous + signedDelta(prevContinuous, newDeg);
-}
-
-const CARDINALS = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
-
-/** Ponto cardeal/colateral (N, NE, L, SE, S, SO, O, NO) para um rumo em graus. */
-export function cardinal(deg) {
-    const idx = Math.round(normalizeDeg(deg) / 45) % 8;
-    return CARDINALS[idx];
-}
-
-/**
- * Converte o heading do grafo (rad) para rumo horário de bússola, em [0, 360).
- * `offsetDeg` alinha o referencial relativo do grafo ao rumo de bússola.
- */
-export function backendHeadingToBearing(rad, offsetDeg = 0) {
-    const deg = radToDeg(rad);
-    return HEADING_CONVENTION === 'ccw'
-        ? normalizeDeg(-deg + offsetDeg)
-        : normalizeDeg(deg + offsetDeg);
-}
-
-/**
- * Inverso exato de `backendHeadingToBearing`: rumo de bússola (graus) → yaw do
- * backend em radianos, no intervalo (-PI, PI].
- */
+/** Rumo de bússola (graus, horário) → yaw do backend em radianos, no intervalo (−π, π]. */
 export function bearingToBackendYaw(deg, offsetDeg = 0) {
     const yawDeg = HEADING_CONVENTION === 'ccw'
         ? offsetDeg - deg

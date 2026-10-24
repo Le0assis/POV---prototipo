@@ -128,7 +128,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 40px;
+    min-height: 44px;
     padding: 0 6px;
     font-size: 14px;
 }
@@ -154,6 +154,72 @@
     box-sizing: border-box;
 }
 
+.map-status {
+    position: absolute;
+    top: var(--space-8);
+    left: var(--space-8);
+    z-index: 800;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-8);
+    max-width: min(20rem, calc(100% - 8.5rem));
+    margin: 0;
+    padding: var(--space-8) var(--space-12);
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    pointer-events: auto;
+}
+
+.map-status[hidden] {
+    display: none !important;
+}
+
+.map-status.is-error {
+    border-color: var(--danger);
+}
+
+.map-status-retry {
+    min-width: 44px;
+    min-height: 44px;
+    touch-action: manipulation;
+}
+
+.map-stage .map-status {
+    top: auto;
+    right: var(--space-8);
+    bottom: 2.75rem;
+    left: var(--space-8);
+    max-width: none;
+}
+
+.visitor-map .map-status {
+    top: max(var(--space-8), env(safe-area-inset-top));
+    left: max(var(--space-8), env(safe-area-inset-left));
+}
+
+.leaflet-control-zoom.leaflet-bar a,
+.leaflet-touch .leaflet-control-zoom.leaflet-bar a {
+    width: 44px;
+    height: 44px;
+    line-height: 44px;
+    font-size: 22px;
+    touch-action: manipulation;
+}
+
+.visitor-map .leaflet-bottom.leaflet-left {
+    left: max(8px, env(safe-area-inset-left));
+    bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+.map-layers-toggle,
+.map-recenter {
+    touch-action: manipulation;
+}
+
 @media (max-width: 900px) {
     .map-layout { grid-template-columns: 1fr; }
     .map-stage { height: 420px; }
@@ -163,8 +229,8 @@
         align-items: center;
         justify-content: center;
         align-self: flex-end;
-        min-height: 40px;
-        min-width: 40px;
+        min-height: 44px;
+        min-width: 44px;
         padding: 0 12px;
         border: 0;
         border-radius: var(--radius);

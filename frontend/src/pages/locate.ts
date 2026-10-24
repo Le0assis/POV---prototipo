@@ -13,6 +13,7 @@ import { StepDetector } from '../sensors/step-detector.js';
 import { metersToPixels, plantHeadingToScreenDeg } from '../map/coords.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels, createBlueDot } from '../map/layers.js';
+import { floorNotice, mountMapStatus } from '../map/map-status.js';
 import { createPositionTracker } from '../nav/positioning.js';
 import { outgoingEdges } from '../route/model.js';
 import { nearestCheckpoint, readLocalization } from '../route/localize.js';
@@ -42,14 +43,24 @@ window.addEventListener('pagehide', stopSensors);
 
 async function init() {
     insertTopNav('locate');
-    state.floor = createFloorMap($('#floor-map'));
+    const host = $('#floor-map');
+    const status = mountMapStatus(host);
+    try {
+        state.floor = createFloorMap(host);
+    } catch (err) {
+        status.show(err && err.message ? err.message : 'Não foi possível abrir o mapa.', {
+            error: true,
+            host
+        });
+        return;
+    }
     state.dot = createBlueDot(state.floor);
     $('#loc-start').addEventListener('change', fillEdges);
     $('#loc-start-btn').addEventListener('click', start);
     $('#loc-stop').addEventListener('click', stopSensors);
     $('#loc-recal').addEventListener('click', recalibrate);
     $('#loc-sim').addEventListener('click', simulateStep);
-    state.model = await loadFloorModel({ toast });
+    await showModel();
     try {
         const config = await getPdrConfig();
         state.pdr = config && config.step_length ? config : null;
@@ -62,20 +73,32 @@ async function init() {
         toast('Sem parâmetros de PDR do servidor.', 'erro');
     }
     paintGoal();
-    const placed = state.model.checkpoints
-        .filter((cp) => cp.anchor)
-        .map((cp) => ({ id: cp.name, label: cp.name }));
-    fillSelect($('#loc-start'), placed, 'Checkpoint');
-    fillEdges();
-    if (state.model.config && state.model.config.plan_image && state.model.config.ready) {
-        try {
-            await state.floor.setPlan(resolvePlanImage(state.model.config.plan_image));
-        } catch (err) {
-            toast(err.message || 'Planta indisponível.', 'warn');
+
+    async function showModel() {
+        status.show('Carregando o mapa…', { busy: true, host });
+        state.model = await loadFloorModel({ toast: () => {} });
+        let planError = '';
+        if (state.model.config && state.model.config.plan_image && state.model.config.ready) {
+            try {
+                await state.floor.setPlan(resolvePlanImage(state.model.config.plan_image));
+            } catch (err) {
+                planError = err && err.message ? err.message : 'Não foi possível carregar a planta.';
+            }
         }
+        const placed = state.model.checkpoints
+            .filter((cp) => cp.anchor)
+            .map((cp) => ({ id: cp.name, label: cp.name }));
+        fillSelect($('#loc-start'), placed, 'Checkpoint');
+        fillEdges();
+        renderFloorLayers(state.floor, state.model, { editable: false });
+        state.floor.fitToContent(contentPixels(state.model));
+        const notice = floorNotice(state.model, planError);
+        status.show(notice.message, {
+            error: notice.error,
+            host,
+            onRetry: notice.retry ? () => { void showModel(); } : null
+        });
     }
-    renderFloorLayers(state.floor, state.model, { editable: false });
-    state.floor.fitToContent(contentPixels(state.model));
 }
 
 function fillEdges() {

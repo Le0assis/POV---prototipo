@@ -30,7 +30,6 @@ const publicApi = new Set([
     'getMap',
     'getMapConfig',
     'getConnections',
-    'getConnection',
     'getPdrConfig',
     'getRoutes',
     'getRoute',
