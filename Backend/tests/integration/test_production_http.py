@@ -196,14 +196,23 @@ def test_production_startup_requires_the_database_env(monkeypatch):
     monkeypatch.setenv("DB_HOST", "db.internal")
     monkeypatch.setenv("DB_PORT", "3306")
     monkeypatch.setenv("DB_NAME", "POV")
+    monkeypatch.setenv("DB_USER", "Root")
+    with pytest.raises(DatabaseConfigError) as root_exc:
+        app_module.database_from_settings()
+    assert secret not in str(root_exc.value)
     monkeypatch.setenv("DB_USER", "pov")
+    monkeypatch.setenv("DB_PASSWORD", "   ")
+    with pytest.raises(DatabaseConfigError) as empty_exc:
+        app_module.database_from_settings()
+    assert secret not in str(empty_exc.value)
+    monkeypatch.setenv("DB_PASSWORD", secret)
     conn = app_module.database_from_settings()
     assert conn.user == "pov"
     assert conn.password == secret
     assert conn.connection is None
 
 
-def test_database_from_settings_defaults_to_pov_and_ignores_admin(monkeypatch):
+def test_database_from_settings_does_not_invent_root(monkeypatch):
     for name in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DB_ADMIN_USER", "root")
@@ -212,6 +221,7 @@ def test_database_from_settings_defaults_to_pov_and_ignores_admin(monkeypatch):
     assert conn.host == "localhost"
     assert conn.port == 3306
     assert conn.database == "POV"
-    assert conn.user == "pov"
+    assert conn.user == ""
     assert conn.password == ""
+    assert conn.user != "root"
     assert conn.connection is None

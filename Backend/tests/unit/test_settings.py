@@ -21,15 +21,26 @@ def test_production_refuses_to_start_without_the_database_account(monkeypatch):
     text = str(exc.value)
     assert "DB_HOST" in text and "DB_USER" in text
     assert "segredo-que-nao-sai" not in text
-    assert "root" not in text.split("Não há usuário root")[0]
 
     for name, value in (
         ("DB_HOST", "db.internal"),
         ("DB_PORT", "3306"),
         ("DB_NAME", "POV"),
-        ("DB_USER", "pov"),
+        ("DB_USER", "root"),
     ):
         monkeypatch.setenv(name, value)
+    with pytest.raises(DatabaseConfigError) as root_exc:
+        assert_production_database()
+    assert "segredo-que-nao-sai" not in str(root_exc.value)
+    assert "root" in str(root_exc.value)
+
+    monkeypatch.setenv("DB_USER", "pov")
+    monkeypatch.setenv("DB_PASSWORD", "")
+    with pytest.raises(DatabaseConfigError) as empty_exc:
+        assert_production_database()
+    assert "DB_PASSWORD" in str(empty_exc.value)
+
+    monkeypatch.setenv("DB_PASSWORD", "segredo-que-nao-sai")
     assert_production_database()
 
 
@@ -52,8 +63,8 @@ def test_unset_env_is_development_with_xampp_defaults(monkeypatch):
     assert cfg.db_host == "localhost"
     assert cfg.db_port == 3306
     assert cfg.db_name == "POV"
-    assert cfg.db_user == "pov"
-    assert cfg.db_password == ""
+    assert cfg.db_user is None
+    assert cfg.db_password is None
     assert not hasattr(cfg, "db_admin_user")
     assert not hasattr(cfg, "db_admin_password")
 

@@ -9,7 +9,7 @@ Notas para quem altera o POV. O README continua sendo o passo a passo de instala
 - `/api/localize`, `/api/current_location` e `/api/reset` só existem com `POV_ENABLE_TEST_ROUTES` (padrão desligado). O nó `Recepcao` é fallback dessas rotas de teste. O estado do matcher é por `X-Pov-Session`, não global.
 - Em `POV_ENV=production` o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem a variável, o padrão é desenvolvimento e o localhost continua. `CORS_ORIGINS` substitui a lista. Sem `allow_credentials`.
 - O túnel publica só `api.pov-unimar.com` em `127.0.0.1:8000`. O site é o GitHub Pages (ver `docs/dns.md`).
-- MySQL continua o do XAMPP. Host, porta, base, usuário e senha saem de `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD`. Em desenvolvimento, sem elas, o padrão é `localhost` / `3306` / `POV` / `pov` / vazio. Não há `root` por omissão. Em `POV_ENV=production` as cinco são obrigatórias e a subida para se faltar alguma, sem escrever a senha. A API não lê `DB_ADMIN_*`. O pool (8 ociosas, 32 abertas) faz ping e reconecta antes de reusar. Pool cheio é 503; erro de SQL é 500 genérico.
+- MySQL continua o do XAMPP. Host, porta, base, usuário e senha saem de `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD`. Usuário e senha não têm default (não viram `root` nem senha vazia). Host, porta e schema, se faltarem, são `localhost` / `3306` / `POV`. Em `POV_ENV=production` as cinco são obrigatórias, `DB_USER=root` ou senha vazia impede a subida, e a mensagem não leva a senha. A API não lê `DB_ADMIN_*`. O único pool é o de `ManagerDatabase` (8 ociosas, 32 abertas): ping e reconexão antes de reusar. Pool cheio é 503; erro de SQL é 500 genérico.
 
 ## Frontend
 

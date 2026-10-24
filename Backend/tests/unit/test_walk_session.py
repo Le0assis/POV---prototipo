@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 import pytest
 
+import api.app as app_module
 from api.walk_session import InvalidSessionId, WalkSessions, parse_session_id
 
 pytestmark = pytest.mark.unit
@@ -22,6 +24,15 @@ class _Clock:
 
     def __call__(self) -> float:
         return self.now
+
+
+def test_app_does_not_keep_a_process_wide_matcher():
+    text = (Path(__file__).resolve().parents[2] / "api" / "app.py").read_text(encoding="utf-8")
+    assert "global matcher" not in text
+    assert "visited_path = [" not in text
+    assert not hasattr(app_module, "matcher")
+    assert not hasattr(app_module, "visited_path")
+    assert app_module.walk_sessions is not None
 
 
 def test_session_id_accepts_a_device_token_and_rejects_the_rest():

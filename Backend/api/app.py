@@ -78,17 +78,20 @@ FRONTEND_DIR = (BASE_DIR / "../../frontend").resolve()
 def database_from_settings() -> ConexaoBD:
     """Sessão modelo com DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.
 
-    Em desenvolvimento, sem ambiente, a conta é pov. Em produção as cinco
-    variáveis são obrigatórias: falta alguma e a subida para, sem citar a
-    senha. CREATE DATABASE e GRANT ficam no create_tables (DB_ADMIN_*).
+    Sem usuário no ambiente a conta fica vazia: não vira root. Em produção,
+    root ou senha vazia impede a subida, e a mensagem não cita a senha.
+    O pool é o de ``ManagerDatabase`` (checkout por request). CREATE DATABASE
+    e GRANT ficam no create_tables (DB_ADMIN_*).
     """
     assert_production_database()
     cfg = get_settings()
+    user = (cfg.db_user or "").strip()
+    password = "" if cfg.db_password is None else cfg.db_password
     return ConexaoBD(
         host=cfg.db_host,
         database=cfg.db_name,
-        user=cfg.db_user,
-        password=cfg.db_password,
+        user=user,
+        password=password,
         port=cfg.db_port,
     )
 
