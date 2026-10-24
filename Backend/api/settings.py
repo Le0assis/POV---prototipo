@@ -67,9 +67,10 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Produção não herda conta. Senha vazia e usuário root param a subida.
+# Produção não herda conta. Senha vazia, curta e usuário root param a subida.
 _PRODUCTION_DB_KEYS = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD")
 _PRODUCTION_DB_NONEMPTY = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER")
+_MIN_PRODUCTION_PASSWORD = 12
 
 
 class DatabaseConfigError(RuntimeError):
@@ -79,8 +80,9 @@ class DatabaseConfigError(RuntimeError):
 def assert_production_database() -> None:
     """Para a subida em produção sem conta de aplicação.
 
-    Falta variável, ``DB_USER`` root ou senha vazia. Fora de produção não
-    inventa usuário nem senha.
+    Falta variável, ``DB_USER`` root, senha vazia ou senha com menos de
+    12 caracteres. Fora de produção a senha curta continua válida. A
+    mensagem não mostra o valor.
     """
     if get_settings().pov_env.strip().lower() != "production":
         return
@@ -96,8 +98,13 @@ def assert_production_database() -> None:
     refused: list[str] = []
     if user.casefold() == "root":
         refused.append("DB_USER=root")
-    if "DB_PASSWORD" in os.environ and not str(password).strip() and "DB_PASSWORD" not in missing:
-        refused.append("DB_PASSWORD vazia")
+    if "DB_PASSWORD" in os.environ and "DB_PASSWORD" not in missing:
+        if not str(password).strip():
+            refused.append("DB_PASSWORD vazia")
+        elif len(password) < _MIN_PRODUCTION_PASSWORD:
+            refused.append(
+                f"DB_PASSWORD com menos de {_MIN_PRODUCTION_PASSWORD} caracteres"
+            )
     problems = missing + refused
     if not problems:
         return
@@ -105,6 +112,7 @@ def assert_production_database() -> None:
         "Produção sem conta de aplicação ("
         + ", ".join(problems)
         + "). Defina DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD. "
-        "DB_USER não pode ser root e a senha não pode ser vazia. "
+        "DB_USER não pode ser root. A senha não pode ser vazia e, em produção, "
+        f"precisa de {_MIN_PRODUCTION_PASSWORD} caracteres ou mais. "
         "A API não lê DB_ADMIN_*."
     )

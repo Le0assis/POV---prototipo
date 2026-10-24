@@ -214,6 +214,20 @@ def test_short_password_stays_in_the_message_and_a_url_credential_does_not(capsy
     assert "mysql://***@db.internal/POV" in long
 
 
+def test_url_userinfo_runs_to_the_last_at_before_the_host():
+    database = ConexaoBD("127.0.0.1", "POV", "pov", "ab")
+    with_at = database._redact(RuntimeError("mysql://pov:p@ss@db"))
+    assert with_at == "mysql://***@db"
+    assert "p@ss" not in with_at
+    with_slash = database._redact(RuntimeError("mysql+pymysql://pov:p/ss@db"))
+    assert with_slash == "mysql+pymysql://***@db"
+    assert "p/ss" not in with_slash
+    both = database._redact(RuntimeError(
+        "antes mysql://pov:p@ss@db/POV e mysql+pymysql://pov:p/ss@db depois"
+    ))
+    assert both == "antes mysql://***@db/POV e mysql+pymysql://***@db depois"
+
+
 def test_map_rollback_prints_use_redact():
     source = (Path(__file__).resolve().parents[2] / "map" / "MapDatabaseManager.py").read_text(
         encoding="utf-8"

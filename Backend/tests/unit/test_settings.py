@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from api.settings import DEV_ORIGINS, PRODUCTION_ORIGINS, get_settings
@@ -42,6 +44,42 @@ def test_production_refuses_to_start_without_the_database_account(monkeypatch):
 
     monkeypatch.setenv("DB_PASSWORD", "segredo-que-nao-sai")
     assert_production_database()
+
+
+def test_production_refuses_a_short_database_password(monkeypatch):
+    from api.settings import DatabaseConfigError, assert_production_database
+
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setenv("DB_HOST", "db.internal")
+    monkeypatch.setenv("DB_PORT", "3306")
+    monkeypatch.setenv("DB_NAME", "POV")
+    monkeypatch.setenv("DB_USER", "pov")
+    short = "abcdefghijk"
+    assert len(short) == 11
+    monkeypatch.setenv("DB_PASSWORD", short)
+    with pytest.raises(DatabaseConfigError) as exc:
+        assert_production_database()
+    text = str(exc.value)
+    assert "DB_PASSWORD com menos de 12 caracteres" in text
+    assert "12 caracteres ou mais" in text
+    assert short not in text
+
+    monkeypatch.setenv("DB_PASSWORD", "abcdefghijkl")
+    assert len(os.environ["DB_PASSWORD"]) == 12
+    assert_production_database()
+
+
+def test_development_and_test_accept_a_short_database_password(monkeypatch):
+    from api.settings import assert_production_database
+
+    monkeypatch.setenv("DB_HOST", "db.internal")
+    monkeypatch.setenv("DB_PORT", "3306")
+    monkeypatch.setenv("DB_NAME", "POV")
+    monkeypatch.setenv("DB_USER", "pov")
+    monkeypatch.setenv("DB_PASSWORD", "ab")
+    for env in ("development", "test", "dev"):
+        monkeypatch.setenv("POV_ENV", env)
+        assert_production_database()
 
 
 def test_unset_env_is_development_with_xampp_defaults(monkeypatch):

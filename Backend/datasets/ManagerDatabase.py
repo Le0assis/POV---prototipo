@@ -62,8 +62,11 @@ class DatabaseQueryError(Exception):
 _LOCK_ERRNOS = (1205, 1213)
 # Senha menor que isso não entra no replace: "a" ou "pov" comem a mensagem.
 _MIN_SECRET_LEN = 6
-# mysql://user:pass@host vira mysql://***@host. A senha curta também sai daqui.
-_URL_USERINFO = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^\s/@]*:[^\s/@]*@")
+# Userinfo vai até o último @ do token (senha pode ter @ ou / crus).
+# mysql://pov:p@ss@db e mysql+pymysql://pov:p/ss@db viram esquema://***@db.
+_URL_USERINFO = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)(?=\S*:)[^\s?#]*@"
+)
 
 
 def _tcp_host(host: str) -> str:
