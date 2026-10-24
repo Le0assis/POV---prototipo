@@ -24,6 +24,9 @@ DEV_ORIGINS = (
     "http://127.0.0.1:5500",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    # Vite (frontend/vite). A origem do browser é esta, não a da API.
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 )
 
 
@@ -42,7 +45,14 @@ class Settings(BaseSettings):
     def allowed_origins(self) -> list[str]:
         raw = self.cors_origins.strip()
         if raw:
-            return [part.strip() for part in raw.split(",") if part.strip()]
+            # ``*`` não entra: a resposta reflete a origem e não usa credencial.
+            chosen = [
+                part.strip()
+                for part in raw.split(",")
+                if part.strip() and part.strip() != "*"
+            ]
+            if chosen:
+                return chosen
         if self.pov_env.strip().lower() == "production":
             return list(PRODUCTION_ORIGINS)
         return list(DEV_ORIGINS)

@@ -36,6 +36,30 @@ def test_missing_or_wrong_password_is_401(monkeypatch):
     assert wrong.json()["detail"] == "Senha do editor ausente ou inválida."
 
 
+def test_bearer_token_is_not_a_login(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    response = TestClient(app).get(
+        "/api/auth/check",
+        headers={"Authorization": f"Bearer {PASSWORD}"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Senha do editor ausente ou inválida."
+    assert PASSWORD not in response.text
+
+
+def test_failed_login_does_not_log_or_return_the_password(monkeypatch, caplog):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    secret = "senha-que-nao-pode-vazar"
+    with caplog.at_level("DEBUG"):
+        response = TestClient(app).get(
+            "/api/auth/check",
+            headers={"X-Editor-Password": secret},
+        )
+    assert response.status_code == 401
+    assert secret not in response.text
+    assert secret not in caplog.text
+
+
 def test_unset_editor_password_is_503(monkeypatch):
     monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     response = TestClient(app).get("/api/auth/check", headers=OK)

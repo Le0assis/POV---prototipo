@@ -277,8 +277,8 @@ def test_process_raw_returns_500_when_the_walk_is_not_saved(monkeypatch):
     )
     assert response.status_code == 500
     assert response.status_code != 201
+    assert response.json() == {"detail": "Erro interno ao salvar."}
     assert "trace_id" not in response.json()
-    assert "trajetória" in response.json()["detail"]
 
 
 def test_process_raw_path_is_an_array_with_origin(monkeypatch):
@@ -445,10 +445,13 @@ def test_position_patch_missing_checkpoint_is_404(monkeypatch):
     assert cursor.calls == 1
 
 
-def test_position_patch_sql_error_is_500_not_404(monkeypatch):
-    cursor, response = _patch_position_request(monkeypatch, [_lock_error(1064)])
+def test_position_patch_sql_error_is_500_not_404(monkeypatch, caplog):
+    with caplog.at_level("ERROR"):
+        cursor, response = _patch_position_request(monkeypatch, [_lock_error(1064)])
     assert response.status_code == 500
-    assert response.json()["detail"] == "Falha ao gravar a posição do checkpoint."
+    assert response.json() == {"detail": "Erro interno."}
+    assert "Checkpoint não encontrado." not in response.text
+    assert "Falha ao gravar a posição do checkpoint." in caplog.text
     assert cursor.calls == 1
 
 

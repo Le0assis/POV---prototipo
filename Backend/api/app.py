@@ -112,8 +112,9 @@ async def mysql_busy(_request, exc: DatabaseBusy):
 
 @app.exception_handler(DatabaseQueryError)
 async def mysql_query_failed(_request, exc: DatabaseQueryError):
-    """Erro de SQL que não é lock. Não vira 404 de recurso ausente."""
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    """Erro de SQL que não é lock. O texto fica no log, não no cliente."""
+    logger.error("Erro de SQL", exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Erro interno."})
 
 
 topo_map = TopologicalMap()
@@ -211,7 +212,7 @@ def create_checkpoint(
             body["checkpoint"] = success
         return body
     else:
-        raise HTTPException(status_code=500, detail="Falha interna ao persistir checkpoint no banco.")
+        raise _internal_error("Erro interno ao salvar.", note="POST /api/checkpoints sem confirmação")
 
 
 @app.post("/api/edges", status_code=status.HTTP_201_CREATED)
@@ -231,7 +232,7 @@ def create_edge(
 
     success = map_db_manager.save_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
     if not success:
-        raise HTTPException(status_code=500, detail="Falha interna ao persistir conexão no banco.")
+        raise _internal_error("Erro interno ao salvar.", note="POST /api/edges")
 
     # Um registro por sentido, nos mesmos radianos gravados no banco.
     inverse_heading = (edge.heading_rad + math.pi) % (2 * math.pi)
@@ -270,8 +271,10 @@ def localize_user(
             "current_node": current_node,
             "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0)
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro interno no PDR: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Erro interno.", exc, note="POST /api/localize") from exc
 
 
 @app.get("/api/route", status_code=status.HTTP_200_OK)
@@ -347,7 +350,7 @@ def create_route(
 
     success = map_db_manager.save_route(name, start, end, segments, path_sequence)
     if not success:
-        raise HTTPException(status_code=500, detail="Falha ao salvar rota no banco.")
+        raise _internal_error("Erro interno ao salvar.", note="POST /api/routes")
 
     # Retorna a rota criada (busca pelo último ID)
     routes = map_db_manager.get_all_routes()
@@ -597,26 +600,17 @@ def get_pdr_config():
 @app.get("/")
 @app.get("/index.html")
 def read_index():
-    index_path = FRONTEND_DIR / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return {"error": f"Arquivo index.html nao encontrado no caminho {index_path}"}
+    return _frontend_page("index.html")
 
 @app.get("/recorder")
 @app.get("/recorder.html")
 def read_recorder():
-    recorder_path = FRONTEND_DIR / "recorder.html"
-    if recorder_path.exists():
-        return FileResponse(recorder_path)
-    return {"error": "Arquivo recorder.html nao encontrado em frontend/"}
+    return _frontend_page("recorder.html")
 
 @app.get("/routes")
 @app.get("/routes.html")
 def read_routes():
-    routes_path = FRONTEND_DIR / "routes.html"
-    if routes_path.exists():
-        return FileResponse(routes_path)
-    return {"error": "Arquivo routes.html nao encontrado em frontend/"}
+    return _frontend_page("routes.html")
 
 @app.get("/editor")
 @app.get("/editor.html")
@@ -634,10 +628,11 @@ def read_locate():
     return _frontend_page("locate.html")
 
 def _frontend_page(name: str):
-    path = FRONTEND_DIR / name
-    if path.exists():
-        return FileResponse(path)
-    return {"error": f"Arquivo {name} nao encontrado em frontend/"}
+    """Página do Vite. O editor e o gravador ficam em ``frontend/admin``."""
+    for path in (FRONTEND_DIR / name, FRONTEND_DIR / "admin" / name):
+        if path.is_file():
+            return FileResponse(path)
+    return JSONResponse(status_code=404, content={"detail": "Não encontrado."})
 
 @app.get("/api/sensors_log/{log_id}/csv")
 def download_sensor_log_csv(

@@ -97,9 +97,36 @@ def test_development_cors_keeps_localhost(monkeypatch):
     _clear_cors(monkeypatch, "development")
     client = TestClient(app)
     local = client.get("/api/health", headers={"Origin": "http://127.0.0.1:8000"})
+    vite = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
     other = client.get("/api/health", headers={"Origin": "https://evil.example"})
     assert local.headers["access-control-allow-origin"] == "http://127.0.0.1:8000"
+    assert vite.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert vite.headers["access-control-expose-headers"] == "Retry-After"
+    assert "access-control-allow-credentials" not in vite.headers
     assert "access-control-allow-origin" not in other.headers
+
+
+def test_wildcard_cors_does_not_open_the_api(monkeypatch):
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setenv("CORS_ORIGINS", "*")
+    client = TestClient(app)
+    response = client.get("/api/health", headers={"Origin": "https://evil.example"})
+    assert "access-control-allow-origin" not in response.headers
+    assert "access-control-allow-credentials" not in response.headers
+    page = client.get("/api/health", headers={"Origin": "https://pov-unimar.com"})
+    assert page.headers["access-control-allow-origin"] == "https://pov-unimar.com"
+
+
+def test_missing_page_is_404_and_editor_lives_under_admin():
+    client = TestClient(app)
+    missing = client.get("/routes")
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "Não encontrado."}
+    assert "frontend" not in missing.text
+    editor = client.get("/editor")
+    assert editor.status_code == 200
+    assert "text/html" in editor.headers["content-type"]
+    assert "POV" in editor.text
 
 
 def test_location_routes_are_404_unless_the_flag_is_on(monkeypatch):

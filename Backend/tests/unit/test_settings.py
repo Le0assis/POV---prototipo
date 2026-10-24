@@ -50,6 +50,19 @@ def test_cors_origins_replaces_the_list(monkeypatch):
     ]
 
 
+def test_dev_origins_include_the_vite_port():
+    assert "http://localhost:5173" in DEV_ORIGINS
+    assert "http://127.0.0.1:5173" in DEV_ORIGINS
+
+
+def test_wildcard_origin_is_dropped(monkeypatch):
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setenv("CORS_ORIGINS", "*")
+    assert get_settings().allowed_origins() == list(PRODUCTION_ORIGINS)
+    monkeypatch.setenv("CORS_ORIGINS", " *, https://pov-unimar.com ")
+    assert get_settings().allowed_origins() == ["https://pov-unimar.com"]
+
+
 def test_create_tables_uses_db_settings(monkeypatch):
     from datasets.create_tables import conexao_from_settings
 
