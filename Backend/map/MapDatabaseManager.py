@@ -347,7 +347,7 @@ class MapDatabaseManager:
                                 raise RuntimeError("commit da aresta falhou")
                             return True
                         except Exception as exc:
-                            print(f"Aresta revertida: {exc}")
+                            print(f"Aresta revertida: {self.db._redact(exc)}")
                             self.db.rollback_transaction()
                             raise
                     except DatabaseBusy:
@@ -590,7 +590,7 @@ class MapDatabaseManager:
                                 raise RuntimeError("commit da trajetória falhou")
                             return payload
                         except Exception as exc:
-                            print(f"Trajetória revertida: {exc}")
+                            print(f"Trajetória revertida: {self.db._redact(exc)}")
                             self.db.rollback_transaction()
                             raise
                     except DatabaseBusy:

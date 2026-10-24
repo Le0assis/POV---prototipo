@@ -189,6 +189,46 @@ def test_transaction_errors_do_not_print_the_password(capsys):
     assert "Traceback" not in printed
 
 
+def test_short_password_stays_in_the_message_and_a_url_credential_does_not(capsys):
+    database, _cursor = _db([Error(msg="denied for ab near OR", errno=1064)])
+    database.password = "ab"
+    assert database.execute_update("UPDATE t SET a = 1") is None
+    plain = capsys.readouterr().out
+    assert "denied for ab near OR" in plain
+    assert "***" not in plain
+
+    database, _cursor = _db([Error(msg="mysql://pov:ab@127.0.0.1/POV", errno=1064)])
+    database.password = "ab"
+    assert database.execute_search("SELECT 1") is None
+    masked = capsys.readouterr().out
+    assert "pov:ab@" not in masked
+    assert "mysql://***@127.0.0.1/POV" in masked
+
+    database, _cursor = _db([
+        Error(msg="senha1 em mysql://pov:senha1@db.internal/POV", errno=1064),
+    ])
+    database.password = "senha1"
+    assert database.execute_search("SELECT 1") is None
+    long = capsys.readouterr().out
+    assert "senha1" not in long
+    assert "mysql://***@db.internal/POV" in long
+
+
+def test_map_rollback_prints_use_redact():
+    source = (Path(__file__).resolve().parents[2] / "map" / "MapDatabaseManager.py").read_text(
+        encoding="utf-8"
+    )
+    checked = 0
+    for line in source.splitlines():
+        if "print(" not in line or "{exc}" in line:
+            continue
+        if "exc" not in line:
+            continue
+        assert "_redact(exc)" in line, line
+        checked += 1
+    assert checked == 2
+
+
 def test_every_mysql_error_print_uses_redact():
     source = (Path(__file__).resolve().parents[2] / "datasets" / "ManagerDatabase.py").read_text(
         encoding="utf-8"

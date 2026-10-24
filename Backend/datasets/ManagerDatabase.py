@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+import re
 import threading
 import time
 
@@ -59,6 +60,10 @@ class DatabaseQueryError(Exception):
 
 # innodb_lock_wait_timeout (1205) e deadlock (1213).
 _LOCK_ERRNOS = (1205, 1213)
+# Senha menor que isso não entra no replace: "a" ou "pov" comem a mensagem.
+_MIN_SECRET_LEN = 6
+# mysql://user:pass@host vira mysql://***@host. A senha curta também sai daqui.
+_URL_USERINFO = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^\s/@]*:[^\s/@]*@")
 
 
 def _tcp_host(host: str) -> str:
@@ -424,12 +429,16 @@ class ConexaoBD:
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
 
     def _redact(self, exc: BaseException) -> str:
-        """Texto de erro sem a senha. Log e print passam por aqui."""
+        """Texto de erro sem senha longa e sem credencial de URL.
+
+        O replace da senha é literal e só com 6 caracteres ou mais. Uma
+        senha curta no meio de ``user:pass@`` ainda some com a URL.
+        """
         text = str(exc)
-        secret = str(self.password or "")
-        if secret:
+        secret = str(getattr(self, "password", "") or "")
+        if len(secret) >= _MIN_SECRET_LEN:
             text = text.replace(secret, "***")
-        return text
+        return _URL_USERINFO.sub(r"\1***@", text)
 
     def ensure_live(self) -> bool:
         """Ping da sessão ociosa. Se caiu, abre outra no mesmo objeto."""
