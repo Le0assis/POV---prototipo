@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { buildQr, parseQr } from '../js/qr/qr-format.js';
-import { MISSING_SLUG_WARNING, filterQrCheckpoints, qrCheckpoints, qrJobs } from '../js/qr/qr-batch.js';
-import { QR_ERROR_CORRECTION, qrSvg } from '../js/qr/qr-draw.js';
+import { buildQr, parseQr } from '../src/qr/qr-format.ts';
+import { MISSING_SLUG_WARNING, filterQrCheckpoints, qrCheckpoints, qrJobs } from '../src/qr/qr-batch.ts';
+import { QR_ERROR_CORRECTION, qrSvg } from '../src/qr/qr-draw.ts';
 
 const rows = [
     {

@@ -76,6 +76,45 @@ def test_recorded_distance_is_median_and_active_is_latest():
     assert resolved["active_trace_id"] == 4
 
 
+def test_edge_matches_the_checkpoint_name_byte_for_byte():
+    """A aresta canônica é o nome exato. ``sala`` não reescreve ``Sala``."""
+    topo = TopologicalMap()
+    topo.add_checkpoint("Sala")
+    topo.add_checkpoint("Quarto")
+    topo.add_checkpoint("Sala")
+    assert list(topo.nodes) == ["Sala", "Quarto"]
+    assert topo.canonical_name("Sala") == "Sala"
+    assert topo.canonical_name("sala") is None
+    with pytest.raises(ValueError):
+        topo.load_directed_edges([
+            {"id": 1, "source_node": "Sala", "target_node": "Quarto", "distance_m": 3.0, "heading_rad": 0.1},
+            {"id": 2, "source_node": "sala", "target_node": "quarto", "distance_m": 9.0, "heading_rad": 0.4},
+        ])
+    assert [(edge.source, edge.target, edge.distance_m) for edge in topo.edges] == [
+        ("Sala", "Quarto", 3.0),
+    ]
+    assert topo.get_outgoing_edges("Sala")[0].target == "Quarto"
+    with pytest.raises(ValueError):
+        topo.get_outgoing_edges("sala")
+    from map.router import TopologicalRouter
+    router = TopologicalRouter(topo)
+    assert router.calculate_route("Sala", "Quarto") == ["Sala", "Quarto"]
+    assert router.calculate_route("sala", "quarto") == []
+
+
+def test_accents_stay_distinct_from_case():
+    topo = TopologicalMap()
+    topo.add_checkpoint("Recepção")
+    topo.add_checkpoint("Recepcao")
+    assert set(topo.nodes) == {"Recepção", "Recepcao"}
+    topo.upsert_directed_edge("Recepcao", "Recepção", 1.0, 0.0)
+    with pytest.raises(ValueError):
+        topo.upsert_directed_edge("recepcao", "Recepção", 2.0, 0.0)
+    assert [(edge.source, edge.target, edge.distance_m) for edge in topo.edges] == [
+        ("Recepcao", "Recepção", 1.0),
+    ]
+
+
 def test_load_does_not_mirror_duplicate_rows():
     topo = TopologicalMap()
     topo.add_checkpoint("Quarto")
@@ -134,6 +173,8 @@ class _MigrationDB:
         self.backup: list[dict] | None = None
         self.statements: list[tuple[str, object]] = []
         self.unique = False
+        self.ranked_unique = False
+        self.checkpoint_names = {"Quarto", "Sala"}
         self.fk = False
         self.map_row = False
         self.fail_exact: set[str] = set()
@@ -158,6 +199,48 @@ class _MigrationDB:
             return [{"ok": 1}] if self.fk else []
         if sql == module.SQL_SELECT_EDGES:
             return [dict(row) for row in self.edges]
+        if sql == module.SQL_EXTRAS:
+            return [
+                {
+                    "id": row["id"],
+                    "source_node": row["source_node"],
+                    "target_node": row["target_node"],
+                    "dup_rank": int(row.get("dup_rank") or 0),
+                }
+                for row in sorted(self.edges, key=lambda item: int(item["id"]))
+                if int(row.get("dup_rank") or 0) > 0
+            ]
+        if sql == module.SQL_ENGINE:
+            if "sensors_log" not in self.tables:
+                return []
+            return [{"engine": "InnoDB"}]
+        if sql == module.SQL_UNIQUE_HAS_RANK:
+            return [{"ok": 1}] if self.ranked_unique else []
+        if sql == module.SQL_DUP_GROUPS:
+            grouped: dict[tuple, list] = {}
+            for row in self.edges:
+                key = (str(row["source_node"]).casefold(), str(row["target_node"]).casefold())
+                grouped.setdefault(key, []).append(row)
+            found = []
+            for group in grouped.values():
+                if len(group) < 2:
+                    continue
+                group_id = min(int(item["id"]) for item in group)
+                for item in group:
+                    exact = (
+                        item["source_node"] in self.checkpoint_names
+                        and item["target_node"] in self.checkpoint_names
+                    )
+                    found.append({
+                        "id": item["id"],
+                        "source_node": item["source_node"],
+                        "target_node": item["target_node"],
+                        "dup_rank": int(item.get("dup_rank") or 0),
+                        "group_id": group_id,
+                        "exact_name": 1 if exact else 0,
+                    })
+            found.sort(key=lambda item: (item["group_id"], item["id"]))
+            return found
         if sql == module.SQL_MAP_EXISTS_ROW:
             return [{"id": 1}] if self.map_row else []
         return []
@@ -172,9 +255,12 @@ class _MigrationDB:
         if sql == module.SQL_BACKUP:
             self.backup = [dict(row) for row in self.edges]
             self.tables.add("edges_backup_m02")
-        if sql.startswith("DELETE FROM edges"):
-            dropped = set(params)
-            self.edges = [row for row in self.edges if row["id"] not in dropped]
+        if sql == module.SQL_SET_RANK:
+            rank, edge_id = params
+            for row in self.edges:
+                if row["id"] == edge_id:
+                    row["dup_rank"] = rank
+            return True
         if "ADD COLUMN" in sql:
             if "pos_x_px" in sql:
                 self.columns.add(("checkpoints", "pos_x_px"))
@@ -188,8 +274,16 @@ class _MigrationDB:
                 self.columns.add(("edges", "active_trace_id"))
             if "samples_count" in sql:
                 self.columns.add(("edges", "samples_count"))
-        if "uq_edges_direction" in sql:
+            if "dup_rank" in sql:
+                self.columns.add(("edges", "dup_rank"))
+                for row in self.edges:
+                    row.setdefault("dup_rank", 0)
+        if sql == module.SQL_UNIQUE_RANKED:
             self.unique = True
+            self.ranked_unique = True
+        elif "uq_edges_direction" in sql:
+            self.unique = True
+            self.ranked_unique = False
         if "walk_traces" in sql and "CREATE TABLE" in sql:
             self.tables.add("walk_traces")
         if "walk_steps" in sql and "CREATE TABLE" in sql:
@@ -203,16 +297,19 @@ class _MigrationDB:
         return True
 
 
-def test_migration_backs_up_then_dedupes_and_is_idempotent():
+def test_migration_backs_up_then_keeps_duplicates_and_is_idempotent():
     module = _migration()
     db = _MigrationDB()
-    removed = module.apply(db)
-    assert [row["id"] for row in removed] == [1, 2]
+    preserved = module.apply(db)
+    assert [row["id"] for row in preserved] == [1, 2]
+    assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert db.backup is not None and [row["id"] for row in db.backup] == [1, 2, 3, 4]
-    assert [row["id"] for row in db.edges] == [3, 4]
+    by_id = {row["id"]: int(row.get("dup_rank") or 0) for row in db.edges}
+    assert by_id == {1: 1, 2: 1, 3: 0, 4: 0}
     creates = [sql for sql, _params in db.statements if sql == module.SQL_BACKUP]
-    deletes = [sql for sql, _params in db.statements if sql.startswith("DELETE FROM edges")]
-    assert len(creates) == 1 and len(deletes) == 1
+    deletes = [sql for sql, _params in db.statements if sql.startswith("DELETE FROM")]
+    assert len(creates) == 1 and deletes == []
+    assert module.SQL_UNIQUE_RANKED in [sql for sql, _params in db.statements]
     walk_sql = next(sql for sql, _params in db.statements if "CREATE TABLE IF NOT EXISTS walk_traces" in sql)
     assert "varchar(100)" in walk_sql
     assert "sensors_log_id) REFERENCES sensors_log(id) ON DELETE CASCADE" in walk_sql
@@ -224,14 +321,15 @@ def test_migration_backs_up_then_dedupes_and_is_idempotent():
     assert any(sql == module.SQL_BACKFILL_SAMPLES for sql, _params in db.statements)
     assert ("edges", "samples_count") in db.columns
 
-    module.apply(db)
+    again = module.apply(db)
+    assert [row["id"] for row in again] == [1, 2]
     creates = [sql for sql, _params in db.statements if sql == module.SQL_BACKUP]
-    deletes = [sql for sql, _params in db.statements if sql.startswith("DELETE FROM edges")]
+    ranks = [sql for sql, _params in db.statements if sql == module.SQL_SET_RANK]
     classify = [sql for sql, _params in db.statements if sql == module.SQL_CLASSIFY_RECORDED]
     assert len(creates) == 1
-    assert len(deletes) == 1
+    assert len(ranks) == 2
     assert classify == [module.SQL_CLASSIFY_RECORDED]
-    assert [row["id"] for row in db.edges] == [3, 4]
+    assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
 
 
 def test_migration_aborts_when_backup_fails_and_does_not_dedupe():
@@ -240,7 +338,7 @@ def test_migration_aborts_when_backup_fails_and_does_not_dedupe():
     db.fail_exact.add(module.SQL_BACKUP)
     with pytest.raises(RuntimeError):
         module.apply(db)
-    assert not any(sql.startswith("DELETE FROM edges") for sql, _params in db.statements)
+    assert not any(sql == module.SQL_SET_RANK for sql, _params in db.statements)
     assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert "edges_backup_m02" not in db.tables
 
@@ -251,7 +349,7 @@ def test_migration_aborts_when_backup_is_not_confirmed():
     db.hide_backup = True
     with pytest.raises(RuntimeError):
         module.apply(db)
-    assert not any(sql.startswith("DELETE FROM edges") for sql, _params in db.statements)
+    assert not any(sql == module.SQL_SET_RANK for sql, _params in db.statements)
     assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
 
 
@@ -261,17 +359,89 @@ def test_migration_aborts_when_column_add_fails_before_dedupe():
     db.fail_parts = ("origin ENUM",)
     with pytest.raises(RuntimeError):
         module.apply(db)
-    assert not any(sql.startswith("DELETE FROM edges") for sql, _params in db.statements)
+    assert not any(sql == module.SQL_SET_RANK for sql, _params in db.statements)
     assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert "edges_backup_m02" in db.tables
 
 
-def test_existing_backup_is_enough_to_dedupe():
+def test_canonical_edge_matches_checkpoint_name_not_the_larger_id():
+    module = _migration()
+    assert "CAST(src.name AS BINARY) = CAST(e.source_node AS BINARY)" in module.SQL_DUP_GROUPS
+    assert "CAST(tgt.name AS BINARY) = CAST(e.target_node AS BINARY)" in module.SQL_DUP_GROUPS
+    assert "EXISTS" not in module.SQL_DUP_GROUPS
+    db = _MigrationDB()
+    db.edges = [
+        {"id": 1, "source_node": "Quarto", "target_node": "Sala", "distance_m": 3.0, "heading_rad": 0.0},
+        {"id": 2, "source_node": "Quarto", "target_node": "sala", "distance_m": 9.0, "heading_rad": 0.2},
+    ]
+    db.checkpoint_names = {"Quarto", "Sala"}
+    preserved = module.apply(db)
+    by_id = {row["id"]: int(row["dup_rank"]) for row in db.edges}
+    assert by_id == {1: 0, 2: 1}
+    assert [row["id"] for row in preserved] == [2]
+    assert [row["id"] for row in db.edges] == [1, 2]
+    assert not any(sql.startswith("DELETE FROM") for sql, _params in db.statements)
+
+
+def test_rerank_is_idempotent_when_the_old_canonical_was_the_lowercase_copy():
     module = _migration()
     db = _MigrationDB()
     db.tables.add("edges_backup_m02")
-    removed = module.apply(db)
-    assert [row["id"] for row in removed] == [1, 2]
+    db.columns.add(("edges", "dup_rank"))
+    db.unique = True
+    db.ranked_unique = True
+    db.edges = [
+        {
+            "id": 1,
+            "source_node": "Quarto",
+            "target_node": "Sala",
+            "distance_m": 3.0,
+            "heading_rad": 0.0,
+            "dup_rank": 1,
+        },
+        {
+            "id": 2,
+            "source_node": "Quarto",
+            "target_node": "sala",
+            "distance_m": 9.0,
+            "heading_rad": 0.2,
+            "dup_rank": 0,
+        },
+    ]
+    module.apply(db)
+    by_id = {row["id"]: int(row["dup_rank"]) for row in db.edges}
+    assert by_id == {1: 0, 2: 1}
+    parked = [params for sql, params in db.statements if sql == module.SQL_SET_RANK and params[0] < 0]
+    assert {params[1] for params in parked} == {1, 2}
+    again = module.apply(db)
+    assert [row["id"] for row in again] == [2]
+    assert {row["id"]: int(row["dup_rank"]) for row in db.edges} == {1: 0, 2: 1}
+    assert len([sql for sql, _params in db.statements if sql == module.SQL_SET_RANK]) == 4
+
+
+def test_without_an_exact_name_the_highest_id_stays_and_a_warning_is_printed(capsys):
+    module = _migration()
+    db = _MigrationDB()
+    db.edges = [
+        {"id": 4, "source_node": "Quarto", "target_node": "sala", "distance_m": 1.0, "heading_rad": 0.0},
+        {"id": 5, "source_node": "quarto", "target_node": "Sala", "distance_m": 2.0, "heading_rad": 0.0},
+    ]
+    db.checkpoint_names = {"Quarto", "Sala"}
+    module.apply(db)
+    by_id = {row["id"]: int(row["dup_rank"]) for row in db.edges}
+    assert by_id[5] == 0
+    assert by_id[4] != 0
+    assert "aviso" in capsys.readouterr().out
+    assert [row["id"] for row in db.edges] == [4, 5]
+
+
+def test_existing_backup_is_enough_to_rank_duplicates():
+    module = _migration()
+    db = _MigrationDB()
+    db.tables.add("edges_backup_m02")
+    preserved = module.apply(db)
+    assert [row["id"] for row in preserved] == [1, 2]
+    assert [row["id"] for row in db.edges] == [1, 2, 3, 4]
     assert module.SQL_BACKUP not in [sql for sql, _params in db.statements]
 
 

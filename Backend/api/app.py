@@ -1,20 +1,46 @@
+import logging
 import math
-import numpy as np
-from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
-from pydantic import BaseModel
-from typing import List
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 
-from datasets.ManagerDatabase import ConexaoBD, request_connection
+from datasets.ManagerDatabase import (
+    ConexaoBD,
+    DatabaseBusy,
+    DatabaseQueryError,
+    DatabaseUnavailable,
+    drain_pool,
+    request_session,
+)
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
-from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
+from .cors import OriginCORSMiddleware
 from .editor_auth import require_editor_password
+from .envfile import load_env_file
+from .settings import assert_production_database, get_settings
+from .walk_session import InvalidSessionId, WalkSessions, parse_session_id
+
+load_env_file()
+
+logger = logging.getLogger(__name__)
+
+
+def _internal_error(
+    detail: str,
+    exc: BaseException | None = None,
+    *,
+    status_code: int = 500,
+    note: str,
+) -> HTTPException:
+    """Corpo genérico. A causa fica no log do processo."""
+    if exc is None:
+        logger.error("%s", note)
+    else:
+        logger.error("%s", note, exc_info=exc)
+    return HTTPException(status_code=status_code, detail=detail)
 from map.MapDatabaseManager import (
     CheckpointConflictError,
     CheckpointLookupError,
@@ -32,14 +58,9 @@ from .schema import (
 )
 from pdr.steps import StepDetectorConfig, pdr_config_payload
 
-# --- IMPORTE SEUS MÓDULOS DE FILTRAGEM E PDR ---
-from filters.butterworth import ButterworthLowPassFilter
-from filters.madgwick import MadgwickAttitudeEstimator
-from pdr.steps import PeakStepDetector
 
-
-# --- CLASSE AUXILIAR DE COMPATIBILIDADE ---
 class StepEventAdapter:
+    """Passo já medido, no formato que o matcher de teste consome."""
     def __init__(self, step_length_m: float):
         self.step_length_m = step_length_m
 
@@ -50,81 +71,172 @@ app = FastAPI(
     description="Backend HTTP para mapeamento e localização indoor em tempo real via sensores mobile."
 )
 
-origins = [
-    "https://pov-unimar.com",
-    "https://www.pov-unimar.com",
-    "http://localhost",
-    "http://127.0.0.1:8000"
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  
-    allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"],  
-)
-
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR / "../../frontend").resolve()
 
-db = ConexaoBD(host="localhost", database="POV", user="root", password="")
-db.connect()
 
-if not db.connection:
-    print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
+def database_from_settings() -> ConexaoBD:
+    """Sessão modelo com DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.
 
+    Sem usuário no ambiente a conta fica vazia: não vira root. Em produção,
+    root ou senha vazia impede a subida, e a mensagem não cita a senha.
+    O pool é o de ``ManagerDatabase`` (checkout por request). CREATE DATABASE
+    e GRANT ficam no create_tables (DB_ADMIN_*).
+    """
+    assert_production_database()
+    cfg = get_settings()
+    user = (cfg.db_user or "").strip()
+    password = "" if cfg.db_password is None else cfg.db_password
+    return ConexaoBD(
+        host=cfg.db_host,
+        database=cfg.db_name,
+        user=user,
+        password=password,
+        port=cfg.db_port,
+    )
+
+
+db = database_from_settings()
 map_db_manager = MapDatabaseManager(db, per_request=True)
 
-
-def _shared_database_is_up() -> bool:
-    connection = getattr(db, "connection", None)
-    if connection is None:
-        return False
-    try:
-        return bool(connection.is_connected())
-    except Exception:
-        return False
+# Por fora das rotas: o preflight não abre MySQL.
+app.add_middleware(OriginCORSMiddleware)
 
 
-@app.middleware("http")
-async def db_connection_per_request(request, call_next):
-    """Uma conexão por requisição. O cursor global não atravessa GET e gravação."""
-    local = None
-    token = None
-    if _shared_database_is_up():
-        local = ConexaoBD(db.host, db.database, db.user, db.password)
-        local.connect(announce=False)
-        if local.connection:
-            token = request_connection.set(local)
-        else:
-            local.disconnect(announce=False)
-            local = None
-    try:
-        return await call_next(request)
-    finally:
-        if token is not None:
-            request_connection.reset(token)
-        if local is not None:
-            local.disconnect(announce=False)
+@app.exception_handler(DatabaseUnavailable)
+async def mysql_unavailable(_request, exc: DatabaseUnavailable):
+    """Connect falhou. Não segue com a conexão modelo do processo."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(DatabaseBusy)
+async def mysql_busy(_request, exc: DatabaseBusy):
+    """Lock ou pool esgotado depois da nova tentativa."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "5"},
+    )
+
+
+@app.exception_handler(DatabaseQueryError)
+async def mysql_query_failed(_request, exc: DatabaseQueryError):
+    """Erro de SQL que não é lock. O texto fica no log, não no cliente."""
+    logger.error("Erro de SQL", exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Erro interno."})
 
 
 topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
-try:
-    map_db_manager.load_map_into_system(topo_map)
-    print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
-except Exception as e:
-    print(f"[AVISO] Falha ao carregar o mapa inicial ou banco vazio. Erro: {e}")
+
+class MapLoadError(RuntimeError):
+    """Produção não sobe sem grafo. A mensagem não leva senha nem SQL."""
+
+
+class MapLoad:
+    """Resultado da carga da subida. O health lê isto e não abre MySQL."""
+
+    def __init__(self) -> None:
+        self.status = "error"
+        self.detail = "Mapa ainda não carregado."
+
+    def set(self, status: str, detail: str) -> None:
+        self.status = status
+        self.detail = detail
+
+
+map_load = MapLoad()
+
+
+def classify_loaded_map(*, failed: bool, node_count: int, edge_count: int) -> tuple[str, str]:
+    """``error`` se a carga estourou, ``empty`` sem nó ou sem aresta, senão ``ok``."""
+    if failed:
+        return "error", "Falha ao carregar o grafo."
+    if node_count <= 0 or edge_count <= 0:
+        return "empty", "Grafo vazio."
+    return "ok", "ok"
+
+
+def _raise_if_production_map_unusable() -> None:
+    """Em produção o processo para. Em desenvolvimento só o health fica 503."""
+    if map_load.status == "ok":
+        return
+    if get_settings().pov_env.strip().lower() != "production":
+        return
+    raise MapLoadError(f"Produção não sobe: {map_load.detail}")
+
+
+def _load_map_once() -> None:
+    """Carrega o grafo na subida e devolve a sessão. Não fica aberta no processo."""
+    failed = False
+    try:
+        with request_session(db):
+            map_db_manager.load_map_into_system(topo_map)
+            print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
+    except DatabaseUnavailable:
+        failed = True
+        print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
+        logger.error("MySQL indisponível ao carregar o mapa")
+    except Exception as exc:
+        failed = True
+        print(f"[ERRO] Falha ao carregar o mapa inicial. Erro: {exc}")
+        logger.error("Falha ao carregar o mapa", exc_info=exc)
+    status_name, detail = classify_loaded_map(
+        failed=failed,
+        node_count=len(topo_map.nodes),
+        edge_count=len(topo_map.edges),
+    )
+    map_load.set(status_name, detail)
+    if status_name == "empty":
+        print("[ERRO] Grafo vazio: sem nó ou sem aresta.")
+        logger.error("Grafo vazio na subida")
+    _raise_if_production_map_unusable()
+
+
+_load_map_once()
 
 starting_node = "Recepcao"
-matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
-visited_path = [starting_node]
+walk_sessions = WalkSessions(topo_map, default_start=starting_node)
 
 # --- ROTAS DA API ---
 
 edge_processor = RawEdgeProcessor(map_db_manager, topo_map)
+
+
+def require_test_routes() -> None:
+    """As rotas de localização fixa só existem com a flag. Sem ela, 404."""
+    if not get_settings().pov_enable_test_routes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
+def require_session_id(x_pov_session: str | None = Header(default=None)) -> str:
+    """Id do aparelho. A rota declara a flag de teste antes desta dependência."""
+    try:
+        return parse_session_id(x_pov_session)
+    except InvalidSessionId as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/health")
+@app.get("/api/health")
+def health():
+    """Grafo carregado na subida. Não abre MySQL. Vazio ou erro é 503."""
+    if map_load.status != "ok":
+        return JSONResponse(
+            status_code=503,
+            content={"status": map_load.status, "detail": map_load.detail},
+        )
+    return {"status": "ok"}
+
+
+def _canonical_pair(source: str, target: str, *, missing: str) -> tuple[str, str]:
+    """Nomes exatos do checkpoint. ``Sala`` não casa com ``sala``."""
+    resolved_source = topo_map.canonical_name(source)
+    resolved_target = topo_map.canonical_name(target)
+    if resolved_source is None or resolved_target is None:
+        raise HTTPException(status_code=404, detail=missing)
+    return resolved_source, resolved_target
 
 @app.get("/api/auth/check", status_code=status.HTTP_204_NO_CONTENT)
 def check_editor_auth(_editor: None = Depends(require_editor_password)):
@@ -137,11 +249,14 @@ def process_raw_edge(
     _editor: None = Depends(require_editor_password),
 ):
     """Recebe amostras brutas, grava a trajetória e atualiza só o sentido andado."""
-    if payload.source not in topo_map.nodes or payload.target not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
-    if payload.source == payload.target:
+    source, target = _canonical_pair(
+        payload.source,
+        payload.target,
+        missing="Nó de origem ou destino não encontrados.",
+    )
+    if source == target:
         raise HTTPException(status_code=400, detail="Origem e destino não podem ser o mesmo nó.")
-    return edge_processor.process_samples(payload.source, payload.target, payload.samples)
+    return edge_processor.process_samples(source, target, payload.samples)
 
 @app.post("/api/checkpoints", status_code=status.HTTP_201_CREATED)
 def create_checkpoint(
@@ -163,9 +278,10 @@ def create_checkpoint(
             detail=f"Categoria '{exc.code}' não existe.",
         ) from exc
     except CheckpointLookupError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível consultar as categorias. Execute a migração 003.",
+        raise _internal_error(
+            "Erro interno ao salvar.",
+            exc,
+            note="POST /api/checkpoints",
         ) from exc
     except CheckpointConflictError as exc:
         raise HTTPException(
@@ -173,7 +289,7 @@ def create_checkpoint(
             detail="O slug gerado ainda está em uso neste prédio. Tente de novo.",
         ) from exc
     if success:
-        if node_name not in topo_map.nodes:
+        if topo_map.canonical_name(node_name) is None:
             topo_map.add_checkpoint(node_name)
         body = {
             "status": "success",
@@ -183,7 +299,7 @@ def create_checkpoint(
             body["checkpoint"] = success
         return body
     else:
-        raise HTTPException(status_code=500, detail="Falha interna ao persistir checkpoint no banco.")
+        raise _internal_error("Erro interno ao salvar.", note="POST /api/checkpoints sem confirmação")
 
 
 @app.post("/api/edges", status_code=status.HTTP_201_CREATED)
@@ -192,30 +308,32 @@ def create_edge(
     _editor: None = Depends(require_editor_password),
 ):
     """Cadastra manualmente uma conexão (ida e volta) entre dois checkpoints."""
-    if edge.source not in topo_map.nodes or edge.target not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
-
-    if edge.source == edge.target:
+    source, target = _canonical_pair(
+        edge.source,
+        edge.target,
+        missing="Nó de origem ou destino não encontrados.",
+    )
+    if source == target:
         raise HTTPException(status_code=400, detail="Origem e destino não podem ser o mesmo nó.")
 
     if edge.distance_m <= 0:
         raise HTTPException(status_code=400, detail="A distância deve ser maior que zero.")
 
-    success = map_db_manager.save_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
+    success = map_db_manager.save_edge(source, target, edge.distance_m, edge.heading_rad)
     if not success:
-        raise HTTPException(status_code=500, detail="Falha interna ao persistir conexão no banco.")
+        raise _internal_error("Erro interno ao salvar.", note="POST /api/edges")
 
     # Um registro por sentido, nos mesmos radianos gravados no banco.
     inverse_heading = (edge.heading_rad + math.pi) % (2 * math.pi)
-    topo_map.upsert_directed_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
-    topo_map.upsert_directed_edge(edge.target, edge.source, edge.distance_m, inverse_heading)
+    topo_map.upsert_directed_edge(source, target, edge.distance_m, edge.heading_rad)
+    topo_map.upsert_directed_edge(target, source, edge.distance_m, inverse_heading)
 
     return {
         "status": "success",
-        "message": f"Conexão '{edge.source}' <-> '{edge.target}' criada com sucesso.",
+        "message": f"Conexão '{source}' <-> '{target}' criada com sucesso.",
         "edge": {
-            "source": edge.source,
-            "target": edge.target,
+            "source": source,
+            "target": target,
             "distance_m": edge.distance_m,
             "heading_rad": edge.heading_rad
         }
@@ -223,30 +341,42 @@ def create_edge(
 
 
 @app.post("/api/localize", status_code=status.HTTP_200_OK)
-def localize_user(sensor_data: StepSensorSchema):
+def localize_user(
+    sensor_data: StepSensorSchema,
+    _test: None = Depends(require_test_routes),
+    session_id: str = Depends(require_session_id),
+):
     if not topo_map.nodes:
         raise HTTPException(status_code=400, detail="O mapa do sistema está vazio.")
-        
+
     try:
         step_event = StepEventAdapter(step_length_m=sensor_data.step_length_m)
-        current_node = matcher.process_step(step=step_event, current_yaw_rad=sensor_data.yaw_rad) #type: ignore
-        
-        if visited_path and visited_path[-1] != current_node:
-            visited_path.append(current_node)
-        
+        with walk_sessions.hold(session_id) as state:
+            current_node = state.matcher.process_step(
+                step=step_event,
+                current_yaw_rad=sensor_data.yaw_rad,
+            )
+            if state.visited_path[-1] != current_node:
+                state.visited_path.append(current_node)
+            distance_m = state.matcher.accumulated_distance
         return {
             "status": "success",
             "current_node": current_node,
-            "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0)
+            "accumulated_distance_m": distance_m,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro interno no PDR: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Erro interno.", exc, note="POST /api/localize") from exc
 
 
 @app.get("/api/route", status_code=status.HTTP_200_OK)
 def get_route(start: str = Query(...), end: str = Query(...)):
-    if start not in topo_map.nodes or end not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+    start, end = _canonical_pair(
+        start,
+        end,
+        missing="Nó de partida ou destino não encontrados.",
+    )
 
     calculated_path = router.calculate_route(start, end)
     if not calculated_path:
@@ -264,8 +394,11 @@ def get_route(start: str = Query(...), end: str = Query(...)):
 @app.get("/api/compass_route", status_code=status.HTTP_200_OK)
 def get_compass_route(start: str = Query(...), end: str = Query(...)):
     """Retorna a rota com segmentos detalhados (heading, distance) para navegação por bússola."""
-    if start not in topo_map.nodes or end not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+    start, end = _canonical_pair(
+        start,
+        end,
+        missing="Nó de partida ou destino não encontrados.",
+    )
 
     segments = router.calculate_route_with_segments(start, end)
     if not segments:
@@ -299,11 +432,11 @@ def create_route(
     _editor: None = Depends(require_editor_password),
 ):
     """Cria e salva uma nova rota calculando via Dijkstra."""
-    start = route_data.start_node
-    end = route_data.end_node
-
-    if start not in topo_map.nodes or end not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+    start, end = _canonical_pair(
+        route_data.start_node,
+        route_data.end_node,
+        missing="Nó de partida ou destino não encontrados.",
+    )
 
     segments = router.calculate_route_with_segments(start, end)
     if not segments:
@@ -316,7 +449,7 @@ def create_route(
 
     success = map_db_manager.save_route(name, start, end, segments, path_sequence)
     if not success:
-        raise HTTPException(status_code=500, detail="Falha ao salvar rota no banco.")
+        raise _internal_error("Erro interno ao salvar.", note="POST /api/routes")
 
     # Retorna a rota criada (busca pelo último ID)
     routes = map_db_manager.get_all_routes()
@@ -348,7 +481,7 @@ def delete_route(
     """Remove uma rota salva."""
     success = map_db_manager.delete_route(route_id)
     if not success:
-        raise HTTPException(status_code=404, detail="Rota não encontrada ou erro ao remover.")
+        raise HTTPException(status_code=404, detail="Rota não encontrada.")
 
     return {"status": "success", "message": "Rota removida com sucesso."}
 
@@ -356,29 +489,42 @@ def delete_route(
 @app.post("/api/reset")
 def reset_session(
     start_node: str = Query(default="Recepcao"),
+    _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
+    session_id: str = Depends(require_session_id),
 ):
-    """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
-    global matcher, visited_path
-    if start_node not in topo_map.nodes:
+    """Zera o matcher e o caminho desta sessão. As outras ficam como estão."""
+    resolved_start = topo_map.canonical_name(start_node)
+    if resolved_start is None:
         start_node = next(iter(topo_map.nodes), starting_node)
-    matcher = TopologicalMatcher(topo_map, starting_node=start_node)
-    visited_path = [start_node]
-    return {"status": "success", "message": "Estado do PDR e sensores resetados.", "start_node": start_node}
+    else:
+        start_node = resolved_start
+    with walk_sessions.hold(session_id, reset=True, start_node=start_node) as state:
+        started = state.visited_path[0]
+    return {
+        "status": "success",
+        "message": "Estado do PDR e sensores resetados.",
+        "start_node": started,
+    }
 
-app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
-app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
-app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
-app.mount("/vendor", StaticFiles(directory=FRONTEND_DIR / "vendor"), name="vendor")
+# O front em Vite tirou frontend/js. Montar pasta ausente derruba o import da API.
+for _mount, _folder in (("/css", "css"), ("/js", "js"), ("/assets", "assets"), ("/vendor", "vendor")):
+    _directory = FRONTEND_DIR / _folder
+    if _directory.is_dir():
+        app.mount(_mount, StaticFiles(directory=_directory), name=_folder)
 
 @app.get("/api/current_location")
-def get_current_location():
-    return {
-        "current_node": getattr(matcher, 'current_node', getattr(matcher, 'current_state', 'Desconhecido')),
-        "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0),
-        "steps_count": getattr(matcher, "steps_count", 0),
-        "visited_path": visited_path
-    }
+def get_current_location(
+    _test: None = Depends(require_test_routes),
+    session_id: str = Depends(require_session_id),
+):
+    with walk_sessions.hold(session_id) as state:
+        return {
+            "current_node": state.matcher.current_node,
+            "accumulated_distance_m": state.matcher.accumulated_distance,
+            "steps_count": getattr(state.matcher, "steps_count", 0),
+            "visited_path": list(state.visited_path),
+        }
 
 def _checkpoint_meta(raw):
     """Tupla legada (x, y) ou o dict público do checkpoint."""
@@ -402,9 +548,11 @@ def get_map_layout():
     try:
         positions = map_db_manager.get_checkpoint_positions()
     except CheckpointLookupError as exc:
-        raise HTTPException(
+        raise _internal_error(
+            "Erro interno.",
+            exc,
             status_code=503,
-            detail="Não foi possível ler os checkpoints do mapa. Execute a migração 003.",
+            note="GET /api/map",
         ) from exc
     nodes = []
     for node in layout["nodes"]:
@@ -429,10 +577,7 @@ def list_categories():
     """Categorias de checkpoint, da menor sort_order para a maior."""
     categories = map_db_manager.list_categories()
     if categories is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível listar as categorias. Execute a migração 003.",
-        )
+        raise _internal_error("Erro interno.", note="GET /api/categories")
     return {"status": "success", "categories": categories}
 
 
@@ -448,9 +593,10 @@ def resolve_checkpoint(
     try:
         found = map_db_manager.resolve_checkpoint(b, slug)
     except CheckpointLookupError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível resolver o checkpoint. Execute a migração 003.",
+        raise _internal_error(
+            "Erro interno.",
+            exc,
+            note="GET /api/checkpoints/resolve",
         ) from exc
     if found is None:
         raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
@@ -475,9 +621,10 @@ def update_checkpoint_category(
             detail=f"Categoria '{exc.code}' não existe.",
         ) from exc
     except CheckpointLookupError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Não foi possível atualizar a categoria. Execute a migração 003.",
+        raise _internal_error(
+            "Erro interno ao salvar.",
+            exc,
+            note="PATCH /api/checkpoints/{name}",
         ) from exc
     if saved is None:
         raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
@@ -522,10 +669,7 @@ def _map_config_body(config: dict) -> dict:
 def get_map_config():
     config = map_db_manager.get_map_config()
     if config is None:
-        raise HTTPException(
-            status_code=500,
-            detail="map_config indisponível. Rode a migração 002: python -m datasets.create_tables.",
-        )
+        raise _internal_error("Erro interno.", note="GET /api/map-config")
     return _map_config_body(config)
 
 
@@ -536,7 +680,7 @@ def put_map_config(
 ):
     saved = map_db_manager.save_map_config(body.plan_image, body.px_per_m, body.rotation_rad)
     if saved is None:
-        raise HTTPException(status_code=500, detail="Não foi possível gravar map_config. Execute a migração 002.")
+        raise _internal_error("Erro interno ao salvar.", note="PUT /api/map-config")
     return _map_config_body(saved)
 
 
@@ -545,7 +689,7 @@ def get_connections(include_path: bool = Query(default=True)):
     """Um item por par físico. include_path default true; false omite path."""
     connections = map_db_manager.list_connections(include_path=include_path)
     if connections is None:
-        raise HTTPException(status_code=500, detail="Não foi possível ler as conexões. Execute a migração 002.")
+        raise _internal_error("Erro interno.", note="GET /api/connections")
     return {"status": "success", "frame": "edge_local", "connections": connections}
 
 
@@ -566,26 +710,17 @@ def get_pdr_config():
 @app.get("/")
 @app.get("/index.html")
 def read_index():
-    index_path = FRONTEND_DIR / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return {"error": f"Arquivo index.html nao encontrado no caminho {index_path}"}
+    return _frontend_page("index.html")
 
 @app.get("/recorder")
 @app.get("/recorder.html")
 def read_recorder():
-    recorder_path = FRONTEND_DIR / "recorder.html"
-    if recorder_path.exists():
-        return FileResponse(recorder_path)
-    return {"error": "Arquivo recorder.html nao encontrado em frontend/"}
+    return _frontend_page("recorder.html")
 
 @app.get("/routes")
 @app.get("/routes.html")
 def read_routes():
-    routes_path = FRONTEND_DIR / "routes.html"
-    if routes_path.exists():
-        return FileResponse(routes_path)
-    return {"error": "Arquivo routes.html nao encontrado em frontend/"}
+    return _frontend_page("routes.html")
 
 @app.get("/editor")
 @app.get("/editor.html")
@@ -603,15 +738,17 @@ def read_locate():
     return _frontend_page("locate.html")
 
 def _frontend_page(name: str):
-    path = FRONTEND_DIR / name
-    if path.exists():
-        return FileResponse(path)
-    return {"error": f"Arquivo {name} nao encontrado em frontend/"}
-
-from fastapi import Response, HTTPException
+    """Página do Vite. O editor e o gravador ficam em ``frontend/admin``."""
+    for path in (FRONTEND_DIR / name, FRONTEND_DIR / "admin" / name):
+        if path.is_file():
+            return FileResponse(path)
+    return JSONResponse(status_code=404, content={"detail": "Não encontrado."})
 
 @app.get("/api/sensors_log/{log_id}/csv")
-def download_sensor_log_csv(log_id: int):
+def download_sensor_log_csv(
+    log_id: int,
+    _editor: None = Depends(require_editor_password),
+):
     """Retorna o CSV gravado no banco como um arquivo para download."""
     csv_data = map_db_manager.get_sensor_log_csv(log_id)
     
@@ -628,4 +765,5 @@ def download_sensor_log_csv(log_id: int):
 
 @app.on_event("shutdown")
 def shutdown_event():
+    drain_pool()
     db.disconnect()

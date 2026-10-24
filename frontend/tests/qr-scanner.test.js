@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
 import {
     CAMERA_REASON,
@@ -14,7 +14,7 @@ import {
     startQrScanner,
     stopStream,
     torchAvailable
-} from '../js/qr/scanner.js';
+} from '../src/qr/scanner.ts';
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -140,7 +140,7 @@ test('sem BarcodeDetector carrega o qr-scanner e o worker fica no vendor', async
     assert.equal(seen[0], 'recepcao');
     await handle.stop();
 
-    const source = readFileSync(path.join(frontendRoot, 'js/qr/scanner.js'), 'utf8');
+    const source = readFileSync(path.join(frontendRoot, 'src/qr/scanner.ts'), 'utf8');
     assert.match(source, /BarcodeDetector/);
     assert.match(source, /formats: \['qr_code'\]/);
     assert.match(source, /facingMode: \{ exact: 'environment' \}/);

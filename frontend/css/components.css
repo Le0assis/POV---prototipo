@@ -491,13 +491,15 @@ textarea:disabled {
 
 .toast-stack {
     position: fixed;
-    right: var(--space-16);
+    top: auto;
+    left: var(--space-16);
+    right: auto;
     bottom: var(--space-16);
     z-index: 4000;
     display: flex;
     flex-direction: column;
     gap: var(--space-8);
-    width: calc(100% - 32px);
+    width: min(360px, calc(100% - 32px));
     max-width: 360px;
     pointer-events: none;
 }
@@ -557,7 +559,11 @@ summary {
     font-family: var(--font-sans);
     font-size: 16px;
     color: var(--text);
-    background: var(--bg);
+    background-color: var(--bg);
+}
+
+html.dark .leaflet-container {
+    background-color: var(--bg);
 }
 
 .leaflet-bar {
@@ -597,8 +603,11 @@ summary {
 
 .leaflet-control-attribution {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    min-width: 0;
     min-height: 48px;
+    height: auto;
     background: var(--surface);
     color: var(--text-muted);
     font-size: max(16px, var(--font-size-body));
@@ -606,7 +615,10 @@ summary {
     border-radius: var(--radius);
     border: 1px solid var(--border);
     padding: 0 var(--space-8);
-    max-width: calc(100% - 72px);
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
+    box-sizing: border-box;
 }
 
 .leaflet-container .leaflet-control-attribution a {
@@ -744,9 +756,12 @@ html.hc .route-line-outline {
 
 @media (max-width: 480px) {
     .toast-stack {
-        right: var(--space-8);
-        bottom: var(--space-8);
-        width: calc(100% - 16px);
+        top: calc(env(safe-area-inset-top, 0px) + var(--nav-h) + var(--space-8));
+        right: calc(env(safe-area-inset-right, 0px) + var(--space-8));
+        bottom: auto;
+        left: calc(env(safe-area-inset-left, 0px) + var(--space-8));
+        width: auto;
+        pointer-events: none;
     }
 
     .modal { padding: var(--space-12); }

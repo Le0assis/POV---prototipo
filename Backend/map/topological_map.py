@@ -26,31 +26,43 @@ class TopologicalMap:
         self.nodes: dict[str, SemanticNode] = {}
         self.edges: list[TopologicalEdge] = []
 
+    def canonical_name(self, name: str) -> str | None:
+        """Nome exato de ``checkpoints.name``, como ``CAST(... AS BINARY)``.
+
+        ``Sala`` não é ``sala``. A collation do MySQL junta as duas; a aresta
+        canônica da migração 002 não. Acento também continua distinto.
+        """
+        if name in self.nodes:
+            return name
+        return None
+
     def add_checkpoint(self, name: str) -> None:
-        """Adiciona um novo nó semântico ao mapa."""
-        node = SemanticNode(
-            name=name,
-        )
-        
-        self.nodes[name] = node
-        
+        """Adiciona um nó. A mesma string não duplica; outra caixa é outro nome."""
+        if name in self.nodes:
+            return
+        self.nodes[name] = SemanticNode(name=name)
         print(f"Checkpoint {name} ")
-        
 
     def upsert_directed_edge(self, source: str, target: str, distance_m: float, heading_rad: float) -> None:
-        """Uma aresta em memória por sentido. Não cria a volta."""
-        if source not in self.nodes or target not in self.nodes:
+        """Uma aresta em memória por sentido. Não cria a volta.
+
+        As pontas têm de ser o nome exato do checkpoint. Outra caixa não
+        reescreve a aresta canônica.
+        """
+        source_name = self.canonical_name(source)
+        target_name = self.canonical_name(target)
+        if source_name is None or target_name is None:
             raise ValueError(f"Erro: Ambos os nós '{source}' e '{target}' devem existir antes de os conectar.")
 
         for edge in self.edges:
-            if edge.source == source and edge.target == target:
+            if edge.source == source_name and edge.target == target_name:
                 edge.distance_m = float(distance_m)
                 edge.heading_rad = float(heading_rad)
                 return
 
         self.edges.append(TopologicalEdge(
-            source=source,
-            target=target,
+            source=source_name,
+            target=target_name,
             distance_m=float(distance_m),
             heading_rad=float(heading_rad),
         ))
@@ -68,7 +80,7 @@ class TopologicalMap:
 
     def connect_checkpoints(self, from_node: str, to_node: str, distance: float, angle_deg: float) -> None:
         """Cria ou atualiza ida e volta. Chamar de novo não duplica o sentido."""
-        if from_node not in self.nodes or to_node not in self.nodes:
+        if self.canonical_name(from_node) is None or self.canonical_name(to_node) is None:
             raise ValueError(f"Erro: Ambos os nós '{from_node}' e '{to_node}' devem existir antes de os conectar.")
 
         heading_ida = float(np.radians(angle_deg))
@@ -81,8 +93,10 @@ class TopologicalMap:
         
         connection: list[TopologicalEdge] = []
         
-        if node_name not in self.nodes:
+        resolved = self.canonical_name(node_name)
+        if resolved is None:
             raise ValueError(f"Erro: O no {node_name} deve existir.")
+        node_name = resolved
         
         for item in self.edges:
             if item.source == node_name:
@@ -96,7 +110,7 @@ class TopologicalMap:
             return {"status": "success", "nodes": [], "edges": []}
 
         # 1. Ponto inicial
-        start_node = "Recepcao" if "Recepcao" in self.nodes else list(self.nodes.keys())[0]
+        start_node = self.canonical_name("Recepcao") or next(iter(self.nodes))
 
         positions = {start_node: (0.0, 0.0)}
         visited = {start_node}

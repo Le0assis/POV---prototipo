@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { MAP_COLOR_TOKENS } from '../js/core/colors.js';
+import { MAP_COLOR_TOKENS } from '../src/core/colors.ts';
 import {
     adaptCategories,
     adaptCheckpoint,
@@ -12,7 +12,7 @@ import {
     adaptResolve,
     checkpointSlug,
     isResolveNotFound
-} from '../js/core/checkpoints.js';
+} from '../src/core/checkpoints.ts';
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -103,20 +103,22 @@ test('polilinha, marcador e sparkline leem token em vez de cor solta', () => {
         assert.match(tokens, new RegExp(`${name}\\s*:`), name);
     });
 
-    ['js/map/layers.js', 'js/map/path-preview.js', 'js/pages/recorder.js'].forEach((rel) => {
+    ['src/map/layers.ts', 'src/map/path-preview.ts', 'src/pages/recorder.ts'].forEach((rel) => {
         const text = readFileSync(path.join(frontendRoot, rel), 'utf8');
         assert.equal(/#[0-9a-fA-F]{3,8}\b/.test(text), false, rel);
         assert.equal(/rgba?\(/.test(text), false, rel);
     });
 
-    const routeBar = readFileSync(path.join(frontendRoot, 'js/ui/route-bar.js'), 'utf8');
+    const routeBar = readFileSync(path.join(frontendRoot, 'src/ui/route-bar.ts'), 'utf8');
     assert.equal(routeBar.includes("createElement('input'"), false);
     assert.equal(routeBar.includes('Leia um QR para saber onde você está'), true);
     assert.equal(routeBar.includes('Iniciar rota'), true);
 
     const index = readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
-    assert.match(index, /js\/boot\.js/);
-    assert.match(index, /js\/app\.js/);
+    const main = readFileSync(path.join(frontendRoot, 'src/main.tsx'), 'utf8');
+    assert.match(index, /\/src\/main\.tsx/);
+    assert.match(main, /['"]\.\/boot['"]/);
+    assert.match(main, /['"]\.\/app['"]/);
     assert.match(index, /aria-live="polite"/);
     assert.match(index, /Para onde você quer ir\?/);
     assert.doesNotMatch(index, /href="editor\.html"/);

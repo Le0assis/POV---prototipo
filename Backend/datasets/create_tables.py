@@ -1,4 +1,8 @@
+import re
+
 from datasets.ManagerDatabase import ConexaoBD  # Ajuste o import conforme o nome exato do seu arquivo
+
+_IDENT = re.compile(r"^[A-Za-z0-9_]+$")
 
 def criar_tabelas_sistema(db: ConexaoBD):
     print("\n[SETUP] Iniciando a criação das tabelas no banco de dados...")
@@ -15,7 +19,7 @@ def criar_tabelas_sistema(db: ConexaoBD):
         building_id INT NOT NULL DEFAULT 1,
         slug VARCHAR(64) NULL,
         INDEX idx_checkpoints_category_id (category_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
     """
 
     # 2. TABELA DE EDGES (As Conexões / Corredores)
@@ -31,12 +35,13 @@ def criar_tabelas_sistema(db: ConexaoBD):
         heading_rad FLOAT NOT NULL,
         origin ENUM('manual','recorded') NOT NULL DEFAULT 'manual',
         samples_count INT NOT NULL DEFAULT 0,
+        dup_rank INT NOT NULL DEFAULT 0,
         active_trace_id INT NULL,
         updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_edges_direction (source_node, target_node),
         FOREIGN KEY (source_node) REFERENCES checkpoints(name) ON DELETE CASCADE,
         FOREIGN KEY (target_node) REFERENCES checkpoints(name) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
     """
 
     # 3. TABELA DE SENSOR LOGS (Histórico de Sensores Brutos)
@@ -53,18 +58,18 @@ def criar_tabelas_sistema(db: ConexaoBD):
         message VARCHAR(255),
         raw_csv LONGTEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
     """
 
     # Execução dos comandos utilizando a sua infraestrutura
     print("Criando tabela 'checkpoints'...")
-    db.execute_query(sql_checkpoints)
+    _run_ddl(db, sql_checkpoints, "checkpoints")
 
     print("Criando tabela 'edges'...")
-    db.execute_query(sql_edges)
+    _run_ddl(db, _match_checkpoint_strings(db, sql_edges), "edges")
 
     print("Criando tabela 'sensor_logs'...")
-    db.execute_query(sql_sensor_logs)
+    _run_ddl(db, sql_sensor_logs, "sensors_log")
     
     print("[SETUP] Processo de criação de tabelas concluído.\n")
 
@@ -84,15 +89,17 @@ def criar_tabelas_sistema(db: ConexaoBD):
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (start_node) REFERENCES checkpoints(name) ON DELETE CASCADE,
         FOREIGN KEY (end_node) REFERENCES checkpoints(name) ON DELETE CASCADE
-    ) ENGINE=InnoDB;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
     """
     print("Criando tabela 'saved_routes'...")
-    db.execute_query(sql_saved_routes)
+    _run_ddl(db, _match_checkpoint_strings(db, sql_saved_routes), "saved_routes")
 
-    print("Aplicando migração 002 (dedupe de edges, trajetória, planta)...")
+    print("Aplicando migração 002 (preserva cópias de edges, trajetória, planta)...")
     aplicar_migracao_002(db)
     print("Aplicando migração 003 (prédio, categoria, slug)...")
     aplicar_migracao_003(db)
+    print("Aplicando migração 004 (índices do salvamento)...")
+    aplicar_migracao_004(db)
     print("[SETUP] Processo de criação de tabelas concluído.\n")
 
 
@@ -107,8 +114,7 @@ def aplicar_migracao_002(db: ConexaoBD) -> None:
         raise RuntimeError(f"Migração não encontrada: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    removed = module.apply(db)
-    print(f"[M02] Linhas de edges removidas nesta execução: {len(removed)}")
+    module.apply(db)
 
 
 def aplicar_migracao_003(db: ConexaoBD) -> None:
@@ -124,12 +130,88 @@ def aplicar_migracao_003(db: ConexaoBD) -> None:
     spec.loader.exec_module(module)
     module.apply(db)
 
+
+def aplicar_migracao_004(db: ConexaoBD) -> None:
+    """Carrega datasets/migrations/004_save_indexes.py (o nome começa com dígito)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / "migrations" / "004_save_indexes.py"
+    spec = importlib.util.spec_from_file_location("migration_004_save_indexes", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Migração não encontrada: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.apply(db)
+
+def _run_ddl(db: ConexaoBD, sql: str, label: str) -> None:
+    if db.execute_query(sql) is not True:
+        raise RuntimeError(
+            f"Não foi possível criar {label}. Nenhum dado existente foi apagado."
+        )
+
+
+def _match_checkpoint_strings(db: ConexaoBD, template: str) -> str:
+    """FK de nome usa o mesmo charset de checkpoints.name. Tabela nova não herda latin1."""
+    rows = db.execute_search(
+        "SELECT COLUMN_TYPE, CHARACTER_SET_NAME, COLLATION_NAME "
+        "FROM information_schema.columns "
+        "WHERE table_schema = DATABASE() AND table_name = 'checkpoints' "
+        "AND column_name = 'name'"
+    )
+    if rows is None:
+        raise RuntimeError("Não li o charset de checkpoints.name. Nada foi apagado.")
+    if not rows:
+        return template
+    meta = {str(key).upper(): value for key, value in rows[0].items()}
+    column_type = str(meta["COLUMN_TYPE"]).strip()
+    charset = str(meta["CHARACTER_SET_NAME"]).strip()
+    collation = str(meta["COLLATION_NAME"]).strip()
+    if not _IDENT.match(charset) or not _IDENT.match(collation):
+        raise RuntimeError(f"charset/collation inesperados em checkpoints.name: {charset} {collation}")
+    if not re.match(r"^varchar\(\d+\)$", column_type, re.IGNORECASE):
+        raise RuntimeError(f"checkpoints.name não é VARCHAR: {column_type}")
+    node = f"{column_type} CHARACTER SET {charset} COLLATE {collation}"
+    return template.replace("VARCHAR(100) NOT NULL", f"{node} NOT NULL")
+
+
+def conexao_from_settings() -> ConexaoBD:
+    """Lê o ``.env`` e monta a conexão com DB_HOST/PORT/NAME/USER/PASSWORD.
+
+    Não consulta o default da API. Sem essas variáveis, para com erro
+    em vez de entrar como root.
+    """
+    from api.envfile import load_env_file
+    from datasets.bootstrap_db import app_db_config
+
+    load_env_file()
+    cfg = app_db_config()
+    return ConexaoBD(
+        host=str(cfg["host"]),
+        database=str(cfg["name"]),
+        user=str(cfg["user"]),
+        password=str(cfg["password"]),
+        port=int(cfg["port"]),
+    )
+
+
 if __name__ == "__main__":
-    # Script para você rodar de forma isolada uma única vez e preparar o XAMPP
-    # Certifique-se de que o banco 'POV' já foi criado no phpMyAdmin!
-    conexao = ConexaoBD(host="localhost", database="POV", user="root", password="")
+    # CREATE DATABASE/USER/GRANT com DB_ADMIN_*. Tabelas com DB_USER (pov).
+    # Não apaga um schema que já exista com outro nome.
+    from api.envfile import load_env_file
+    from datasets.bootstrap_db import ensure_app_database
+
+    load_env_file()
+    conexao = conexao_from_settings()
+    ensure_app_database(
+        str(conexao.database),
+        str(conexao.host),
+        int(conexao.port),
+        str(conexao.user),
+        str(conexao.password),
+    )
     conexao.connect()
-    
+
     if conexao.connection:
         criar_tabelas_sistema(conexao)
         conexao.disconnect()

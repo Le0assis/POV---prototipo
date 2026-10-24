@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 
 import {
     projectByAccumulatedDistance,
     snapToPolylines,
     tangentAtDistance
-} from '../js/route/snap.js';
-import { nearestCheckpoint, projectWalk, readLocalization } from '../js/route/localize.js';
+} from '../src/route/snap.ts';
+import { nearestCheckpoint, projectWalk, readLocalization } from '../src/route/localize.ts';
 
 const path = [
     { x: 0, y: 0 },

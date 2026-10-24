@@ -6,11 +6,14 @@ default true, reset e routes pedem senha, map-config sem px_per_m é 422.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 
 import api.app as app_module
 from api.app import app
+from api.editor_auth import make_password_hash, set_attempt_limit
 from map.MapDatabaseManager import MapDatabaseManager
 from tests.unit.test_m02_connections import _MemDB
 from tests.unit.test_m02_walk_transaction import _TxDB
@@ -18,8 +21,9 @@ from tests.unit.test_m02_walk_transaction import _TxDB
 pytestmark = pytest.mark.integration
 
 PASSWORD = "segredo-do-editor"
-OK = {"X-Editor-Password": PASSWORD}
-WRONG = {"X-Editor-Password": "outra"}
+PASSWORD_HASH = make_password_hash(PASSWORD)
+OK = {"X-Editor-Password": PASSWORD, "X-Pov-Session": "device-editor-1"}
+WRONG = {"X-Editor-Password": "outra", "X-Pov-Session": "device-editor-1"}
 
 
 def _samples(count: int = 20) -> list[dict]:
@@ -99,7 +103,9 @@ def _send(client: TestClient, method: str, path: str, body, headers=None):
 
 
 def test_protected_writes_reject_missing_and_wrong_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    set_attempt_limit(50)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     client = TestClient(app)
     for method, path, body in _calls():
         missing = _send(client, method, path, body)
@@ -110,7 +116,8 @@ def test_protected_writes_reject_missing_and_wrong_password(monkeypatch):
 
 
 def test_protected_writes_fail_closed_without_env(monkeypatch):
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     client = TestClient(app)
     for method, path, body in _calls():
         response = _send(client, method, path, body, OK)
@@ -118,7 +125,8 @@ def test_protected_writes_fail_closed_without_env(monkeypatch):
 
 
 def test_protected_writes_accept_the_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     _succeed(monkeypatch)
     client = TestClient(app)
     expected = {
@@ -161,7 +169,8 @@ def test_each_http_request_uses_its_own_connection(monkeypatch):
     seen = {}
 
     def get_map_config():
-        seen["db"] = app_module.map_db_manager.db
+        with app_module.map_db_manager._session():
+            seen["db"] = app_module.map_db_manager.db
         return {"plan_image": None, "px_per_m": None, "rotation_rad": 0.0}
 
     monkeypatch.setattr(app_module.map_db_manager, "get_map_config", get_map_config)
@@ -176,7 +185,7 @@ def test_each_http_request_uses_its_own_connection(monkeypatch):
 
 
 def test_public_gets_do_not_need_the_header(monkeypatch):
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     seen = {}
 
     def list_connections(include_path=True):
@@ -207,7 +216,7 @@ def test_public_gets_do_not_need_the_header(monkeypatch):
 
 
 def test_map_config_and_position_reject_invalid_bodies(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
     missing = client.put("/api/map-config", json={"plan_image": "assets/planta.png"}, headers=OK)
     zero = client.put("/api/map-config", json={"px_per_m": 0}, headers=OK)
@@ -245,7 +254,7 @@ class _ProcessRawDB:
 
 
 def test_process_raw_returns_500_when_the_walk_is_not_saved(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     app_module.topo_map.add_checkpoint("Quarto")
     app_module.topo_map.add_checkpoint("Sala")
 
@@ -268,12 +277,12 @@ def test_process_raw_returns_500_when_the_walk_is_not_saved(monkeypatch):
     )
     assert response.status_code == 500
     assert response.status_code != 201
+    assert response.json() == {"detail": "Erro interno ao salvar."}
     assert "trace_id" not in response.json()
-    assert "trajetória" in response.json()["detail"]
 
 
 def test_process_raw_path_is_an_array_with_origin(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     app_module.topo_map.add_checkpoint("Quarto")
     app_module.topo_map.add_checkpoint("Sala")
     monkeypatch.setattr(app_module.edge_processor, "db_manager", _ProcessRawDB())
@@ -311,26 +320,149 @@ def test_connections_include_path_defaults_to_true_and_path_is_array(monkeypatch
     assert "path" not in hidden.json()["connections"][0]
 
 
+def test_wrong_password_does_not_open_mysql(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise AssertionError("a senha errada não abre MySQL")
+
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setattr("datasets.ManagerDatabase.ConexaoBD.connect", fail)
+    response = TestClient(app).post("/api/checkpoints", json={"name": "Novo"})
+    assert response.status_code == 401
+
+
+def test_sixty_parallel_correct_saves_all_succeed(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    monkeypatch.setattr(app_module.map_db_manager, "save_checkpoint", lambda *_args, **_kwargs: True)
+
+    def once(index: int) -> int:
+        return TestClient(app).post(
+            "/api/checkpoints",
+            headers=OK,
+            json={"name": f"Paralelo{index}"},
+        ).status_code
+
+    with ThreadPoolExecutor(max_workers=60) as pool:
+        codes = list(pool.map(once, range(60)))
+    assert codes == [201] * 60
+
+
+def test_lock_conflict_after_retry_is_503(monkeypatch):
+    from datasets.ManagerDatabase import DatabaseBusy
+
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    app_module.topo_map.add_checkpoint("A")
+    app_module.topo_map.add_checkpoint("B")
+
+    def busy(*_args, **_kwargs):
+        raise DatabaseBusy()
+
+    monkeypatch.setattr(app_module.map_db_manager, "save_edge", busy)
+    response = TestClient(app).post(
+        "/api/edges",
+        headers=OK,
+        json={"source": "A", "target": "B", "distance_m": 1.0, "heading_rad": 0.0},
+    )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+
+
 def test_post_reset_requires_editor_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
-    missing = client.post("/api/reset")
+    missing = client.post("/api/reset", headers={"X-Pov-Session": "device-editor-1"})
     wrong = client.post("/api/reset", headers=WRONG)
     assert missing.status_code == 401
     assert wrong.status_code == 401
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     closed = client.post("/api/reset", headers=OK)
     assert closed.status_code == 503
 
 
+def _lock_error(errno: int = 1205):
+    from mysql.connector import Error
+
+    return Error(msg="lock wait", errno=errno)
+
+
+class _PositionCursor:
+    def __init__(self, steps) -> None:
+        self.steps = list(steps)
+        self.rowcount = 0
+        self.calls = 0
+
+    def execute(self, sql, params=None):
+        self.calls += 1
+        step = self.steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        self.rowcount = int(step)
+
+
+class _PositionConnection:
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return None
+
+
+def _patch_position(monkeypatch, steps):
+    from datasets.ManagerDatabase import ConexaoBD
+
+    database = ConexaoBD("127.0.0.1", "pov", "pov", "x")
+    database.connection = _PositionConnection()
+    database.cursor = _PositionCursor(steps)
+    monkeypatch.setattr(app_module.map_db_manager, "_per_request", False)
+    monkeypatch.setattr(app_module.map_db_manager, "_database", database)
+    return database.cursor
+
+
+def _patch_position_request(monkeypatch, steps):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    cursor = _patch_position(monkeypatch, steps)
+    response = TestClient(app).patch(
+        "/api/checkpoints/Sala/position",
+        headers=OK,
+        json={"pos_x_px": 12.0, "pos_y_px": 40.0},
+    )
+    return cursor, response
+
+
+def test_position_patch_held_lock_is_503_with_retry_after(monkeypatch):
+    cursor, response = _patch_position_request(monkeypatch, [_lock_error(), _lock_error()])
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"] != "Checkpoint não encontrado."
+    assert cursor.calls == 2
+
+
+def test_position_patch_missing_checkpoint_is_404(monkeypatch):
+    cursor, response = _patch_position_request(monkeypatch, [0])
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Checkpoint não encontrado."
+    assert response.headers.get("retry-after") is None
+    assert cursor.calls == 1
+
+
+def test_position_patch_sql_error_is_500_not_404(monkeypatch, caplog):
+    with caplog.at_level("ERROR"):
+        cursor, response = _patch_position_request(monkeypatch, [_lock_error(1064)])
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Erro interno."}
+    assert "Checkpoint não encontrado." not in response.text
+    assert "Falha ao gravar a posição do checkpoint." in caplog.text
+    assert cursor.calls == 1
+
+
 def test_post_routes_requires_editor_password(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     body = {"start_node": "A", "end_node": "B", "name": "Rota"}
     client = TestClient(app)
     missing = client.post("/api/routes", json=body)
     wrong = client.post("/api/routes", json=body, headers=WRONG)
     assert missing.status_code == 401
     assert wrong.status_code == 401
-    monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     closed = client.post("/api/routes", json=body, headers=OK)
     assert closed.status_code == 503

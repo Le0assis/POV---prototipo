@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { after, before, test } from 'node:test';
+import { afterAll, beforeAll, test } from 'vitest';
 
 import {
+    distRoot,
     formatViolations,
     installApiMocks,
     seriousViolations,
@@ -14,15 +15,15 @@ let server;
 let origin;
 let browser;
 
-before(async () => {
-    const started = await startStaticServer();
+beforeAll(async () => {
+    const started = await startStaticServer(distRoot);
     server = started.server;
     origin = started.origin;
     const { chromium } = await import('playwright');
     browser = await chromium.launch();
 });
 
-after(async () => {
+afterAll(async () => {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));
 });
@@ -127,6 +128,12 @@ test('axe em index.html no E4 com rota simulada', { timeout: 120000 }, async () 
         await page.waitForFunction(() => {
             const instruction = document.querySelector('.nav-instruction');
             return instruction && instruction.textContent.trim().length > 0;
+        });
+        await page.waitForSelector('.blue-dot.has-cone');
+        await page.waitForFunction(() => {
+            const labels = [...document.querySelectorAll('.you-label')]
+                .filter((el) => (el.textContent || '').trim() === 'você');
+            return labels.length === 1;
         });
         await expectClean(page, 'E4');
         assert.equal(errors.length, 0, errors.join('\n'));

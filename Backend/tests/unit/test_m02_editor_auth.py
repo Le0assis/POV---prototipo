@@ -3,12 +3,34 @@
 from __future__ import annotations
 
 import ast
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from argon2.exceptions import VerifyMismatchError
 from fastapi import HTTPException
 
-from api.editor_auth import check_editor_password
+from argon2 import PasswordHasher
+
+import api.editor_auth as editor_auth
+from api.editor_auth import (
+    BAD_HASH_DETAIL,
+    BUSY_DETAIL,
+    LOCKED_DETAIL,
+    MISSING_HASH_DETAIL,
+    VERIFY_SLOTS,
+    _MAX_TRACKED_CLIENTS,
+    _failures,
+    check_editor_password,
+    client_key,
+    make_password_hash,
+    note_failure,
+    require_editor_password,
+    set_attempt_limit,
+    too_many_attempts,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -26,6 +48,7 @@ PROTECTED = {
     "reset_session",
     "update_checkpoint_category",
     "check_editor_auth",
+    "download_sensor_log_csv",
 }
 PUBLIC = {
     "get_map_layout",
@@ -36,27 +59,50 @@ PUBLIC = {
     "get_map_config",
     "get_pdr_config",
     "get_all_routes",
-    "download_sensor_log_csv",
+    "health",
     "localize_user",
+    "get_current_location",
 }
 
 
-def test_missing_env_is_503(monkeypatch):
+def _use_hash(monkeypatch, password: str = "segredo-do-editor") -> None:
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", make_password_hash(password))
     monkeypatch.delenv("EDITOR_PASSWORD", raising=False)
+
+
+def test_missing_env_is_503(monkeypatch):
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     with pytest.raises(HTTPException) as exc:
         check_editor_password("qualquer")
     assert exc.value.status_code == 503
+    assert exc.value.detail == MISSING_HASH_DETAIL
 
 
 def test_empty_env_is_503(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", "")
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", "")
     with pytest.raises(HTTPException) as exc:
         check_editor_password("qualquer")
     assert exc.value.status_code == 503
 
 
-def test_missing_or_wrong_header_is_401(monkeypatch):
+def test_plaintext_env_is_not_accepted(monkeypatch):
+    monkeypatch.delenv("EDITOR_PASSWORD_HASH", raising=False)
     monkeypatch.setenv("EDITOR_PASSWORD", "segredo-do-editor")
+    with pytest.raises(HTTPException) as exc:
+        check_editor_password("segredo-do-editor")
+    assert exc.value.status_code == 503
+
+
+def test_invalid_hash_is_503(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", "nao-e-hash")
+    with pytest.raises(HTTPException) as exc:
+        check_editor_password("segredo-do-editor")
+    assert exc.value.status_code == 503
+    assert exc.value.detail == BAD_HASH_DETAIL
+
+
+def test_missing_or_wrong_header_is_401(monkeypatch):
+    _use_hash(monkeypatch)
     for provided in (None, "", "outra"):
         with pytest.raises(HTTPException) as exc:
             check_editor_password(provided)
@@ -64,16 +110,283 @@ def test_missing_or_wrong_header_is_401(monkeypatch):
 
 
 def test_correct_password_passes(monkeypatch):
-    monkeypatch.setenv("EDITOR_PASSWORD", "segredo-do-editor")
+    _use_hash(monkeypatch)
     check_editor_password("segredo-do-editor")
 
 
-def test_comparison_is_constant_time_and_does_not_load_dotenv():
+def test_hash_is_argon2id_and_auth_does_not_load_dotenv():
+    encoded = make_password_hash("segredo-do-editor")
+    assert encoded.startswith("$argon2id$")
+    PasswordHasher().verify(encoded, "segredo-do-editor")
     source = (BACKEND_ROOT / "api" / "editor_auth.py").read_text(encoding="utf-8")
-    assert "hmac.compare_digest" in source
-    assert "hashlib.sha256" in source
+    assert "PasswordHasher" in source
+    assert "Type.ID" in source
+    assert "verify" in source
     assert "load_dotenv" not in source
     assert "import dotenv" not in source
+    script = (BACKEND_ROOT / "scripts" / "hash_password.py").read_text(encoding="utf-8")
+    assert "getpass.getpass" in script
+    assert "sys.argv" in script
+
+
+class _Client:
+    def __init__(self, host: str, headers: dict | None = None) -> None:
+        self.client = type("Peer", (), {"host": host})()
+        self.headers = headers or {}
+
+
+def test_attempt_limit_locks_only_that_client():
+    set_attempt_limit(2)
+    note_failure("203.0.113.8", now=0)
+    note_failure("203.0.113.8", now=1)
+    assert too_many_attempts("203.0.113.8", now=2) is True
+    assert too_many_attempts("203.0.113.9", now=2) is False
+    assert too_many_attempts("203.0.113.8", now=400) is False
+
+
+def test_require_editor_password_returns_429(monkeypatch):
+    _use_hash(monkeypatch)
+    set_attempt_limit(2)
+    request = _Client("198.51.100.4")
+    for _ in range(2):
+        with pytest.raises(HTTPException) as exc:
+            require_editor_password(request, x_editor_password="errada")
+        assert exc.value.status_code == 401
+    with pytest.raises(HTTPException) as locked:
+        require_editor_password(request, x_editor_password="errada")
+    assert locked.value.status_code == 429
+    assert locked.value.detail == LOCKED_DETAIL
+
+
+def test_untrusted_peer_ignores_forwarded_headers(monkeypatch):
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    loopback = _Client("127.0.0.1", {
+        "cf-connecting-ip": "203.0.113.50",
+        "x-forwarded-for": "198.51.100.9",
+    })
+    assert client_key(loopback) == "127.0.0.1"
+    public = _Client("203.0.113.7", {"cf-connecting-ip": "198.51.100.9"})
+    assert client_key(public) == "203.0.113.7"
+
+
+def test_trusted_proxy_list_is_explicit(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1")
+    request = _Client("127.0.0.1", {"cf-connecting-ip": "203.0.113.50"})
+    assert client_key(request) == "203.0.113.50"
+    monkeypatch.setenv("TRUSTED_PROXIES", "*")
+    assert client_key(request) == "127.0.0.1"
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "--no-proxy-headers" in readme
+    assert "forwarded-allow-ips=127.0.0.1" not in readme
+    assert "forwarded-allow-ips=*" not in readme
+    assert "forwarded-allow-ips *" not in readme
+
+
+def test_forwarded_for_uses_rightmost_untrusted(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1, 10.0.0.8")
+    chained = _Client("127.0.0.1", {
+        "x-forwarded-for": "203.0.113.9, 198.51.100.20, 10.0.0.8",
+    })
+    assert client_key(chained) == "198.51.100.20"
+    spoofed_left = _Client("127.0.0.1", {
+        "x-forwarded-for": "203.0.113.9, 198.51.100.20",
+    })
+    assert client_key(spoofed_left) == "198.51.100.20"
+
+
+def test_rotating_forwarded_headers_do_not_bypass_429(monkeypatch):
+    _use_hash(monkeypatch)
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    set_attempt_limit(2)
+    for index in range(2):
+        request = _Client("198.51.100.8", {
+            "cf-connecting-ip": f"203.0.113.{index}",
+            "x-forwarded-for": f"198.51.100.{index}",
+        })
+        with pytest.raises(HTTPException) as exc:
+            require_editor_password(request, x_editor_password="errada")
+        assert exc.value.status_code == 401
+    rotated = _Client("198.51.100.8", {
+        "cf-connecting-ip": "203.0.113.99",
+        "x-forwarded-for": "198.51.100.99",
+    })
+    with pytest.raises(HTTPException) as locked:
+        require_editor_password(rotated, x_editor_password="errada")
+    assert locked.value.status_code == 429
+
+
+def test_cached_password_skips_argon2(monkeypatch):
+    _use_hash(monkeypatch)
+    request = _Client("203.0.113.70")
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+
+    def boom(_encoded, _password):
+        raise AssertionError("senha já conferida não repete o argon2")
+
+    class _Hasher:
+        def verify(self, encoded, password):
+            boom(encoded, password)
+
+    monkeypatch.setattr("api.editor_auth._hasher", _Hasher())
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+
+
+def test_cache_matches_only_the_same_password(monkeypatch):
+    assert editor_auth.VERIFIED_TTL_S == 60.0
+    _use_hash(monkeypatch)
+    request = _Client("203.0.113.71")
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+    calls: list[str] = []
+
+    def verify(_encoded, password):
+        calls.append(password)
+        raise VerifyMismatchError()
+
+    class _Hasher:
+        def verify(self, encoded, password):
+            verify(encoded, password)
+
+    monkeypatch.setattr(editor_auth, "_hasher", _Hasher())
+    with pytest.raises(HTTPException) as other:
+        require_editor_password(request, x_editor_password="outra")
+    assert other.value.status_code == 401
+    assert calls == ["outra"]
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+    assert calls == ["outra"]
+
+
+def test_cache_never_accepts_missing_or_empty_password(monkeypatch):
+    _use_hash(monkeypatch)
+    request = _Client("203.0.113.72")
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+    for provided in (None, ""):
+        with pytest.raises(HTTPException) as exc:
+            require_editor_password(request, x_editor_password=provided)
+        assert exc.value.status_code == 401
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+
+
+def test_verified_cache_expires_after_ttl(monkeypatch):
+    _use_hash(monkeypatch)
+    request = _Client("203.0.113.73")
+    require_editor_password(request, x_editor_password="segredo-do-editor")
+    editor_auth._verified_until = time.monotonic() - 1
+    calls: list[str] = []
+
+    def verify(_encoded, password):
+        calls.append(password)
+        raise VerifyMismatchError()
+
+    class _Hasher:
+        def verify(self, encoded, password):
+            verify(encoded, password)
+
+    monkeypatch.setattr(editor_auth, "_hasher", _Hasher())
+    with pytest.raises(HTTPException) as exc:
+        require_editor_password(request, x_editor_password="segredo-do-editor")
+    assert exc.value.status_code == 401
+    assert calls == ["segredo-do-editor"]
+
+
+def _parallel_wrong_passwords(monkeypatch, count: int) -> tuple[list[int], int]:
+    calls = 0
+    call_lock = threading.Lock()
+
+    def verify(_encoded, _password):
+        nonlocal calls
+        with call_lock:
+            calls += 1
+        raise VerifyMismatchError()
+
+    class _Hasher:
+        def verify(self, encoded, password):
+            verify(encoded, password)
+
+    monkeypatch.setattr(editor_auth, "_hasher", _Hasher())
+    request = _Client("203.0.113.40")
+
+    def once() -> int:
+        try:
+            require_editor_password(request, x_editor_password="errada")
+        except HTTPException as exc:
+            return exc.status_code
+        return 200
+
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        codes = list(pool.map(lambda _index: once(), range(count)))
+    return codes, calls
+
+
+def test_forty_parallel_wrong_passwords_stop_at_eight(monkeypatch):
+    _use_hash(monkeypatch)
+    set_attempt_limit(8)
+    codes, calls = _parallel_wrong_passwords(monkeypatch, 40)
+    assert calls <= 8
+    assert codes.count(200) == 0
+    assert codes.count(503) == 0
+    assert codes.count(401) == calls
+    assert codes.count(429) == 40 - calls
+
+
+def test_three_hundred_parallel_wrong_passwords_stop_at_eight(monkeypatch):
+    _use_hash(monkeypatch)
+    set_attempt_limit(8)
+    codes, calls = _parallel_wrong_passwords(monkeypatch, 300)
+    assert calls <= 8
+    assert codes.count(200) == 0
+    assert codes.count(503) == 0
+    assert codes.count(401) == calls
+    assert codes.count(429) == 300 - calls
+
+
+def test_slot_timeout_releases_the_reservation(monkeypatch):
+    _use_hash(monkeypatch)
+    set_attempt_limit(1)
+    monkeypatch.setattr(editor_auth, "SLOT_WAIT_S", 0.2)
+    gate = threading.Event()
+    started = threading.Semaphore(0)
+
+    def verify(_encoded, _password):
+        started.release()
+        assert gate.wait(timeout=3)
+        raise VerifyMismatchError()
+
+    class _SlowHasher:
+        def verify(self, encoded, password):
+            verify(encoded, password)
+
+    monkeypatch.setattr(editor_auth, "_hasher", _SlowHasher())
+
+    def hold(index: int) -> int:
+        try:
+            require_editor_password(_Client(f"198.51.100.{index}"), x_editor_password="errada")
+        except HTTPException as exc:
+            return exc.status_code
+        return 200
+
+    with ThreadPoolExecutor(max_workers=VERIFY_SLOTS + 1) as pool:
+        holders = [pool.submit(hold, index) for index in range(VERIFY_SLOTS)]
+        for _ in range(VERIFY_SLOTS):
+            assert started.acquire(timeout=3)
+        with pytest.raises(HTTPException) as busy:
+            require_editor_password(_Client("203.0.113.77"), x_editor_password="errada")
+        assert busy.value.status_code == 503
+        assert busy.value.detail == BUSY_DETAIL
+        assert busy.value.headers is not None
+        assert busy.value.headers["Retry-After"] == str(max(1, int(round(editor_auth.SLOT_WAIT_S))))
+        assert too_many_attempts("203.0.113.77") is False
+        gate.set()
+        assert [item.result(timeout=5) for item in holders] == [401] * VERIFY_SLOTS
+    with pytest.raises(HTTPException) as again:
+        require_editor_password(_Client("203.0.113.77"), x_editor_password="errada")
+    assert again.value.status_code == 401
+
+
+def test_failure_log_is_bounded():
+    now = 1_000_000.0
+    for index in range(_MAX_TRACKED_CLIENTS + 25):
+        note_failure(f"client-{index}", now=now)
+    assert len(_failures) <= _MAX_TRACKED_CLIENTS
 
 
 def _guarded_functions(path: Path) -> set[str]:
@@ -99,6 +412,8 @@ def test_write_routes_require_password_and_reads_stay_open():
 
 def test_env_example_has_no_secret_and_gitignore_covers_dotenv():
     example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert any(line.strip() == "EDITOR_PASSWORD=" for line in example.splitlines())
+    assert any(line.strip() == "EDITOR_PASSWORD_HASH=" for line in example.splitlines())
+    assert "$argon2" not in example
+    assert "EDITOR_PASSWORD=" not in example
     ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert ".env" in {line.strip() for line in ignored}

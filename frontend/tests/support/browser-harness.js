@@ -8,10 +8,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export const distRoot = path.join(frontendRoot, 'dist');
 
 const MIME = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
     '.css': 'text/css; charset=utf-8',
     '.svg': 'image/svg+xml',
     '.json': 'application/json',
@@ -101,43 +103,46 @@ function json(route, body, status = 200) {
     });
 }
 
+function handleApi(route) {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/auth/check') {
+        return route.fulfill({ status: 204, body: '' });
+    }
+    if (url.pathname === '/api/map') return json(route, { nodes: MOCK_NODES });
+    if (url.pathname === '/api/map-config') {
+        return json(route, { map_config: { plan_image: '', px_per_m: 20, rotation_rad: 0 } });
+    }
+    if (url.pathname === '/api/connections') {
+        return json(route, {
+            connections: [{
+                source: 'recepcao',
+                target: 'sala',
+                distance_m: 40,
+                origin: 'manual'
+            }]
+        });
+    }
+    if (url.pathname === '/api/categories') {
+        return json(route, {
+            categories: [
+                { code: 'atendimento', label: 'Atendimento', sort_order: 1 },
+                { code: 'salas', label: 'Salas', sort_order: 2 },
+                { code: 'alimentacao', label: 'Alimentação', sort_order: 3 },
+                { code: 'saidas', label: 'Saídas', sort_order: 4 }
+            ]
+        });
+    }
+    if (url.pathname === '/api/health') return json(route, { status: 'ok' });
+    if (url.pathname === '/api/pdr/config') return json(route, {});
+    if (url.pathname === '/api/checkpoints/resolve') {
+        return json(route, { checkpoint: MOCK_NODES[0] });
+    }
+    return json(route, { detail: 'not found' }, 404);
+}
+
 export async function installApiMocks(page) {
-    await page.route('http://127.0.0.1:8000/**', (route) => {
-        const url = new URL(route.request().url());
-        if (url.pathname === '/api/auth/check') {
-            return route.fulfill({ status: 204, body: '' });
-        }
-        if (url.pathname === '/api/map') return json(route, { nodes: MOCK_NODES });
-        if (url.pathname === '/api/map-config') {
-            return json(route, { map_config: { plan_image: '', px_per_m: 20, rotation_rad: 0 } });
-        }
-        if (url.pathname === '/api/connections') {
-            return json(route, {
-                connections: [{
-                    source: 'recepcao',
-                    target: 'sala',
-                    distance_m: 40,
-                    origin: 'manual'
-                }]
-            });
-        }
-        if (url.pathname === '/api/categories') {
-            return json(route, {
-                categories: [
-                    { code: 'atendimento', label: 'Atendimento', sort_order: 1 },
-                    { code: 'salas', label: 'Salas', sort_order: 2 },
-                    { code: 'alimentacao', label: 'Alimentação', sort_order: 3 },
-                    { code: 'saidas', label: 'Saídas', sort_order: 4 }
-                ]
-            });
-        }
-        if (url.pathname === '/api/current_location') return json(route, {});
-        if (url.pathname === '/api/pdr/config') return json(route, {});
-        if (url.pathname === '/api/checkpoints/resolve') {
-            return json(route, { checkpoint: MOCK_NODES[0] });
-        }
-        return json(route, { detail: 'not found' }, 404);
-    });
+    await page.route('http://127.0.0.1:8000/**', handleApi);
+    await page.route('https://api.pov-unimar.com/**', handleApi);
 }
 
 export function seriousViolations(results) {

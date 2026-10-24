@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { resolvePlanImage } from '../js/map/floor-map.js';
+import { resolvePlanImage } from '../src/map/floor-map.ts';
 
 test('a planta relativa resolve na raiz do frontend, também em /admin/', () => {
     assert.equal(

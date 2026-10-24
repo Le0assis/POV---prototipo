@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 
-import { relativeHeadingRad } from '../js/sensors/angles.js';
+import { relativeHeadingRad } from '../src/sensors/angles.ts';
 
 test('sem giro, o heading relativo é o heading_rad da aresta', () => {
     const ref = 0.4;

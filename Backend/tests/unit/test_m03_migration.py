@@ -74,6 +74,8 @@ class _MigrationDB:
                 for row in self.checkpoints
                 if not row.get("slug")
             ]
+        if sql == module.SQL_DUPLICATE_MAP:
+            return []
         if sql == module.SQL_DUPLICATE_SLUGS:
             counts: dict[tuple, int] = {}
             for row in self.checkpoints:
@@ -106,7 +108,7 @@ class _MigrationDB:
         if sql == module.SQL_SEED_BUILDING:
             self.building = {"id": params[0], "name": params[1]}
             return True
-        if sql == module.SQL_SEED_CATEGORIES:
+        if sql == module.SQL_SEED_CATEGORY:
             self.category_params = params
             return True
         if sql.startswith("ALTER TABLE checkpoints ADD COLUMN category_id"):
@@ -141,6 +143,12 @@ class _MigrationDB:
                 if row["id"] == checkpoint_id and not row.get("slug"):
                     row["slug"] = slug
             return True
+        if sql == module.SQL_REPOINT_SLUG:
+            replacement, checkpoint_id, previous = params
+            for row in self.checkpoints:
+                if row["id"] == checkpoint_id and row.get("slug") == previous:
+                    row["slug"] = replacement
+            return True
         if sql == module.SQL_SLUG_NOT_NULL:
             self.nullable.discard(("checkpoints", "slug"))
             return True
@@ -168,15 +176,16 @@ def test_migration_backfills_unique_slugs_and_is_idempotent():
     assert db.backup is not None
     assert all("slug" not in row for row in db.backup)
     assert db.building == {"id": 1, "name": "Unimar"}
-    assert "ON DUPLICATE KEY UPDATE" in module.SQL_SEED_CATEGORIES
+    assert "ON DUPLICATE KEY UPDATE" in module.SQL_SEED_CATEGORY
+    assert "VALUES(label)" not in module.SQL_SEED_CATEGORY
     assert module.SQL_FK_CATEGORY.endswith("ON DELETE SET NULL")
     assert "ON DELETE RESTRICT" in module.SQL_FK_BUILDING
     assert "UNIQUE KEY uq_checkpoints_building_slug (building_id, slug)" in module.SQL_UNIQUE_SLUG
-    codes = []
-    params = db.category_params
-    for index in range(0, len(params), 3):
-        codes.append(params[index])
-    assert codes == ["atendimento", "banheiros", "alimentacao", "saidas"]
+    seeds = [params for sql, params in db.statements if sql == module.SQL_SEED_CATEGORY]
+    assert [params[0] for params in seeds] == [
+        "atendimento", "banheiros", "alimentacao", "saidas",
+    ]
+    assert all(params[1] == params[3] and params[2] == params[4] for params in seeds)
 
     by_name = {row["name"]: row["slug"] for row in db.checkpoints}
     assert by_name == {
@@ -222,7 +231,7 @@ def test_same_slug_is_allowed_in_another_building():
     assert [row["slug"] for row in db.checkpoints] == ["sala", "sala"]
 
 
-def test_duplicate_slugs_abort_before_the_unique_key():
+def test_duplicate_slugs_keep_both_rows_and_the_first_slug():
     module = _migration()
     db = _MigrationDB(checkpoints=[
         {"id": 1, "name": "Sala", "building_id": 1, "slug": "igual"},
@@ -234,10 +243,12 @@ def test_duplicate_slugs_abort_before_the_unique_key():
         ("checkpoints", "slug"),
     })
     db.nullable.add(("checkpoints", "slug"))
-    with pytest.raises(RuntimeError, match="duplicado"):
-        module.apply(db)
-    assert module.SQL_UNIQUE_SLUG not in [sql for sql, _params in db.statements]
-    assert module.SQL_SLUG_NOT_NULL not in [sql for sql, _params in db.statements]
+    module.apply(db)
+    by_id = {row["id"]: row["slug"] for row in db.checkpoints}
+    assert by_id[1] == "igual"
+    assert by_id[2] != "igual"
+    assert len(set(by_id.values())) == 2
+    assert module.SQL_UNIQUE_SLUG in [sql for sql, _params in db.statements]
 
 
 def test_backup_failure_aborts_before_any_change():

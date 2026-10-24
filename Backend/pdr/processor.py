@@ -7,9 +7,12 @@ abre banco e não lança HTTP. Dá para testar o mesmo caminho do
 
 import csv
 import io
+import logging
 import math
 
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 from pdr.trajectory import (
     displacement_m,
@@ -135,10 +138,8 @@ class RawEdgeProcessor:
                 is_valid=bool(result.valid),
             )
             if not saved:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Falha ao gravar a trajetória. A transação foi revertida.",
-                )
+                logger.error("record_walk não devolveu a trajetória de %s para %s", source, target)
+                raise HTTPException(status_code=500, detail="Erro interno ao salvar.")
             if saved.get("path") is not None:
                 body["path"] = saved["path"]
             body["trace_id"] = saved.get("trace_id")

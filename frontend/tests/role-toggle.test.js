@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
-import { SHOW_ROLE_TOGGLE } from '../js/config.js';
+import { SHOW_ROLE_TOGGLE } from '../src/core/config.ts';
 import {
     PASSWORD_UNCONFIGURED_MESSAGE,
     PASSWORD_WRONG_MESSAGE,
@@ -14,13 +14,13 @@ import {
     hrefForRole,
     nextRadioIndex,
     requestAdminEntry
-} from '../js/core/role-toggle.js';
+} from '../src/core/role-toggle.ts';
 import {
     clearEditorPassword,
     getEditorPassword,
     setEditorPassword,
     verifyEditorPassword
-} from '../js/core/api.js';
+} from '../src/core/api.ts';
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -124,21 +124,40 @@ test('senha errada mostra erro e não navega', async () => {
     assert.match(decision.error, /Senha incorreta/);
 });
 
-test('503 avisa que a senha não está configurada no servidor', async () => {
-    let cleared = false;
-    const decision = await requestAdminEntry({
+test('503 sem hash avisa e não apaga a senha; 503 ocupado também não apaga', async () => {
+    let cleared = 0;
+    const unconfigured = await requestAdminEntry({
         getPassword: () => '',
         prompt: async () => 'qualquer',
         verify: async () => {
-            throw statusError(503);
+            const error = statusError(503);
+            error.detail = 'EDITOR_PASSWORD_HASH não está definida no ambiente do servidor.';
+            throw error;
         },
         clearPassword: () => {
-            cleared = true;
+            cleared += 1;
         }
     });
-    assert.equal(decision.action, 'warn');
-    assert.equal(decision.message, PASSWORD_UNCONFIGURED_MESSAGE);
-    assert.equal(cleared, true);
+    assert.equal(unconfigured.action, 'warn');
+    assert.equal(unconfigured.message, PASSWORD_UNCONFIGURED_MESSAGE);
+
+    const busy = await requestAdminEntry({
+        getPassword: () => '',
+        prompt: async () => 'qualquer',
+        verify: async () => {
+            const error = statusError(503);
+            error.detail = 'Muitas conferências ao mesmo tempo. Tente de novo em instantes.';
+            error.retryAfter = 2;
+            throw error;
+        },
+        clearPassword: () => {
+            cleared += 1;
+        }
+    });
+    assert.equal(busy.action, 'warn');
+    assert.match(busy.message, /Servidor ocupado, tente de novo em instantes/);
+    assert.match(busy.message, /\(2s\)/);
+    assert.equal(cleared, 0);
 });
 
 test('SHOW_ROLE_TOGGLE ligado por padrão e desligado não pede senha', async () => {
@@ -236,14 +255,14 @@ test('verifyEditorPassword usa GET /api/auth/check: 204 aceita, 401 e 503 rejeit
         globalThis.fetch = async () => ({
             ok: false,
             status: 503,
-            json: async () => ({ detail: 'EDITOR_PASSWORD não está definida no ambiente do servidor.' })
+            json: async () => ({ detail: 'EDITOR_PASSWORD_HASH não está definida no ambiente do servidor.' })
         });
         setEditorPassword('qualquer');
         await assert.rejects(
             () => verifyEditorPassword('qualquer'),
             (err) => err.status === 503 && /não está configurada/.test(err.message)
         );
-        assert.equal(getEditorPassword(), '');
+        assert.equal(getEditorPassword(), 'qualquer');
     } finally {
         globalThis.fetch = original;
         clearEditorPassword();
@@ -255,10 +274,10 @@ test('nenhum código valida a senha com DELETE', () => {
     const files = [];
     const walk = (dir) => {
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
-            if (skip.has(entry.name)) continue;
+            if (skip.has(entry.name) || entry.name === 'dist' || entry.name === 'vendor') continue;
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) walk(full);
-            else if (/\.(js|html|css)$/.test(entry.name)) files.push(full);
+            else if (/\.(js|ts|tsx|html|css)$/.test(entry.name)) files.push(full);
         }
     };
     walk(frontendRoot);
@@ -268,24 +287,27 @@ test('nenhum código valida a senha com DELETE', () => {
         assert.equal(/DELETE\s+\/api\/routes\/2147483647/.test(text), false, file);
         assert.equal(/\/api\/routes\/2147483647/.test(text), false, file);
     });
-    const api = readFileSync(path.join(frontendRoot, 'js/core/api.js'), 'utf8');
+    const api = readFileSync(path.join(frontendRoot, 'src/core/api.ts'), 'utf8');
     assert.match(api, /request\('\/api\/auth\/check',\s*\{\s*method:\s*'GET'/);
 });
 
 test('páginas de visitante e de admin carregam o seletor', () => {
-    ['index.html', 'viewer.html', 'locate.html', 'routes.html'].forEach((page) => {
+    const home = readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
+    const entry = readFileSync(path.join(frontendRoot, 'src/main.tsx'), 'utf8');
+    assert.match(home, /\/src\/main\.tsx/);
+    assert.match(entry, /['"]\.\/boot['"]/);
+    ['viewer.html', 'locate.html'].forEach((page) => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
-        assert.match(html, /js\/boot\.js/, page);
+        assert.match(html, /\/src\/boot\.ts/, page);
     });
     ['admin/index.html', 'admin/editor.html', 'admin/recorder.html', 'admin/map-config.html', 'admin/qrcodes.html'].forEach((page) => {
         const html = readFileSync(path.join(frontendRoot, page), 'utf8');
-        assert.match(html, /\.\.\/js\/boot\.js/, page);
+        assert.match(html, /\/src\/boot\.ts/, page);
         assert.match(html, /id="admin-header"/, page);
     });
     const viewer = readFileSync(path.join(frontendRoot, 'viewer.html'), 'utf8');
     const locate = readFileSync(path.join(frontendRoot, 'locate.html'), 'utf8');
-    const nav = readFileSync(path.join(frontendRoot, 'js/components/nav.js'), 'utf8');
-    const home = readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
+    const nav = readFileSync(path.join(frontendRoot, 'src/components/nav.ts'), 'utf8');
     assert.match(viewer, /Mapa do prédio/);
     assert.match(locate, /Navegar/);
     assert.match(nav, /Mapa do prédio/);

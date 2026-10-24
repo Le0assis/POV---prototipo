@@ -15,9 +15,9 @@ Base de conhecimento central do POV. Leia antes de qualquer tarefa. Atualize a s
 |---|---|
 | Backend | Python 3.10+, FastAPI + Uvicorn, NumPy, SciPy (`find_peaks`, Butterworth) |
 | Banco | MySQL (XAMPP local), acesso via `ConexaoBD` e `MapDatabaseManager` |
-| Frontend | HTML5, CSS3, JavaScript puro (ES modules, sem framework) |
+| Frontend | TypeScript, Vite, Preact (`@preact/signals`), Leaflet |
 | APIs de hardware | `DeviceMotionEvent`, `DeviceOrientationEvent`, Page Visibility |
-| Infra | Cloudflare Tunnel (`api.pov-unimar.com` → `:8000`), GitHub Pages (front, branch `gh-pages`), GitHub Actions (`.github/workflows/frontend-deploy.yml`) |
+| Infra | Cloudflare Tunnel (`api.pov-unimar.com` → `:8000`), GitHub Pages (build do Vite em `frontend/dist`, `.github/workflows/pages.yml`) |
 
 ## 3. Estrutura de pastas
 
@@ -28,9 +28,9 @@ POV---prototipo/
 │   ├── datasets/       create_tables.py, ManagerDatabase.py, generate_sample_dataset.py, sample_walk.csv
 │   ├── filters/        madgwick.py, quaternion.py, butterworth.py, moving_average.py, signal_filter.py, attitude_estimator.py
 │   ├── map/            MapDatabaseManager.py, router.py (Dijkstra), topological_map.py, topological_matcher.py
-│   ├── pdr/            processor.py (pipeline), steps.py (picos + Weinberg), tracker.py, magnitude.py, altitude.py
-│   ├── sensors/        accelerometer.py, gyroscope.py, magnetometer.py, barometer.py, sensor_sample.py, repository.py
-│   ├── others/         run_csv_client.py, seed_map.py, example_sensors.py
+│   ├── pdr/            processor.py (pipeline), steps.py (picos + Weinberg), magnitude.py, altitude.py
+│   ├── sensors/        accelerometer.py, gyroscope.py, magnetometer.py, barometer.py, sensor_sample.py
+│   ├── others/         seed_map.py, evaluate_steps.py
 │   ├── static/         páginas legadas (index.html, mapa-2d.html, sensors_upload.html)
 │   └── tests/
 ├── frontend/           visão do administrador (css/, js/, index, recorder, routes)

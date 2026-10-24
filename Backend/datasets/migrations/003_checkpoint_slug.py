@@ -5,8 +5,10 @@ depois da 002. Rodar de novo não recria ``checkpoints_backup_m03`` nem
 troca slug que já esteja preenchido.
 
 O backup é o primeiro comando. Se ele não confirmar, nada é alterado.
-Slug entra NULL, o backfill preenche uma vez (mesma regra da criação) e
-só então a coluna vira NOT NULL e UNIQUE (building_id, slug).
+Slug entra NULL, o backfill preenche uma vez (mesma regra da criação).
+Slug já gravado e único não muda. Se dois checkpoints do mesmo prédio
+têm o mesmo slug, o menor id fica com ele e o outro recebe um slug novo.
+Nenhuma linha é apagada. Só então a coluna vira NOT NULL e UNIQUE.
 """
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ SQL_CREATE_BUILDINGS = """
 CREATE TABLE IF NOT EXISTS buildings (
     id INT NOT NULL PRIMARY KEY,
     name VARCHAR(128) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci
 """
 SQL_SEED_BUILDING = (
     "INSERT INTO buildings (id, name) VALUES (%s, %s) "
@@ -59,20 +61,26 @@ CREATE TABLE IF NOT EXISTS checkpoint_categories (
     code VARCHAR(32) NOT NULL UNIQUE,
     label VARCHAR(64) NOT NULL,
     sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci
 """
-SQL_SEED_CATEGORIES = (
-    "INSERT INTO checkpoint_categories (code, label, sort_order) VALUES "
-    + ", ".join(["(%s, %s, %s)"] * len(CATEGORY_SEEDS))
-    + " ON DUPLICATE KEY UPDATE label = VALUES(label), sort_order = VALUES(sort_order)"
+SQL_SEED_CATEGORY = (
+    "INSERT INTO checkpoint_categories (code, label, sort_order) VALUES (%s, %s, %s) "
+    "ON DUPLICATE KEY UPDATE label = %s, sort_order = %s"
 )
 SQL_SELECT_CHECKPOINTS = (
     "SELECT id, name, building_id, slug FROM checkpoints ORDER BY id"
 )
 SQL_UPDATE_SLUG = (
-    "UPDATE checkpoints SET slug = %s WHERE id = %s AND slug IS NULL"
+    "UPDATE checkpoints SET slug = %s WHERE id = %s AND (slug IS NULL OR slug = '')"
+)
+SQL_REPOINT_SLUG = (
+    "UPDATE checkpoints SET slug = %s WHERE id = %s AND slug = %s"
 )
 SQL_NULL_SLUGS = "SELECT id FROM checkpoints WHERE slug IS NULL OR slug = ''"
+SQL_DUPLICATE_MAP = (
+    "SELECT building_id, COUNT(*) AS total FROM map_config "
+    "GROUP BY building_id HAVING COUNT(*) > 1"
+)
 SQL_DUPLICATE_SLUGS = (
     "SELECT building_id, slug, COUNT(*) AS total FROM checkpoints "
     "GROUP BY building_id, slug HAVING COUNT(*) > 1"
@@ -150,11 +158,10 @@ def backup_checkpoints_once(db) -> None:
     print("[M03] Snapshot checkpoints_backup_m03 criado antes das alterações.")
 
 
-def _seed_params() -> tuple:
-    values = []
+def _seed_categories(db) -> None:
+    """Uma linha por vez. VALUES() no ON DUPLICATE sai no MySQL 8 e no MariaDB não é igual."""
     for code, label, sort_order in CATEGORY_SEEDS:
-        values.extend((code, label, sort_order))
-    return tuple(values)
+        _exec(db, SQL_SEED_CATEGORY, (code, label, sort_order, label, sort_order))
 
 
 def backfill_slugs(db) -> None:
@@ -177,6 +184,30 @@ def backfill_slugs(db) -> None:
         print(
             f"[M03] slug id={row['id']} building_id={building_id} "
             f"name={row.get('name')!r} -> {slug}"
+        )
+
+
+def disambiguate_slugs(db) -> None:
+    """Slug repetido no mesmo prédio: o menor id fica, o seguinte ganha outro.
+
+    Não apaga checkpoint. Slug que não colide não é reescrito.
+    """
+    rows = _fetch(db, SQL_SELECT_CHECKPOINTS)
+    taken: dict[int, set[str]] = {}
+    for row in rows:
+        building_id = int(row.get("building_id") or DEFAULT_BUILDING_ID)
+        bucket = taken.setdefault(building_id, set())
+        current = (row.get("slug") or "").strip()
+        if not current or current not in bucket:
+            if current:
+                bucket.add(current)
+            continue
+        replacement = allocate_slug(str(row.get("name") or ""), bucket)
+        bucket.add(replacement)
+        _exec(db, SQL_REPOINT_SLUG, (replacement, int(row["id"]), current))
+        print(
+            f"[M03] slug id={row['id']} colidia em '{current}' "
+            f"e passou a '{replacement}'. A linha ficou."
         )
 
 
@@ -203,7 +234,7 @@ def apply(db) -> None:
     _exec(db, SQL_SEED_BUILDING, (DEFAULT_BUILDING_ID, BUILDING_NAME))
 
     _exec(db, SQL_CREATE_CATEGORIES)
-    _exec(db, SQL_SEED_CATEGORIES, _seed_params())
+    _seed_categories(db)
 
     _add_column(db, "checkpoints", "category_id", "category_id INT NULL")
     if not _index_exists(db, "checkpoints", "idx_checkpoints_category_id"):
@@ -219,6 +250,7 @@ def apply(db) -> None:
     )
     _add_column(db, "checkpoints", "slug", "slug VARCHAR(64) NULL")
     backfill_slugs(db)
+    disambiguate_slugs(db)
     _assert_slugs_ready(db)
 
     nullable = _fetch(db, SQL_COLUMN_NULLABLE, ("checkpoints", "slug"))
@@ -241,6 +273,13 @@ def apply(db) -> None:
         "building_id INT NOT NULL DEFAULT 1",
     )
     if not _index_exists(db, "map_config", "uq_map_config_building"):
-        _exec(db, SQL_UNIQUE_MAP)
+        duplicates = _fetch(db, SQL_DUPLICATE_MAP)
+        if duplicates:
+            print(
+                "[M03] map_config tem mais de uma linha no mesmo prédio "
+                f"({duplicates}). UNIQUE não foi criado. Nenhuma linha foi apagada."
+            )
+        else:
+            _exec(db, SQL_UNIQUE_MAP)
     if not _fk_exists(db, "map_config", "fk_map_config_building"):
         _exec(db, SQL_FK_MAP)

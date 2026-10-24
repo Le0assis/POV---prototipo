@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 
 import {
     PX_INVALID_MESSAGE,
     PX_MISSING_MESSAGE,
     formatMapConfigSaveError,
     validateMapConfigInput
-} from '../js/pages/map-config-form.js';
+} from '../src/pages/map-config-form.ts';
 
 test('px_per_m ausente ou <= 0 explica o 422', () => {
     assert.equal(validateMapConfigInput({ planImage: 'assets/planta.png', rawPx: '', degrees: 0 }).error, PX_MISSING_MESSAGE);

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 
 import {
     metersToPixels,
     pixelsToMeters,
     plantHeadingToScreenDeg,
     pixelDistanceMeters
-} from '../js/map/coords.js';
+} from '../src/map/coords.ts';
 
 const anchor = { pos_x_px: 100, pos_y_px: 200 };
 const flat = { px_per_m: 10, rotation_rad: 0 };

@@ -10,12 +10,32 @@
             var root = document.documentElement;
             if (prefs && prefs.hc) root.classList.add('hc');
             if (prefs && prefs.fontLg) root.classList.add('font-lg');
+            if (prefs && prefs.dark) root.classList.add('dark');
         } catch (e) { /* preferência ausente: segue o tema padrão */ }
     })();
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POV — Editor</title>
+    <meta name="robots" content="noindex">
+    <meta name="description" content="Cria checkpoints e conexões e grava a posição de cada ponto na planta.">
+    <link rel="canonical" href="https://pov-unimar.com/admin/editor.html">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="POV">
+    <meta property="og:locale" content="pt_BR">
+    <meta property="og:title" content="POV — Editor">
+    <meta property="og:description" content="Cria checkpoints e conexões e grava a posição de cada ponto na planta.">
+    <meta property="og:url" content="https://pov-unimar.com/admin/editor.html">
+    <meta property="og:image" content="https://pov-unimar.com/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="POV, mapa do prédio com a rota em azul e o destino em âmbar.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="POV — Editor">
+    <meta name="twitter:description" content="Cria checkpoints e conexões e grava a posição de cada ponto na planta.">
+    <meta name="twitter:url" content="https://pov-unimar.com/admin/editor.html">
+    <meta name="twitter:image" content="https://pov-unimar.com/og.png">
+    <meta name="twitter:image:alt" content="POV, mapa do prédio com a rota em azul e o destino em âmbar.">
     <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#2563EB">
     <link rel="stylesheet" href="../vendor/leaflet/leaflet.css">
@@ -73,16 +93,6 @@
                         <button type="submit" class="btn btn-primary">Gravar conexão</button>
                     </form>
 
-                    <form class="card" id="form-reset">
-                        <h2>Sessão no servidor</h2>
-                        <label class="form-group" for="reset-node">
-                            Nó inicial
-                            <select id="reset-node" required></select>
-                        </label>
-                        <p class="hint">Reinicia o PDR do servidor neste checkpoint. Usa a senha do editor. O mapa e a localização não chamam este endpoint.</p>
-                        <button type="submit" class="btn btn-danger">Reiniciar sessão</button>
-                    </form>
-
                     <section class="card" id="unplaced-card">
                         <h2>Sem posição</h2>
                         <p class="hint">Trajetórias desses nós não entram no mapa até haver pixels.</p>
@@ -93,7 +103,7 @@
         </div>
     </main>
     <script src="../vendor/leaflet/leaflet.js"></script>
-    <script type="module" src="../js/boot.js"></script>
-    <script type="module" src="../js/pages/editor.js"></script>
+    <script type="module" src="/src/boot.ts"></script>
+    <script type="module" src="/src/pages/editor.ts"></script>
 </body>
 </html>
