@@ -53,6 +53,14 @@ export function routeWeight(zoom) {
  * e mesmo quando se sobrepõem. Os outros só entram acima do zoom mínimo
  * e se o retângulo não cruza um rótulo já escolhido.
  */
+/** A rota já nomeia o destino; o rótulo permanente da camada Rótulos sai dessa sala. */
+export function routeHidesLayerLabel(focus, slug, name) {
+    const wanted = focus && focus.routeDestination;
+    if (!wanted) return false;
+    const value = String(wanted);
+    return value === String(slug || '') || value === String(name || '');
+}
+
 export function chooseLabels(items, { labelsOn = true, zoom = 0, minZoom = LABEL_MIN_ZOOM } = {} as any) {
     const visible = [];
     const boxes = [];

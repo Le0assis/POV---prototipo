@@ -6,7 +6,7 @@
 import { mapLineColors, tokenColor } from '../core/colors.js';
 import { escapeHtml } from '../core/dom.js';
 import { pixelTolerance, simplifyPath } from './simplify.js';
-import { chooseLabels, defaultLayerVisibility, lineWeight } from './style.js';
+import { chooseLabels, defaultLayerVisibility, lineWeight, routeHidesLayerLabel } from './style.js';
 
 function recordedStyle(zoom) {
     return { color: mapLineColors().recorded, weight: lineWeight(zoom, true), opacity: 0.95 };
@@ -177,16 +177,19 @@ function syncLabels(floor) {
         if (!latlng) return;
         const point = floor.map.latLngToContainerPoint(latlng);
         const pinned = samePoint(focus.origin, slug, name) || samePoint(focus.destination, slug, name);
+        const covered = routeHidesLayerLabel(focus, slug, name);
         items.push({
             id: key,
             name,
             pinned,
+            covered,
             x: point.x - 24,
             y: point.y - 28,
             marker
         });
     });
-    const visible = new Set(chooseLabels(items, { labelsOn: layers.labels !== false, zoom }));
+    const candidates = items.filter((item) => !item.covered);
+    const visible = new Set(chooseLabels(candidates, { labelsOn: layers.labels !== false, zoom }));
     items.forEach((item) => setPermanentLabel(item.marker, visible.has(item.id), item.name));
 }
 

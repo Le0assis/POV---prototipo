@@ -3,6 +3,7 @@ import { test } from 'vitest';
 
 import {
     chooseLabels,
+    routeHidesLayerLabel,
     defaultLayerVisibility,
     LABEL_MIN_ZOOM,
     lineWeight,
@@ -54,4 +55,12 @@ test('rótulos: origem e destino sempre, o resto só acima do zoom e sem sobrepo
     const shown = chooseLabels(items, { zoom: LABEL_MIN_ZOOM });
     assert.deepEqual(shown, ['origem', 'destino', 'longe']);
     assert.deepEqual(chooseLabels(items, { labelsOn: false, zoom: 3 }), []);
+});
+
+test('a rota esconde o rótulo da camada só na sala de destino', () => {
+    assert.equal(routeHidesLayerLabel({ routeDestination: 'sala' }, 'sala', 'Sala de aula'), true);
+    assert.equal(routeHidesLayerLabel({ routeDestination: 'Sala de aula' }, 'sala', 'Sala de aula'), true);
+    assert.equal(routeHidesLayerLabel({ routeDestination: 'sala' }, 'recepcao', 'Recepção'), false);
+    assert.equal(routeHidesLayerLabel({ destination: 'sala' }, 'sala', 'Sala de aula'), false);
+    assert.equal(routeHidesLayerLabel({ routeDestination: '' }, 'sala', 'Sala de aula'), false);
 });

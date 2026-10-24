@@ -49,6 +49,21 @@ export function createRouteLayer(floor) {
         outlineLine = null;
         mainLine = null;
         originMarker = null;
+        syncDestinationLabel(null);
+    }
+
+    function syncDestinationLabel(checkpoint) {
+        const focus = floor.labelFocus || (floor.labelFocus = { origin: '', destination: '' });
+        const raw = checkpoint ? (checkpoint.slug || checkpoint.name || checkpoint.label || '') : '';
+        focus.routeDestination = raw ? String(raw) : '';
+        if (typeof floor.syncLabels === 'function') floor.syncLabels();
+    }
+
+    function destinationStop(route) {
+        const stops = Array.isArray(route && route.checkpoints) ? route.checkpoints : [];
+        const destination = stops.length > 1 ? stops[stops.length - 1] : null;
+        if (!destination || !Number.isFinite(destination.pos_x_px) || !Number.isFinite(destination.pos_y_px)) return null;
+        return destination;
     }
 
     function applyWeight() {
@@ -83,6 +98,7 @@ export function createRouteLayer(floor) {
         const next = routeSignature(route);
         if (next && next === signature) {
             syncOrigin(route, markOrigin);
+            syncDestinationLabel(destinationStop(route));
             return;
         }
         clear();
@@ -120,6 +136,7 @@ export function createRouteLayer(floor) {
         const destination = stops.length > 1 ? stops[stops.length - 1] : null;
         syncOrigin(route, markOrigin);
         if (destination) addDestination(floor, group, destination);
+        syncDestinationLabel(destinationStop(route));
         bringGroupToFront(group);
         setVisible(floor.layers ? floor.layers.route !== false : visible);
     }
@@ -219,6 +236,8 @@ function addDestination(floor, group, checkpoint) {
         className: 'route-dest-label',
         offset: [0, -12]
     });
+    // O nome fica neste marcador. syncDestinationLabel tira o rótulo permanente
+    // da camada Rótulos na mesma sala, para os dois não se cobrirem.
     marker.addTo(group);
 }
 
