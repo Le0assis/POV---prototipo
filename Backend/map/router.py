@@ -9,7 +9,9 @@ class TopologicalRouter:
 
     def calculate_route(self, start_node: str, end_node: str) -> list[str]:
         """Dijkstra. Lista vazia se algum nó não existe ou não há caminho."""
-        if start_node not in self.map.nodes or end_node not in self.map.nodes:
+        start_node = self.map.canonical_name(start_node)
+        end_node = self.map.canonical_name(end_node)
+        if start_node is None or end_node is None:
             return []
 
         distances = {node: float("inf") for node in self.map.nodes}

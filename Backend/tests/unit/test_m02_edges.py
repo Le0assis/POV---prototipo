@@ -76,6 +76,46 @@ def test_recorded_distance_is_median_and_active_is_latest():
     assert resolved["active_trace_id"] == 4
 
 
+def test_sala_case_uses_the_checkpoint_spelling():
+    """Banco antigo com Sala/sala não esvazia o grafo. A grafia do checkpoint fica."""
+    topo = TopologicalMap()
+    topo.add_checkpoint("Sala")
+    topo.add_checkpoint("Quarto")
+    topo.add_checkpoint("sala")
+    assert list(topo.nodes) == ["Sala", "Quarto"]
+    topo.load_directed_edges([
+        {"id": 1, "source_node": "sala", "target_node": "QUARTO", "distance_m": 4.0, "heading_rad": 0.2},
+        {"id": 2, "source_node": "SALA", "target_node": "quarto", "distance_m": 9.0, "heading_rad": 0.4},
+    ])
+    assert [(edge.source, edge.target) for edge in topo.edges] == [("Sala", "Quarto")]
+    assert topo.edges[0].distance_m == 9.0
+    assert topo.get_outgoing_edges("sala")[0].target == "Quarto"
+    topo.upsert_directed_edge("Sala", "Quarto", 5.0, 0.3)
+    assert len(topo.edges) == 1
+    assert topo.edges[0].source == "Sala"
+    assert topo.edges[0].distance_m == 5.0
+    from map.router import TopologicalRouter
+    assert TopologicalRouter(topo).calculate_route("sala", "quarto") == ["Sala", "Quarto"]
+
+
+def test_accents_stay_distinct_from_case():
+    topo = TopologicalMap()
+    topo.add_checkpoint("Recepção")
+    topo.add_checkpoint("Recepcao")
+    assert set(topo.nodes) == {"Recepção", "Recepcao"}
+    topo.load_directed_edges([
+        {
+            "id": 1,
+            "source_node": "recepcao",
+            "target_node": "Recepção",
+            "distance_m": 1.0,
+            "heading_rad": 0.0,
+        },
+    ])
+    assert topo.edges[0].source == "Recepcao"
+    assert topo.edges[0].target == "Recepção"
+
+
 def test_load_does_not_mirror_duplicate_rows():
     topo = TopologicalMap()
     topo.add_checkpoint("Quarto")

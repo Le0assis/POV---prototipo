@@ -129,16 +129,69 @@ async def mysql_query_failed(_request, exc: DatabaseQueryError):
 topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
+
+class MapLoadError(RuntimeError):
+    """Produção não sobe sem grafo. A mensagem não leva senha nem SQL."""
+
+
+class MapLoad:
+    """Resultado da carga da subida. O health lê isto e não abre MySQL."""
+
+    def __init__(self) -> None:
+        self.status = "error"
+        self.detail = "Mapa ainda não carregado."
+
+    def set(self, status: str, detail: str) -> None:
+        self.status = status
+        self.detail = detail
+
+
+map_load = MapLoad()
+
+
+def classify_loaded_map(*, failed: bool, node_count: int, edge_count: int) -> tuple[str, str]:
+    """``error`` se a carga estourou, ``empty`` sem nó ou sem aresta, senão ``ok``."""
+    if failed:
+        return "error", "Falha ao carregar o grafo."
+    if node_count <= 0 or edge_count <= 0:
+        return "empty", "Grafo vazio."
+    return "ok", "ok"
+
+
+def _raise_if_production_map_unusable() -> None:
+    """Em produção o processo para. Em desenvolvimento só o health fica 503."""
+    if map_load.status == "ok":
+        return
+    if get_settings().pov_env.strip().lower() != "production":
+        return
+    raise MapLoadError(f"Produção não sobe: {map_load.detail}")
+
+
 def _load_map_once() -> None:
     """Carrega o grafo na subida e devolve a sessão. Não fica aberta no processo."""
+    failed = False
     try:
         with request_session(db):
             map_db_manager.load_map_into_system(topo_map)
             print(f"[SISTEMA] Mapa carregado com sucesso. Nós em memória: {list(topo_map.nodes.keys())}")
     except DatabaseUnavailable:
+        failed = True
         print("[ERRO CRÍTICO] Não foi possível conectar ao banco MySQL. Verifique o XAMPP.")
+        logger.error("MySQL indisponível ao carregar o mapa")
     except Exception as exc:
-        print(f"[AVISO] Falha ao carregar o mapa inicial ou banco vazio. Erro: {exc}")
+        failed = True
+        print(f"[ERRO] Falha ao carregar o mapa inicial. Erro: {exc}")
+        logger.error("Falha ao carregar o mapa", exc_info=exc)
+    status_name, detail = classify_loaded_map(
+        failed=failed,
+        node_count=len(topo_map.nodes),
+        edge_count=len(topo_map.edges),
+    )
+    map_load.set(status_name, detail)
+    if status_name == "empty":
+        print("[ERRO] Grafo vazio: sem nó ou sem aresta.")
+        logger.error("Grafo vazio na subida")
+    _raise_if_production_map_unusable()
 
 
 _load_map_once()
@@ -167,8 +220,22 @@ def require_session_id(x_pov_session: str | None = Header(default=None)) -> str:
 
 @app.get("/api/health")
 def health():
-    """Ping do status. Não abre MySQL nem as rotas de teste."""
+    """Grafo carregado na subida. Não abre MySQL. Vazio ou erro é 503."""
+    if map_load.status != "ok":
+        return JSONResponse(
+            status_code=503,
+            content={"status": map_load.status, "detail": map_load.detail},
+        )
     return {"status": "ok"}
+
+
+def _canonical_pair(source: str, target: str, *, missing: str) -> tuple[str, str]:
+    """Nomes do checkpoint. Caixa diferente não é outro nó; acerto exato não muda."""
+    resolved_source = topo_map.canonical_name(source)
+    resolved_target = topo_map.canonical_name(target)
+    if resolved_source is None or resolved_target is None:
+        raise HTTPException(status_code=404, detail=missing)
+    return resolved_source, resolved_target
 
 @app.get("/api/auth/check", status_code=status.HTTP_204_NO_CONTENT)
 def check_editor_auth(_editor: None = Depends(require_editor_password)):
@@ -181,11 +248,14 @@ def process_raw_edge(
     _editor: None = Depends(require_editor_password),
 ):
     """Recebe amostras brutas, grava a trajetória e atualiza só o sentido andado."""
-    if payload.source not in topo_map.nodes or payload.target not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
-    if payload.source == payload.target:
+    source, target = _canonical_pair(
+        payload.source,
+        payload.target,
+        missing="Nó de origem ou destino não encontrados.",
+    )
+    if source == target:
         raise HTTPException(status_code=400, detail="Origem e destino não podem ser o mesmo nó.")
-    return edge_processor.process_samples(payload.source, payload.target, payload.samples)
+    return edge_processor.process_samples(source, target, payload.samples)
 
 @app.post("/api/checkpoints", status_code=status.HTTP_201_CREATED)
 def create_checkpoint(
@@ -218,7 +288,7 @@ def create_checkpoint(
             detail="O slug gerado ainda está em uso neste prédio. Tente de novo.",
         ) from exc
     if success:
-        if node_name not in topo_map.nodes:
+        if topo_map.canonical_name(node_name) is None:
             topo_map.add_checkpoint(node_name)
         body = {
             "status": "success",
@@ -237,30 +307,32 @@ def create_edge(
     _editor: None = Depends(require_editor_password),
 ):
     """Cadastra manualmente uma conexão (ida e volta) entre dois checkpoints."""
-    if edge.source not in topo_map.nodes or edge.target not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de origem ou destino não encontrados.")
-
-    if edge.source == edge.target:
+    source, target = _canonical_pair(
+        edge.source,
+        edge.target,
+        missing="Nó de origem ou destino não encontrados.",
+    )
+    if source == target:
         raise HTTPException(status_code=400, detail="Origem e destino não podem ser o mesmo nó.")
 
     if edge.distance_m <= 0:
         raise HTTPException(status_code=400, detail="A distância deve ser maior que zero.")
 
-    success = map_db_manager.save_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
+    success = map_db_manager.save_edge(source, target, edge.distance_m, edge.heading_rad)
     if not success:
         raise _internal_error("Erro interno ao salvar.", note="POST /api/edges")
 
     # Um registro por sentido, nos mesmos radianos gravados no banco.
     inverse_heading = (edge.heading_rad + math.pi) % (2 * math.pi)
-    topo_map.upsert_directed_edge(edge.source, edge.target, edge.distance_m, edge.heading_rad)
-    topo_map.upsert_directed_edge(edge.target, edge.source, edge.distance_m, inverse_heading)
+    topo_map.upsert_directed_edge(source, target, edge.distance_m, edge.heading_rad)
+    topo_map.upsert_directed_edge(target, source, edge.distance_m, inverse_heading)
 
     return {
         "status": "success",
-        "message": f"Conexão '{edge.source}' <-> '{edge.target}' criada com sucesso.",
+        "message": f"Conexão '{source}' <-> '{target}' criada com sucesso.",
         "edge": {
-            "source": edge.source,
-            "target": edge.target,
+            "source": source,
+            "target": target,
             "distance_m": edge.distance_m,
             "heading_rad": edge.heading_rad
         }
@@ -299,8 +371,11 @@ def localize_user(
 
 @app.get("/api/route", status_code=status.HTTP_200_OK)
 def get_route(start: str = Query(...), end: str = Query(...)):
-    if start not in topo_map.nodes or end not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+    start, end = _canonical_pair(
+        start,
+        end,
+        missing="Nó de partida ou destino não encontrados.",
+    )
 
     calculated_path = router.calculate_route(start, end)
     if not calculated_path:
@@ -318,8 +393,11 @@ def get_route(start: str = Query(...), end: str = Query(...)):
 @app.get("/api/compass_route", status_code=status.HTTP_200_OK)
 def get_compass_route(start: str = Query(...), end: str = Query(...)):
     """Retorna a rota com segmentos detalhados (heading, distance) para navegação por bússola."""
-    if start not in topo_map.nodes or end not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+    start, end = _canonical_pair(
+        start,
+        end,
+        missing="Nó de partida ou destino não encontrados.",
+    )
 
     segments = router.calculate_route_with_segments(start, end)
     if not segments:
@@ -353,11 +431,11 @@ def create_route(
     _editor: None = Depends(require_editor_password),
 ):
     """Cria e salva uma nova rota calculando via Dijkstra."""
-    start = route_data.start_node
-    end = route_data.end_node
-
-    if start not in topo_map.nodes or end not in topo_map.nodes:
-        raise HTTPException(status_code=404, detail="Nó de partida ou destino não encontrados.")
+    start, end = _canonical_pair(
+        route_data.start_node,
+        route_data.end_node,
+        missing="Nó de partida ou destino não encontrados.",
+    )
 
     segments = router.calculate_route_with_segments(start, end)
     if not segments:
@@ -415,8 +493,11 @@ def reset_session(
     session_id: str = Depends(require_session_id),
 ):
     """Zera o matcher e o caminho desta sessão. As outras ficam como estão."""
-    if start_node not in topo_map.nodes:
+    resolved_start = topo_map.canonical_name(start_node)
+    if resolved_start is None:
         start_node = next(iter(topo_map.nodes), starting_node)
+    else:
+        start_node = resolved_start
     with walk_sessions.hold(session_id, reset=True, start_node=start_node) as state:
         started = state.visited_path[0]
     return {

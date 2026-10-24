@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from fastapi.testclient import TestClient
 
 import api.app as app_module
-from api.app import app
+from api.app import MapLoadError, app
 from api.editor_auth import make_password_hash
 
 pytestmark = pytest.mark.integration
@@ -21,14 +23,101 @@ def _clear_cors(monkeypatch, env: str) -> None:
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
 
 
-def test_health_does_not_open_mysql(monkeypatch):
+def _restore_map(snapshot):
+    topo = app_module.topo_map
+    topo.nodes.clear()
+    topo.nodes.update(snapshot["nodes"])
+    topo.edges[:] = snapshot["edges"]
+    topo._folded.clear()
+    topo._folded.update(snapshot["folded"])
+    app_module.map_load.set(*snapshot["load"])
+
+
+def _snapshot_map():
+    topo = app_module.topo_map
+    return {
+        "nodes": dict(topo.nodes),
+        "edges": list(topo.edges),
+        "folded": dict(topo._folded),
+        "load": (app_module.map_load.status, app_module.map_load.detail),
+    }
+
+
+def test_health_reports_the_graph_without_opening_mysql(monkeypatch):
     def fail(*_args, **_kwargs):
         raise AssertionError("o ping não abre MySQL")
 
     monkeypatch.setattr("datasets.ManagerDatabase.ConexaoBD.connect", fail)
-    response = TestClient(app).get("/api/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    snapshot = _snapshot_map()
+    try:
+        app_module.map_load.set("ok", "ok")
+        response = TestClient(app).get("/api/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+
+        app_module.map_load.set("empty", "Grafo vazio.")
+        empty = TestClient(app).get("/api/health")
+        assert empty.status_code == 503
+        assert empty.json() == {"status": "empty", "detail": "Grafo vazio."}
+
+        app_module.map_load.set("error", "Falha ao carregar o grafo.")
+        failed = TestClient(app).get("/api/health")
+        assert failed.status_code == 503
+        body = failed.json()
+        assert body["status"] == "error"
+        assert body["detail"] == "Falha ao carregar o grafo."
+        assert "senha" not in failed.text.lower()
+    finally:
+        _restore_map(snapshot)
+
+
+def test_classify_empty_graph_is_not_a_loaded_map():
+    assert app_module.classify_loaded_map(failed=False, node_count=2, edge_count=0) == (
+        "empty",
+        "Grafo vazio.",
+    )
+    assert app_module.classify_loaded_map(failed=False, node_count=0, edge_count=0) == (
+        "empty",
+        "Grafo vazio.",
+    )
+    assert app_module.classify_loaded_map(failed=True, node_count=2, edge_count=1)[0] == "error"
+    assert app_module.classify_loaded_map(failed=False, node_count=2, edge_count=1) == ("ok", "ok")
+
+
+def test_production_does_not_start_when_the_graph_is_empty_or_failed(monkeypatch):
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setattr(app_module, "request_session", lambda *_args, **_kwargs: contextlib.nullcontext())
+    snapshot = _snapshot_map()
+
+    def empty_load(target):
+        target.nodes.clear()
+        target.edges.clear()
+        target._folded.clear()
+
+    def broken_load(_target):
+        raise RuntimeError("segredo-do-banco")
+
+    try:
+        monkeypatch.setattr(app_module.map_db_manager, "load_map_into_system", empty_load)
+        with pytest.raises(MapLoadError) as empty_exc:
+            app_module._load_map_once()
+        assert str(empty_exc.value) == "Produção não sobe: Grafo vazio."
+        assert app_module.map_load.status == "empty"
+
+        monkeypatch.setenv("POV_ENV", "development")
+        app_module._load_map_once()
+        assert app_module.map_load.status == "empty"
+
+        monkeypatch.setenv("POV_ENV", "production")
+        monkeypatch.setattr(app_module.map_db_manager, "load_map_into_system", broken_load)
+        with pytest.raises(MapLoadError) as failed_exc:
+            app_module._load_map_once()
+        text = str(failed_exc.value)
+        assert text == "Produção não sobe: Falha ao carregar o grafo."
+        assert "segredo-do-banco" not in text
+        assert app_module.map_load.status == "error"
+    finally:
+        _restore_map(snapshot)
 
 
 def test_production_cors_allows_only_the_pages(monkeypatch):
