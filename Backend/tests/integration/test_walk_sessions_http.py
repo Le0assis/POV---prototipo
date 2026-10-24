@@ -261,3 +261,13 @@ def test_missing_or_invalid_session_is_400_and_stores_nothing():
     assert "X-Pov-Session" in missing.json()["detail"]
     assert "passwd" not in invalid.text
     assert len(app_module.walk_sessions) == 0
+
+
+def test_cloudflared_on_loopback_gives_each_visitor_their_own_limit(monkeypatch):
+    """Atrás do cloudflared o par é 127.0.0.1: com TRUSTED_PROXIES o 9º visitante entra."""
+    monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1,::1")
+    tunnel = TestClient(app, client=("127.0.0.1", 50000))
+    for index in range(12):
+        opened = _open(tunnel, f"device-t-{index:02d}", {"CF-Connecting-IP": f"198.51.100.{index + 1}"})
+        assert opened.status_code == 200, opened.text
+    assert len(app_module.walk_sessions) == 12
