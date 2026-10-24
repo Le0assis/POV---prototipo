@@ -22,8 +22,8 @@ pytestmark = pytest.mark.integration
 
 PASSWORD = "segredo-do-editor"
 PASSWORD_HASH = make_password_hash(PASSWORD)
-OK = {"X-Editor-Password": PASSWORD}
-WRONG = {"X-Editor-Password": "outra"}
+OK = {"X-Editor-Password": PASSWORD, "X-Pov-Session": "device-editor-1"}
+WRONG = {"X-Editor-Password": "outra", "X-Pov-Session": "device-editor-1"}
 
 
 def _samples(count: int = 20) -> list[dict]:
@@ -370,7 +370,7 @@ def test_post_reset_requires_editor_password(monkeypatch):
     monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
     monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     client = TestClient(app)
-    missing = client.post("/api/reset")
+    missing = client.post("/api/reset", headers={"X-Pov-Session": "device-editor-1"})
     wrong = client.post("/api/reset", headers=WRONG)
     assert missing.status_code == 401
     assert wrong.status_code == 401

@@ -1,6 +1,6 @@
 import logging
 import math
-from fastapi import Depends, FastAPI, HTTPException, Response, status, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
@@ -16,12 +16,12 @@ from datasets.ManagerDatabase import (
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
-from map.topological_matcher import TopologicalMatcher
 from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
 from .editor_auth import require_editor_password
 from .envfile import load_env_file
 from .settings import get_settings
+from .walk_session import InvalidSessionId, WalkSessions, parse_session_id
 
 load_env_file()
 
@@ -139,8 +139,7 @@ def _load_map_once() -> None:
 _load_map_once()
 
 starting_node = "Recepcao"
-matcher = TopologicalMatcher(topo_map, starting_node=starting_node)
-visited_path = [starting_node]
+walk_sessions = WalkSessions(topo_map, default_start=starting_node)
 
 # --- ROTAS DA API ---
 
@@ -151,6 +150,14 @@ def require_test_routes() -> None:
     """As rotas de localização fixa só existem com a flag. Sem ela, 404."""
     if not get_settings().pov_enable_test_routes:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
+def require_session_id(x_pov_session: str | None = Header(default=None)) -> str:
+    """Id do aparelho. A rota declara a flag de teste antes desta dependência."""
+    try:
+        return parse_session_id(x_pov_session)
+    except InvalidSessionId as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/health")
@@ -259,21 +266,25 @@ def create_edge(
 def localize_user(
     sensor_data: StepSensorSchema,
     _test: None = Depends(require_test_routes),
+    session_id: str = Depends(require_session_id),
 ):
     if not topo_map.nodes:
         raise HTTPException(status_code=400, detail="O mapa do sistema está vazio.")
-        
+
     try:
         step_event = StepEventAdapter(step_length_m=sensor_data.step_length_m)
-        current_node = matcher.process_step(step=step_event, current_yaw_rad=sensor_data.yaw_rad) #type: ignore
-        
-        if visited_path and visited_path[-1] != current_node:
-            visited_path.append(current_node)
-        
+        with walk_sessions.hold(session_id) as state:
+            current_node = state.matcher.process_step(
+                step=step_event,
+                current_yaw_rad=sensor_data.yaw_rad,
+            )
+            if state.visited_path[-1] != current_node:
+                state.visited_path.append(current_node)
+            distance_m = state.matcher.accumulated_distance
         return {
             "status": "success",
             "current_node": current_node,
-            "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0)
+            "accumulated_distance_m": distance_m,
         }
     except HTTPException:
         raise
@@ -396,14 +407,18 @@ def reset_session(
     start_node: str = Query(default="Recepcao"),
     _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
+    session_id: str = Depends(require_session_id),
 ):
-    """Zera o estado do matcher e a lista de nós visitados para nova gravação/localização."""
-    global matcher, visited_path
+    """Zera o matcher e o caminho desta sessão. As outras ficam como estão."""
     if start_node not in topo_map.nodes:
         start_node = next(iter(topo_map.nodes), starting_node)
-    matcher = TopologicalMatcher(topo_map, starting_node=start_node)
-    visited_path = [start_node]
-    return {"status": "success", "message": "Estado do PDR e sensores resetados.", "start_node": start_node}
+    with walk_sessions.hold(session_id, reset=True, start_node=start_node) as state:
+        started = state.visited_path[0]
+    return {
+        "status": "success",
+        "message": "Estado do PDR e sensores resetados.",
+        "start_node": started,
+    }
 
 # O front em Vite tirou frontend/js. Montar pasta ausente derruba o import da API.
 for _mount, _folder in (("/css", "css"), ("/js", "js"), ("/assets", "assets"), ("/vendor", "vendor")):
@@ -412,13 +427,17 @@ for _mount, _folder in (("/css", "css"), ("/js", "js"), ("/assets", "assets"), (
         app.mount(_mount, StaticFiles(directory=_directory), name=_folder)
 
 @app.get("/api/current_location")
-def get_current_location(_test: None = Depends(require_test_routes)):
-    return {
-        "current_node": getattr(matcher, 'current_node', getattr(matcher, 'current_state', 'Desconhecido')),
-        "accumulated_distance_m": getattr(matcher, 'accumulated_distance', 0.0),
-        "steps_count": getattr(matcher, "steps_count", 0),
-        "visited_path": visited_path
-    }
+def get_current_location(
+    _test: None = Depends(require_test_routes),
+    session_id: str = Depends(require_session_id),
+):
+    with walk_sessions.hold(session_id) as state:
+        return {
+            "current_node": state.matcher.current_node,
+            "accumulated_distance_m": state.matcher.accumulated_distance,
+            "steps_count": getattr(state.matcher, "steps_count", 0),
+            "visited_path": list(state.visited_path),
+        }
 
 def _checkpoint_meta(raw):
     """Tupla legada (x, y) ou o dict público do checkpoint."""

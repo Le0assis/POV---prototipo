@@ -167,7 +167,7 @@ O arquivo `.env` está no `.gitignore`. O exemplo versionado é `.env.example`, 
 
 Escritas protegidas: `POST /api/checkpoints`, `PATCH /api/checkpoints/{name}/position`, `POST /api/edges`, `POST /api/edges/process-raw`, `PUT /api/map-config`, `POST /api/routes`, `DELETE /api/routes/{id}`. `POST /api/reset` também, e só responde se `POV_ENABLE_TEST_ROUTES` estiver ligada; sem a flag é **404**. `GET /api/sensors_log/{id}/csv` exige a mesma senha.
 
-Leituras públicas, entre elas `GET /api/health`, `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/connections/{id}` e `GET /api/pdr/config`. `GET /api/health` não abre MySQL. `POST /api/localize` e `GET /api/current_location` ficam atrás da mesma flag de teste (padrão desligada). O fallback `Recepcao` vale só nessas rotas.
+Leituras públicas, entre elas `GET /api/health`, `GET /api/map`, `GET /api/map-config`, `GET /api/connections`, `GET /api/connections/{id}` e `GET /api/pdr/config`. `GET /api/health` não abre MySQL. `POST /api/localize` e `GET /api/current_location` ficam atrás da mesma flag de teste (padrão desligada). O fallback `Recepcao` vale só nessas rotas. O matcher e o caminho visitado são por aparelho: o cliente manda `X-Pov-Session` (8 a 64 caracteres: letras, números, `_` e `-`). Sem o header, ou com um id inválido, a resposta é **400**. Uma sessão não vê a outra. O aplicativo Vite não chama essas rotas.
 
 ### API pública, CORS e banco
 

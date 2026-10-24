@@ -6,7 +6,7 @@ Notas para quem altera o POV. O README continua sendo o passo a passo de instala
 
 - A senha do editor é uma só, em `EDITOR_PASSWORD_HASH` (argon2id). Gere com `Backend/scripts/hash_password.py`. Não commite senha nem hash. O limite reserva a tentativa antes do argon2 (em curso + falhas). Senha certa ou 503 devolve a reserva; senha errada fica contada. Sem vaga de argon2 a resposta é 503 com `Retry-After`. O cache de 60s só aceita a mesma senha. `TRUSTED_PROXIES` é a lista explícita de pares que podem informar o cliente; `*` não vale. No `X-Forwarded-For` o cliente é o endereço mais à direita fora dessa lista. Suba o uvicorn com `--no-proxy-headers` (o padrão reescreve o par do socket a partir do header).
 - `GET /api/health` responde `{"status":"ok"}` e não abre MySQL.
-- `/api/localize`, `/api/current_location` e `/api/reset` só existem com `POV_ENABLE_TEST_ROUTES` (padrão desligado). O nó `Recepcao` é fallback dessas rotas de teste.
+- `/api/localize`, `/api/current_location` e `/api/reset` só existem com `POV_ENABLE_TEST_ROUTES` (padrão desligado). O nó `Recepcao` é fallback dessas rotas de teste. O estado do matcher é por `X-Pov-Session`, não global.
 - Em `POV_ENV=production` o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem a variável, o padrão é desenvolvimento e o localhost continua. `CORS_ORIGINS` substitui a lista. Sem `allow_credentials`.
 - O túnel publica só `api.pov-unimar.com` em `127.0.0.1:8000`. O site é o GitHub Pages (ver `docs/dns.md`).
 - MySQL continua o do XAMPP. Host, porta, base, usuário e senha saem de `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD`, com padrão `localhost` / `3306` / `POV` / `pov` / vazio. A API não lê `DB_ADMIN_*`.

@@ -53,13 +53,14 @@ def test_production_preflight_allows_the_editor_header(monkeypatch):
         headers={
             "Origin": "https://www.pov-unimar.com",
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "X-Editor-Password, X-Injected",
+            "Access-Control-Request-Headers": "X-Editor-Password, X-Pov-Session, X-Injected",
         },
     )
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "https://www.pov-unimar.com"
     allowed = response.headers["access-control-allow-headers"].lower()
     assert "x-editor-password" in allowed
+    assert "x-pov-session" in allowed
     assert "x-injected" not in allowed
     assert "access-control-allow-credentials" not in response.headers
     assert response.headers["access-control-expose-headers"] == "Retry-After"
@@ -141,7 +142,9 @@ def test_location_routes_are_404_unless_the_flag_is_on(monkeypatch):
     ]
     assert [item.status_code for item in hidden] == [404, 404, 404]
     monkeypatch.setenv("POV_ENABLE_TEST_ROUTES", "1")
-    visible = client.get("/api/current_location")
+    missing = client.get("/api/current_location")
+    assert missing.status_code == 400
+    visible = client.get("/api/current_location", headers={"X-Pov-Session": "device-test-1"})
     assert visible.status_code == 200
     assert "current_node" in visible.json()
 

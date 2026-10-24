@@ -10,6 +10,7 @@ _ALLOWED_REQUEST_HEADERS = frozenset({
     "authorization",
     "content-type",
     "x-editor-password",
+    "x-pov-session",
 })
 # O front no Pages lê Retry-After no 503. Sem isto o browser esconde o header.
 _EXPOSE_HEADERS = b"Retry-After"
@@ -17,14 +18,14 @@ _EXPOSE_HEADERS = b"Retry-After"
 
 def _allow_headers(requested: str | None) -> str:
     if not requested:
-        return "Content-Type, X-Editor-Password"
+        return "Content-Type, X-Editor-Password, X-Pov-Session"
     chosen = []
     for part in requested.split(","):
         name = part.strip()
         if name.lower() in _ALLOWED_REQUEST_HEADERS:
             chosen.append(name)
     if not chosen:
-        return "Content-Type, X-Editor-Password"
+        return "Content-Type, X-Editor-Password, X-Pov-Session"
     return ", ".join(chosen)
 
 
