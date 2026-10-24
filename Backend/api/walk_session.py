@@ -77,7 +77,7 @@ class WalkSessions:
         self._max_per_ip = int(max_per_ip)
         self._clock = clock
         self._lock = threading.Lock()
-        self._items: dict[str, _Walk] = {}
+        self._items: dict[tuple[str, str], _Walk] = {}
 
     def clear(self) -> None:
         with self._lock:
@@ -132,19 +132,21 @@ class WalkSessions:
     ) -> Iterator[_Walk]:
         """Devolve a caminhada desta sessão. Outra sessão é outro objeto.
 
-        ``client_ip`` é o mesmo valor de ``editor_auth.client_key``.
+        ``client_ip`` é o mesmo valor de ``editor_auth.client_key``, o IP
+        confiável. A sessão fica presa a esse IP. Outro endereço não acha
+        a linha, não renova o TTL e não vê o caminho.
         """
         owner = (client_ip or "").strip() or "unknown"
         now = self._clock()
         with self._lock:
             self._purge(now)
-            current = self._items.get(session_id)
+            key = (session_id, owner)
+            current = self._items.get(key)
             if reset or current is None:
-                replacing = current is not None and current.client_ip == owner
-                if not replacing:
+                if not reset or current is None:
                     self._ensure_room(owner, now)
                 if current is not None:
-                    del self._items[session_id]
+                    del self._items[key]
                 start = self._start_for_new(start_node, explicit=reset)
                 current = _Walk(
                     TopologicalMatcher(self._map, starting_node=start),
@@ -152,7 +154,7 @@ class WalkSessions:
                     now,
                     owner,
                 )
-                self._items[session_id] = current
+                self._items[key] = current
             else:
                 current.touched = now
             yield current

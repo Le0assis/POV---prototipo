@@ -179,6 +179,75 @@ def test_trusted_proxy_counts_the_forwarded_client(monkeypatch):
     assert len(app_module.walk_sessions) == 9
 
 
+def test_another_ip_does_not_inherit_the_walk(monkeypatch):
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    session = "device-dono-01"
+    owner = TestClient(app, client=("203.0.113.40", 50000))
+    stranger = TestClient(app, client=("203.0.113.41", 50000))
+    reset = owner.post(
+        "/api/reset",
+        params={"start_node": NODE_A},
+        headers=_headers(session, editor=True),
+    )
+    assert reset.status_code == 200, reset.text
+    assert _step(owner, session, 0.4)["accumulated_distance_m"] == pytest.approx(0.4)
+
+    stolen = stranger.get(
+        "/api/current_location",
+        headers={
+            "X-Pov-Session": session,
+            "X-Forwarded-For": "203.0.113.40",
+            "CF-Connecting-IP": "203.0.113.40",
+        },
+    )
+    assert stolen.status_code == 200, stolen.text
+    body = stolen.json()
+    assert body["accumulated_distance_m"] == pytest.approx(0.0)
+    assert body["visited_path"] == [body["current_node"]]
+
+    again = _where(owner, session)
+    assert again["current_node"] == NODE_A
+    assert again["visited_path"] == [NODE_A]
+    assert again["accumulated_distance_m"] == pytest.approx(0.4)
+    assert len(app_module.walk_sessions) == 2
+
+
+def test_trusted_proxy_binds_the_session_to_the_forwarded_client(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "203.0.113.10")
+    proxy = TestClient(app, client=("203.0.113.10", 50000))
+    session = "device-proxy-01"
+    owner_headers = {
+        "X-Pov-Session": session,
+        "X-Editor-Password": PASSWORD,
+        "X-Forwarded-For": "198.51.100.20",
+    }
+    reset = proxy.post("/api/reset", params={"start_node": NODE_A}, headers=owner_headers)
+    assert reset.status_code == 200, reset.text
+    stepped = proxy.post(
+        "/api/localize",
+        json={"step_length_m": 0.4, "yaw_rad": 0.0},
+        headers={"X-Pov-Session": session, "X-Forwarded-For": "198.51.100.20"},
+    )
+    assert stepped.status_code == 200, stepped.text
+    assert stepped.json()["accumulated_distance_m"] == pytest.approx(0.4)
+
+    stranger = proxy.get(
+        "/api/current_location",
+        headers={"X-Pov-Session": session, "X-Forwarded-For": "198.51.100.30"},
+    )
+    assert stranger.status_code == 200, stranger.text
+    assert stranger.json()["accumulated_distance_m"] == pytest.approx(0.0)
+
+    owner = proxy.get(
+        "/api/current_location",
+        headers={"X-Pov-Session": session, "X-Forwarded-For": "198.51.100.20"},
+    )
+    assert owner.status_code == 200, owner.text
+    assert owner.json()["current_node"] == NODE_A
+    assert owner.json()["visited_path"] == [NODE_A]
+    assert owner.json()["accumulated_distance_m"] == pytest.approx(0.4)
+
+
 def test_missing_or_invalid_session_is_400_and_stores_nothing():
     client = TestClient(app)
     missing = client.post("/api/localize", json={"step_length_m": 0.4, "yaw_rad": 0.0})

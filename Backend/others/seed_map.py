@@ -38,8 +38,11 @@ EDGES = [
     ("Corredor B", "Escada", 4.0, 0.0),
 ]
 
-SQL_SLUGS = "SELECT slug FROM checkpoints WHERE building_id = %s AND slug IS NOT NULL"
-# Mesma regra do grafo: Sala não é sala. O resolve?cp= continua na collation.
+# Leitura de uma vez, antes de qualquer INSERT. O resolve?cp= continua na collation.
+# A unique de name é da tabela, não do prédio: o conflito de caixa olha todos.
+SQL_NAMES = "SELECT name FROM checkpoints"
+SQL_EXISTING = "SELECT name, slug FROM checkpoints WHERE building_id = %s"
+# Mesma regra do grafo: Sala não é sala.
 SQL_NAME = (
     "SELECT slug FROM checkpoints WHERE CAST(name AS BINARY) = CAST(%s AS BINARY)"
 )
@@ -52,6 +55,10 @@ SQL_EDGE = (
     "VALUES (%s, %s, %s, %s, 'manual') "
     "ON DUPLICATE KEY UPDATE id = id"
 )
+
+
+class SeedConflict(RuntimeError):
+    """Outra caixa já ocupa a unique. O script sai com 1, sem traceback."""
 
 
 def _inverse_heading(heading: float) -> float:
@@ -67,10 +74,34 @@ def _exact_checkpoint(db, name: str):
     return rows
 
 
-def seed(db) -> None:
-    rows = db.execute_search(SQL_SLUGS, (DEFAULT_BUILDING_ID,))
-    if rows is None:
-        raise RuntimeError("Não leu os slugs. Rode create_tables antes do seed.")
+def _case_conflicts(rows, names) -> list[tuple[str, str]]:
+    """Nomes do seed cuja grafia exata não existe, mas a caixa já ocupa a chave."""
+    exact = {row["name"] for row in rows if row.get("name")}
+    folded: dict[str, str] = {}
+    for row in rows:
+        stored = row.get("name")
+        if stored:
+            folded.setdefault(stored.casefold(), stored)
+    found = []
+    for name in names:
+        if name in exact:
+            continue
+        stored = folded.get(name.casefold())
+        if stored is not None and stored != name:
+            found.append((name, stored))
+    return found
+
+
+def _conflict_message(conflicts: list[tuple[str, str]]) -> str:
+    parts = [f"'{wanted}' já está como '{stored}'" for wanted, stored in conflicts]
+    return (
+        "Conflito de maiúsculas: "
+        + "; ".join(parts)
+        + ". Nada foi gravado e nenhuma aresta foi criada."
+    )
+
+
+def _write_seed(db, rows) -> None:
     taken = {row["slug"] for row in rows if row.get("slug")}
     print("Inserindo checkpoints...")
     for name in CHECKPOINTS:
@@ -80,15 +111,15 @@ def seed(db) -> None:
                 taken.add(current[0]["slug"])
             continue
         slug = allocate_slug(name, taken)
-        if not db.execute_query(SQL_CHECKPOINT, (name, DEFAULT_BUILDING_ID, slug)):
-            raise RuntimeError(f"Não gravou o checkpoint {name}. Nada foi apagado.")
-        # A unique de name segue a collation: recepcao ocupa a chave de
-        # Recepcao e o ON DUPLICATE KEY UPDATE name = name não troca a caixa.
+        if not db.execute_within(SQL_CHECKPOINT, (name, DEFAULT_BUILDING_ID, slug)):
+            raise RuntimeError(f"Não gravou o checkpoint {name}. Nada foi gravado.")
+        # A unique de name segue a collation. Se o INSERT não deixou o texto
+        # exato, a transação desfaz o que esta rodada já escreveu.
         if not _exact_checkpoint(db, name):
-            raise RuntimeError(
+            raise SeedConflict(
                 f"Conflito de maiúsculas: '{name}' não foi gravado. "
                 "A unique de checkpoints.name ignora caixa e manteve a outra grafia. "
-                "Nenhuma aresta foi criada."
+                "Nada foi gravado e nenhuma aresta foi criada."
             )
         taken.add(slug)
     print("Inserindo conexões...")
@@ -98,9 +129,40 @@ def seed(db) -> None:
             (target, source, distance, _inverse_heading(heading)),
         )
         for src, tgt, dist, rad in directions:
-            if not db.execute_query(SQL_EDGE, (src, tgt, dist, rad)):
-                raise RuntimeError(f"Não gravou a aresta {src}->{tgt}. Nada foi apagado.")
+            if not db.execute_within(SQL_EDGE, (src, tgt, dist, rad)):
+                raise RuntimeError(f"Não gravou a aresta {src}->{tgt}. Nada foi gravado.")
+
+
+def seed(db) -> None:
+    known = db.execute_search(SQL_NAMES)
+    if known is None:
+        raise RuntimeError("Não leu os checkpoints. Rode create_tables antes do seed.")
+    conflicts = _case_conflicts(known, CHECKPOINTS)
+    if conflicts:
+        raise SeedConflict(_conflict_message(conflicts))
+    rows = db.execute_search(SQL_EXISTING, (DEFAULT_BUILDING_ID,))
+    if rows is None:
+        raise RuntimeError("Não leu os checkpoints. Rode create_tables antes do seed.")
+    if not db.begin_transaction():
+        raise RuntimeError("Não abriu a transação do seed. Nada foi gravado.")
+    try:
+        _write_seed(db, rows)
+        if not db.commit_transaction():
+            raise RuntimeError("Não confirmou o seed. Nada foi gravado.")
+    except Exception:
+        db.rollback_transaction()
+        raise
     print("Mapa de exemplo garantido. Linha que já existia não foi alterada.")
+
+
+def cli(db) -> int:
+    """Conflito de caixa: código 1 e só a mensagem. O traceback fica de fora."""
+    try:
+        seed(db)
+    except SeedConflict as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
 
 
 def assert_seed_account(user: str) -> None:
@@ -127,6 +189,8 @@ if __name__ == "__main__":
             "DB_USER e DB_PASSWORD. O seed não usa a conta administrativa."
         )
     try:
-        seed(db)
+        code = cli(db)
     finally:
         db.disconnect()
+    if code:
+        raise SystemExit(code)

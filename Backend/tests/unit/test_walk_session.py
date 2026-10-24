@@ -110,6 +110,35 @@ def test_one_address_stops_at_eight_and_does_not_evict_another():
     assert len(store) == 4
 
 
+def test_another_ip_does_not_see_the_path_or_renew_the_owner():
+    clock = _Clock()
+    store = WalkSessions(_Map(), ttl_s=10, clock=clock)
+    clock.now = 0
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        state.visited_path.append("marca-a")
+    clock.now = 9
+    with store.hold("aaaaaaaa", client_ip="203.0.113.2") as state:
+        assert state.visited_path == ["Recepcao"]
+        state.visited_path.append("intruso")
+    assert len(store) == 2
+    clock.now = 11
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path == ["Recepcao"]
+    with store.hold("aaaaaaaa", client_ip="203.0.113.2") as state:
+        assert state.visited_path[-1] == "intruso"
+
+
+def test_reset_from_another_ip_does_not_replace_the_owner():
+    store = WalkSessions(_Map(), ttl_s=100)
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        state.visited_path.append("fica")
+    with store.hold("aaaaaaaa", client_ip="203.0.113.2", reset=True) as state:
+        assert state.visited_path == ["Recepcao"]
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path[-1] == "fica"
+    assert len(store) == 2
+
+
 def test_two_sessions_keep_their_own_matcher_under_threads():
     store = WalkSessions(_Map(), ttl_s=60, max_sessions=8)
     start = threading.Barrier(2)
