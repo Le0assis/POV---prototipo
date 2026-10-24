@@ -8,6 +8,11 @@ qualquer tabela.
 O script não dá DROP, RENAME nem TRUNCATE. Usuário pov que já existe
 mantém a senha. ``CREATE USER`` só roda se ``DB_POV_PASSWORD`` estiver
 definida, ou se ``DB_USER=pov`` e ``DB_PASSWORD`` estiver definida.
+
+``CREATE DATABASE``, ``CREATE USER`` e ``GRANT`` usam só
+``DB_ADMIN_USER`` e ``DB_ADMIN_PASSWORD``. Não há usuário root no código:
+se as duas faltarem, a operação para. No XAMPP local elas são ``root``
+e senha vazia, escritas no ambiente.
 """
 
 from __future__ import annotations
@@ -54,6 +59,62 @@ def create_user_sql(host: str) -> str:
     return f"CREATE USER IF NOT EXISTS '{POV_USER}'@'{host}' IDENTIFIED BY %s"
 
 
+def app_db_config() -> dict[str, str | int]:
+    """DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD. Sem default de root."""
+    required = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD")
+    missing = [key for key in required if key not in os.environ]
+    if missing:
+        raise RuntimeError(
+            "Faltam "
+            + ", ".join(missing)
+            + ". create_tables e o seed leem DB_HOST, DB_PORT, DB_NAME, "
+            "DB_USER e DB_PASSWORD do ambiente. O usuário da aplicação é pov. "
+            "Nenhum root está fixo no código."
+        )
+    host = os.environ["DB_HOST"].strip()
+    name = os.environ["DB_NAME"].strip()
+    user = os.environ["DB_USER"].strip()
+    port_raw = os.environ["DB_PORT"].strip()
+    if not host or not name or not user or not port_raw:
+        raise RuntimeError(
+            "DB_HOST, DB_PORT, DB_NAME e DB_USER não podem ficar vazios. "
+            "DB_PASSWORD pode ser vazia se a variável existir."
+        )
+    try:
+        port = int(port_raw)
+    except ValueError as exc:
+        raise RuntimeError(f"DB_PORT inválida: {port_raw!r}.") from exc
+    return {
+        "host": host,
+        "port": port,
+        "name": name,
+        "user": user,
+        "password": os.environ["DB_PASSWORD"],
+    }
+
+
+def admin_db_config() -> tuple[str, str]:
+    """Conta de CREATE DATABASE/USER/GRANT. As duas variáveis são obrigatórias."""
+    missing = [
+        key for key in ("DB_ADMIN_USER", "DB_ADMIN_PASSWORD") if key not in os.environ
+    ]
+    if missing:
+        raise RuntimeError(
+            "Faltam "
+            + ", ".join(missing)
+            + " para CREATE DATABASE, CREATE USER e GRANT. "
+            "No XAMPP local defina DB_ADMIN_USER=root e DB_ADMIN_PASSWORD vazio. "
+            "O código não assume root."
+        )
+    user = os.environ["DB_ADMIN_USER"].strip()
+    if not user:
+        raise RuntimeError(
+            "DB_ADMIN_USER está vazio. No XAMPP local use root, "
+            "com DB_ADMIN_PASSWORD vazio."
+        )
+    return user, os.environ["DB_ADMIN_PASSWORD"]
+
+
 def _password_for_new_account(app_user: str, app_password: str) -> str | None:
     """Senha só para conta que ainda não existe. Conta velha não é alterada."""
     if "DB_POV_PASSWORD" in os.environ:
@@ -78,30 +139,24 @@ def _connect_server(host: str, port: int, user: str, password: str):
     )
 
 
-def _open_admin(host: str, port: int, app_user: str, app_password: str):
-    admin_user = os.environ.get("DB_ADMIN_USER", "root")
-    admin_password = os.environ.get("DB_ADMIN_PASSWORD", "")
-    attempts = [(admin_user, admin_password)]
-    if app_user and (app_user, app_password) not in attempts:
-        attempts.append((app_user, app_password))
-    errors: list[str] = []
-    for user, password in attempts:
-        try:
-            return _connect_server(host, port, user, password), user
-        except Error as exc:
-            errors.append(f"{user}: {exc}")
-    raise RuntimeError(
-        "Não conectou no MySQL sem schema para criar o banco. "
-        "Rode com o root do XAMPP (DB_ADMIN_USER/DB_ADMIN_PASSWORD) "
-        "ou com um usuário que possa CREATE DATABASE. "
-        + " | ".join(errors)
-    )
+def _open_admin(host: str, port: int):
+    """Só a conta administrativa. Não cai no usuário da aplicação nem em root."""
+    admin_user, admin_password = admin_db_config()
+    try:
+        return _connect_server(host, port, admin_user, admin_password), admin_user
+    except Error as exc:
+        raise RuntimeError(
+            "Não conectou no MySQL sem schema para CREATE DATABASE/USER/GRANT. "
+            f"DB_ADMIN_USER={admin_user!r} falhou ({exc}). "
+            "No XAMPP local: DB_ADMIN_USER=root e DB_ADMIN_PASSWORD vazio. "
+            "A conta pov não é usada nesta etapa."
+        ) from exc
 
 
 def ensure_app_database(name: str, host: str, port: int, app_user: str, app_password: str) -> None:
     """CREATE DATABASE IF NOT EXISTS e GRANT para pov. Não remove schema nem conta."""
     sql = create_database_sql(name)
-    connection, admin = _open_admin(host, port, app_user, app_password)
+    connection, admin = _open_admin(host, port)
     try:
         cursor = connection.cursor()
         cursor.execute("SHOW VARIABLES LIKE 'lower_case_table_names'")

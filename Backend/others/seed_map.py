@@ -1,8 +1,9 @@
 """Seed do mapa de exemplo. Pode rodar de novo: não apaga e não sobrescreve.
 
-Usa DB_NAME / DB_USER do ambiente (padrão POV / root), o mesmo da API.
-Checkpoint repetido fica como está. Aresta que já existe não muda distância
-nem origin. Rode depois de ``python -m datasets.create_tables``.
+Entra com ``DB_USER=pov`` e a senha de ``DB_PASSWORD``. Só consulta e
+insere. Não usa ``DB_ADMIN_*`` e não aceita a conta root. Checkpoint
+repetido fica como está. Aresta que já existe não muda distância nem
+origin. Rode depois de ``python -m datasets.create_tables``.
 """
 
 from __future__ import annotations
@@ -84,11 +85,29 @@ def seed(db) -> None:
     print("Mapa de exemplo garantido. Linha que já existia não foi alterada.")
 
 
+def assert_seed_account(user: str) -> None:
+    """O seed é a conta pov. Root e o admin do CREATE DATABASE ficam de fora."""
+    account = (user or "").strip()
+    if account != "pov":
+        raise RuntimeError(
+            "O seed entra com DB_USER=pov e só lê e insere. "
+            f"DB_USER está como {user!r}. "
+            "DB_ADMIN_USER (no XAMPP local, root sem senha) não serve para o seed."
+        )
+
+
 if __name__ == "__main__":
     db = conexao_from_settings()
+    try:
+        assert_seed_account(str(db.user))
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     db.connect()
     if not db.connection:
-        raise SystemExit("Erro ao conectar. Confira DB_HOST, DB_NAME, DB_USER e DB_PASSWORD.")
+        raise SystemExit(
+            "Erro ao conectar como pov. Confira DB_HOST, DB_PORT, DB_NAME, "
+            "DB_USER e DB_PASSWORD. O seed não usa a conta administrativa."
+        )
     try:
         seed(db)
     finally:

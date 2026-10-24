@@ -3,13 +3,16 @@
 Uso (com o MySQL do XAMPP ou outro local já criado):
 
     cd Backend
-    set POV_DB_HOST=127.0.0.1
-    set POV_DB_USER=root
-    set POV_DB_PASSWORD=
-    set POV_DB_NAME=pov_save_repro
+    set DB_HOST=127.0.0.1
+    set DB_USER=pov
+    set DB_PASSWORD=
+    set DB_NAME=pov_save_repro
     python -m datasets.repro_save_hang
 
 O banco precisa existir e o usuário precisa poder criar tabelas nele.
+DB_USER e DB_PASSWORD são obrigatórios. Não há conta root no script.
+POV_DB_HOST, POV_DB_USER, POV_DB_PASSWORD e POV_DB_NAME ainda valem se
+as DB_* correspondentes não estiverem definidas.
 O script aplica as migrações do projeto (create_tables) e no final apaga
 as linhas que ele mesmo gravou. Não mexe em outro schema.
 
@@ -37,11 +40,23 @@ from map.MapDatabaseManager import MapDatabaseManager
 from map.edge_rules import circular_mean, median
 
 
+def _setting(name: str, legacy: str) -> str:
+    if name in os.environ:
+        return os.environ[name]
+    if legacy in os.environ:
+        return os.environ[legacy]
+    raise SystemExit(
+        f"Falta {name}. Este script não assume root. "
+        "Defina DB_HOST, DB_USER, DB_PASSWORD e DB_NAME "
+        "(ou os nomes antigos POV_DB_*)."
+    )
+
+
 def _connect(database: str | None = None, autocommit: bool = True):
     kwargs = dict(
-        host=os.environ.get("POV_DB_HOST", "127.0.0.1"),
-        user=os.environ.get("POV_DB_USER", "root"),
-        password=os.environ.get("POV_DB_PASSWORD", ""),
+        host=_setting("DB_HOST", "POV_DB_HOST"),
+        user=_setting("DB_USER", "POV_DB_USER"),
+        password=_setting("DB_PASSWORD", "POV_DB_PASSWORD"),
         autocommit=autocommit,
     )
     if database:
@@ -50,19 +65,24 @@ def _connect(database: str | None = None, autocommit: bool = True):
 
 
 def _db_name() -> str:
-    return os.environ.get("POV_DB_NAME", "pov_save_repro")
+    if "DB_NAME" in os.environ or "POV_DB_NAME" in os.environ:
+        return _setting("DB_NAME", "POV_DB_NAME")
+    return "pov_save_repro"
 
 
 def _app() -> tuple[ConexaoBD, MapDatabaseManager]:
     db = ConexaoBD(
-        os.environ.get("POV_DB_HOST", "127.0.0.1"),
+        _setting("DB_HOST", "POV_DB_HOST"),
         _db_name(),
-        os.environ.get("POV_DB_USER", "root"),
-        os.environ.get("POV_DB_PASSWORD", ""),
+        _setting("DB_USER", "POV_DB_USER"),
+        _setting("DB_PASSWORD", "POV_DB_PASSWORD"),
     )
     db.connect(announce=False)
     if not db.connection:
-        raise SystemExit("Não conectou. Confira POV_DB_HOST, POV_DB_USER e POV_DB_PASSWORD.")
+        raise SystemExit(
+            "Não conectou. Confira DB_HOST, DB_USER e DB_PASSWORD. "
+            "O script não entra como root."
+        )
     return db, MapDatabaseManager(db)
 
 

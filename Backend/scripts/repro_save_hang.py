@@ -44,7 +44,8 @@ def main() -> int:
 
     thread = threading.Thread(target=accept_and_hold, daemon=True)
     thread.start()
-    database = ConexaoBD("localhost", "POV", "root", "", port=port)
+    # O handshake não chega a autenticar. O usuário é o da aplicação.
+    database = ConexaoBD("localhost", "POV", "pov", "", port=port)
     started = time.perf_counter()
     try:
         database.connect(announce=False, timeout=0.4)

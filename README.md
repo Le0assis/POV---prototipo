@@ -177,13 +177,14 @@ O MySQL continua o do XAMPP. `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PA
 
 ### Aplicar o banco
 
-Na raiz do repositório, com o `.env` apontando para o servidor (ou os padrões do XAMPP). Quem cria o schema precisa poder `CREATE DATABASE`. No XAMPP isso é o `root` com senha vazia. A API em si pode usar o usuário `pov`.
+Na raiz do repositório, com o `.env` (ou o shell) definindo `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD`. Os scripts não herdam o default da API e não entram como root se a variável faltar: param com o nome do que falta.
+
+`create_tables` ainda precisa de `DB_ADMIN_USER` e `DB_ADMIN_PASSWORD` para `CREATE DATABASE`, `CREATE USER` e `GRANT`. No XAMPP local essa conta é `root` sem senha, escrita no ambiente. O seed roda depois, só com `DB_USER=pov`, e só lê e insere.
 
 ```bash
 cd Backend
-# opcional, se o root não for o padrão:
-# export DB_ADMIN_USER=root
-# export DB_ADMIN_PASSWORD=
+# No XAMPP local, no .env: DB_ADMIN_USER=root e DB_ADMIN_PASSWORD vazio.
+# DB_USER=pov e DB_PASSWORD com a senha dessa conta.
 # export DB_POV_PASSWORD='senha-do-pov'   # só se a conta pov ainda não existe
 python -m datasets.create_tables
 python others/seed_map.py
@@ -196,7 +197,7 @@ O que isso faz, e o que não faz:
 - Tabelas com `CREATE TABLE IF NOT EXISTS`. Coluna e índice novos só entram depois de olhar o `information_schema`.
 - Migração 002 não dá `DELETE` em `edges`. Cópias do mesmo sentido (inclusive `Sala` e `sala`, que o unique trata como iguais) ficam na tabela: a de maior `id` permanece com `dup_rank` 0 e as outras ganham 1, 2, … O mapa e o upsert usam só `dup_rank` 0.
 - Rode `create_tables` antes de subir esta versão da API. A leitura filtra `dup_rank`. A coluna nasce na migração, com default 0. Sem ela o SELECT do mapa falha; com ela, a linha antiga continua no mapa.
-- Seed (`others/seed_map.py`) usa o mesmo `DB_NAME`. `INSERT ... ON DUPLICATE KEY UPDATE` não muda checkpoint nem distância que já existam.
+- Seed (`others/seed_map.py`) usa o mesmo `DB_NAME` e entra como `pov`. Não abre sessão com `DB_ADMIN_USER`. `INSERT ... ON DUPLICATE KEY UPDATE` não muda checkpoint nem distância que já existam.
 - Rodar o comando de novo é seguro. Não há `DROP`, `TRUNCATE` nem `DELETE` de dado de mapa.
 
 `pov_save_repro` e qualquer outro schema que não seja o `DB_NAME` ficam intocados. Se o mapa real estiver num nome diferente de `POV`, ajuste `DB_NAME` para esse nome antes de rodar. Não copie à mão e não apague o antigo.

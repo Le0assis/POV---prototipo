@@ -177,34 +177,42 @@ def _match_checkpoint_strings(db: ConexaoBD, template: str) -> str:
 
 
 def conexao_from_settings() -> ConexaoBD:
-    """Host, porta, base, usuário e senha saem de ``DB_*`` (padrão do XAMPP)."""
+    """Lê o ``.env`` e monta a conexão com DB_HOST/PORT/NAME/USER/PASSWORD.
+
+    Não consulta o default da API. Sem essas variáveis, para com erro
+    em vez de entrar como root.
+    """
     from api.envfile import load_env_file
-    from api.settings import get_settings
+    from datasets.bootstrap_db import app_db_config
 
     load_env_file()
-    cfg = get_settings()
+    cfg = app_db_config()
     return ConexaoBD(
-        host=cfg.db_host,
-        database=cfg.db_name,
-        user=cfg.db_user,
-        password=cfg.db_password,
-        port=cfg.db_port,
+        host=str(cfg["host"]),
+        database=str(cfg["name"]),
+        user=str(cfg["user"]),
+        password=str(cfg["password"]),
+        port=int(cfg["port"]),
     )
 
 
 if __name__ == "__main__":
-    # Cria DB_NAME (padrão POV) se faltar e dá GRANT ao usuário pov.
+    # CREATE DATABASE/USER/GRANT com DB_ADMIN_*. Tabelas com DB_USER (pov).
     # Não apaga um schema que já exista com outro nome.
     from api.envfile import load_env_file
-    from api.settings import get_settings
     from datasets.bootstrap_db import ensure_app_database
 
     load_env_file()
-    cfg = get_settings()
-    ensure_app_database(cfg.db_name, cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_password)
     conexao = conexao_from_settings()
+    ensure_app_database(
+        str(conexao.database),
+        str(conexao.host),
+        int(conexao.port),
+        str(conexao.user),
+        str(conexao.password),
+    )
     conexao.connect()
-    
+
     if conexao.connection:
         criar_tabelas_sistema(conexao)
         conexao.disconnect()
