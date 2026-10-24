@@ -12,6 +12,7 @@ import sys
 from collections.abc import Callable
 from typing import TypeVar
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Pages. Em produção a lista é esta, a menos que CORS_ORIGINS substitua.
@@ -45,10 +46,21 @@ class Settings(BaseSettings):
     # DB_USER, DB_PASSWORD. Host, porta e schema têm default de desenvolvimento.
     # Usuário e senha não: None não vira root nem senha vazia. DB_ADMIN_* não é lido.
     db_host: str = "localhost"
-    db_port: int = 3306
+    # Número vira int. Texto como ``abc`` fica str: get_settings() não pode
+    # estourar ValidationError antes do seed dizer que a porta é inválida.
+    db_port: int | str = 3306
     db_name: str = "POV"
     db_user: str | None = None
     db_password: str | None = None
+
+    @field_validator("db_port", mode="before")
+    @classmethod
+    def _port_number_stays_int(cls, value: object) -> object:
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.isdigit():
+                return int(raw)
+        return value
 
     def allowed_origins(self) -> list[str]:
         raw = self.cors_origins.strip()
@@ -76,7 +88,11 @@ _PRODUCTION_DB_NONEMPTY = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER")
 _MIN_PRODUCTION_PASSWORD = 12
 
 
-class DatabaseConfigError(RuntimeError):
+class BootRefusal(RuntimeError):
+    """A subida para. A mensagem vai para o stderr, sem traceback."""
+
+
+class DatabaseConfigError(BootRefusal):
     """Conta do MySQL inválida em produção. A mensagem não leva a senha."""
 
 
@@ -87,8 +103,7 @@ def assert_production_database() -> None:
     12 caracteres. Fora de produção a senha curta continua válida. A
     mensagem não mostra o valor.
     """
-    # Não passa por Settings: DB_PORT=abc não pode virar ValidationError aqui.
-    if os.environ.get("POV_ENV", "development").strip().lower() != "production":
+    if get_settings().pov_env.strip().lower() != "production":
         return
     missing: list[str] = []
     for key in _PRODUCTION_DB_KEYS:
@@ -127,9 +142,9 @@ _T = TypeVar("_T")
 
 
 def boot_or_exit(load: Callable[[], _T]) -> _T:
-    """Sobe a conta. Configuração inválida em produção sai com a mensagem, sem traceback."""
+    """Sobe o processo. Recusa de produção sai com a mensagem, sem traceback."""
     try:
         return load()
-    except DatabaseConfigError as exc:
+    except BootRefusal as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None

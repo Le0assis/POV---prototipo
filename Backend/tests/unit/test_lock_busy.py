@@ -219,14 +219,51 @@ def test_url_userinfo_runs_to_the_last_at_before_the_host():
     with_at = database._redact(RuntimeError("mysql://pov:p@ss@db"))
     assert with_at == "mysql://***@db"
     assert "p@ss" not in with_at
+    slash = database._redact(RuntimeError("mysql+pymysql://pov:p/ss@db"))
+    assert slash == "mysql+pymysql://***@db"
+    assert "p/ss" not in slash
     kept = database._redact(RuntimeError("mysql://u:p@db/x;a@b.com"))
     assert kept == "mysql://***@db/x;a@b.com"
+    stopped = database._redact(RuntimeError("mysql://u:p@db;a@b.com"))
+    assert stopped == "mysql://***@db;a@b.com"
     plain = database._redact(RuntimeError("http://x/a:b@c"))
     assert plain == "http://x/a:b@c"
     both = database._redact(RuntimeError(
         "antes mysql://pov:p@ss@db/POV depois"
     ))
     assert both == "antes mysql://***@db/POV depois"
+    for char in ("/", ";", " ", "(", ",", "'", "?", "#", "<"):
+        raw = f"mysql://pov:p{char}ss@db"
+        masked = database._redact(RuntimeError(raw))
+        assert masked == "mysql://***@db", char
+        assert f"p{char}ss" not in masked
+
+
+def test_redact_removes_a_password_that_crosses_the_cut(monkeypatch):
+    env_secret = "EnvPass99word"
+    conn_secret = "ConnPass88word"
+    monkeypatch.setenv("DB_PASSWORD", env_secret)
+    database = ConexaoBD("127.0.0.1", "POV", "pov", conn_secret)
+    both = database._redact(RuntimeError(f"{env_secret} e {conn_secret}"))
+    assert both == "*** e ***"
+    database.password = "segredo"
+    monkeypatch.setenv("DB_PASSWORD", "segredo-extra")
+    assert database._redact(RuntimeError("segredo-extra")) == "***"
+    cases = (
+        (env_secret, "ab"),
+        (conn_secret, conn_secret),
+        ("Zz9secretPIECE", "Zz9secretPIECE"),
+    )
+    monkeypatch.setenv("DB_PASSWORD", env_secret)
+    for secret, password in cases:
+        holder = ConexaoBD("127.0.0.1", "POV", "pov", password)
+        for head in range(0, len(secret) + 1):
+            text = "q" * (4096 - head) + secret
+            out = holder._redact(RuntimeError(text))
+            assert secret not in out
+            assert len(out) <= 4096
+            if head:
+                assert secret[:head] not in out, (secret, head, out[-20:])
 
 
 def test_redact_of_a_long_message_stays_under_50ms():

@@ -104,6 +104,18 @@ def test_boot_refuses_a_short_password_without_a_traceback(monkeypatch, capsys):
     assert "12" in err
 
 
+def test_invalid_port_still_reads_pov_env(monkeypatch):
+    from api.settings import assert_production_database
+
+    monkeypatch.setenv("POV_ENV", "development")
+    monkeypatch.setenv("DB_PORT", "abc")
+    assert_production_database()
+    assert get_settings().pov_env == "development"
+    assert get_settings().db_port == "abc"
+    monkeypatch.setenv("DB_PORT", "3306")
+    assert get_settings().db_port == 3306
+
+
 def test_development_and_test_accept_a_short_database_password(monkeypatch):
     from api.settings import assert_production_database
 

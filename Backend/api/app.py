@@ -24,7 +24,7 @@ from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
 from .editor_auth import client_key, require_editor_password
 from .envfile import load_env_file
-from .settings import assert_production_database, boot_or_exit, get_settings
+from .settings import BootRefusal, assert_production_database, boot_or_exit, get_settings
 from .walk_session import (
     SESSION_LIMIT_DETAIL,
     InvalidSessionId,
@@ -141,7 +141,7 @@ topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
 
-class MapLoadError(RuntimeError):
+class MapLoadError(BootRefusal):
     """Produção não sobe sem grafo. A mensagem não leva senha nem SQL."""
 
 
@@ -205,7 +205,7 @@ def _load_map_once() -> None:
     _raise_if_production_map_unusable()
 
 
-_load_map_once()
+boot_or_exit(_load_map_once)
 
 starting_node = "Recepcao"
 walk_sessions = WalkSessions(topo_map, default_start=starting_node)

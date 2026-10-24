@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+import os
 import re
 import threading
 import time
@@ -62,13 +63,66 @@ class DatabaseQueryError(Exception):
 _LOCK_ERRNOS = (1205, 1213)
 # Senha menor que isso não entra no replace: "a" ou "pov" comem a mensagem.
 _MIN_SECRET_LEN = 6
-# O redact não varre mensagens enormes: o custo do esquema seria quadrático.
+# Corta depois de redigir. O corte antes deixava um pedaço da senha.
 _REDACT_MAX_CHARS = 4096
-# Userinfo para no último @ antes de / ; ( ) < > , " ' espaço ? #.
-# mysql://u:p@db/x;a@b.com fica mysql://***@db/x;a@b.com. http://x/a:b@c não muda.
-_URL_USERINFO = re.compile(
-    r"""\b([A-Za-z][A-Za-z0-9+.-]*://)[^/;()<>,"'\s?#]*@"""
-)
+# Esquema ancorado. O userinfo segue no scanner, não nesta expressão.
+_URL_SCHEME = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://")
+# Delimitador só encerra o userinfo quando vem depois de um @.
+# Antes do @, / ; espaço ( , ' ? # < ainda podem ser a senha.
+_URL_DELIMS = frozenset("/;()<>," + "'" + '" \t\r\n?#')
+
+
+def _mask_url_userinfo(text: str) -> str:
+    """``esquema://user:senha@host`` vira ``esquema://***@host``.
+
+    A senha vai até o último ``@`` antes do primeiro delimitador que aparece
+    depois de um ``@``. ``mysql://u:p@db/x;a@b.com`` preserva host e caminho.
+    ``http://x/a:b@c`` não tem credencial e fica como está.
+    """
+    pieces: list[str] = []
+    cursor = 0
+    for match in _URL_SCHEME.finditer(text):
+        if match.start() < cursor:
+            continue
+        seen_colon = False
+        seen_at = False
+        last_at = -1
+        abandon = False
+        for index in range(match.end(), len(text)):
+            char = text[index]
+            if char == "@":
+                seen_at = True
+                last_at = index
+                continue
+            if char == ":":
+                seen_colon = True
+            if char not in _URL_DELIMS:
+                continue
+            if not seen_at:
+                if not seen_colon:
+                    abandon = True
+                else:
+                    continue
+            break
+        if abandon or not seen_at or not seen_colon or last_at < match.end():
+            continue
+        pieces.append(text[cursor:match.start()])
+        pieces.append(match.group(0))
+        pieces.append("***@")
+        cursor = last_at + 1
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
+def _known_secrets(password: object) -> list[str]:
+    """DB_PASSWORD e a senha da conexão. Só entram com 6 caracteres ou mais."""
+    found: list[str] = []
+    for value in (password, os.environ.get("DB_PASSWORD", "")):
+        secret = str(value or "")
+        if len(secret) >= _MIN_SECRET_LEN and secret not in found:
+            found.append(secret)
+    found.sort(key=len, reverse=True)
+    return found
 
 
 def _tcp_host(host: str) -> str:
@@ -434,16 +488,15 @@ class ConexaoBD:
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
 
     def _redact(self, exc: BaseException) -> str:
-        """Texto de erro sem senha longa e sem credencial de URL.
+        """Troca senha e userinfo, e só então corta.
 
-        O replace da senha é literal e só com 6 caracteres ou mais. Uma
-        senha curta no meio de ``user:pass@`` ainda some com a URL.
+        O corte vem depois: senha que atravessa os 4096 não deixa pedaço.
+        Senha curta no meio de ``user:pass@`` ainda some na máscara da URL.
         """
-        text = str(exc)[:_REDACT_MAX_CHARS]
-        secret = str(getattr(self, "password", "") or "")
-        if len(secret) >= _MIN_SECRET_LEN:
+        text = str(exc)
+        for secret in _known_secrets(getattr(self, "password", "")):
             text = text.replace(secret, "***")
-        return _URL_USERINFO.sub(r"\1***@", text)
+        return _mask_url_userinfo(text)[:_REDACT_MAX_CHARS]
 
     def ensure_live(self) -> bool:
         """Ping da sessão ociosa. Se caiu, abre outra no mesmo objeto."""

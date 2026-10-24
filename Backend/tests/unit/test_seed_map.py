@@ -310,6 +310,41 @@ def test_create_tables_refuses_a_short_production_password(monkeypatch, capsys):
     assert "12" in captured.err
 
 
+def test_create_tables_exits_when_pov_does_not_connect(monkeypatch, capsys):
+    from datasets.ManagerDatabase import ConexaoBD
+    from datasets.create_tables import main
+
+    secret = _env_without_dotenv(
+        monkeypatch,
+        DB_HOST="127.0.0.1",
+        DB_PORT="3306",
+        DB_NAME="POV",
+        DB_USER="pov",
+        DB_PASSWORD="senha-super-secreta",
+    )
+    monkeypatch.setenv("POV_ENV", "development")
+
+    def no_schema(*_args, **_kwargs):
+        return None
+
+    def no_connect(self, announce: bool = True, timeout=None):
+        self.connection = None
+        self.cursor = None
+
+    monkeypatch.setattr("datasets.bootstrap_db.ensure_app_database", no_schema)
+    monkeypatch.setattr(ConexaoBD, "connect", no_connect)
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.err == (
+        "Não conectou como pov. Confira DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.\n"
+    )
+    assert "Traceback" not in captured.err
+    assert secret not in captured.err
+    assert secret not in captured.out
+
+
 def test_cli_reports_invalid_port_on_one_line(monkeypatch, capsys):
     secret = _env_without_dotenv(
         monkeypatch,

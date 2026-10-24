@@ -1,4 +1,5 @@
 import re
+import sys
 
 from datasets.ManagerDatabase import ConexaoBD  # Ajuste o import conforme o nome exato do seu arquivo
 
@@ -200,6 +201,7 @@ def conexao_from_settings() -> ConexaoBD:
 def main() -> None:
     """Cria o schema. Em produção, senha curta sai com código 1 e sem traceback.
 
+    Se a conta pov não abre sessão, sai com código 1. A mensagem não leva a senha.
     CREATE DATABASE/USER/GRANT usam DB_ADMIN_*. Tabelas usam DB_USER (pov).
     Não apaga um schema que já exista com outro nome.
     """
@@ -217,10 +219,15 @@ def main() -> None:
         str(conexao.password),
     )
     conexao.connect()
+    if not conexao.connection:
+        print(
+            "Não conectou como pov. Confira DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
-    if conexao.connection:
-        criar_tabelas_sistema(conexao)
-        conexao.disconnect()
+    criar_tabelas_sistema(conexao)
+    conexao.disconnect()
 
 
 if __name__ == "__main__":
