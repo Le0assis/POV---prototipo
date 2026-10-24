@@ -125,6 +125,68 @@ def test_invalid_walk_is_stored_without_updating_the_edge():
     assert topo.directed == []
 
 
+def test_missing_sensor_log_does_not_rewrite_the_edge():
+    class _LogFails:
+        def __init__(self) -> None:
+            self.edge = False
+
+        def save_sensor_log(self, source, target, csv_data):
+            return None
+
+        def record_walk(self, **kwargs):
+            raise AssertionError("record_walk sem log")
+
+        def save_edge(self, *args, **kwargs):
+            self.edge = True
+            return True
+
+    database = _LogFails()
+    samples = []
+    for index in range(80):
+        samples.append({
+            "timestamp": index / 50.0,
+            "accel_x": 0.0,
+            "accel_y": 0.0,
+            "accel_z": 9.81,
+            "gyro_x": 0.0,
+            "gyro_y": 0.0,
+            "gyro_z": 0.0,
+        })
+    with pytest.raises(HTTPException) as exc:
+        RawEdgeProcessor(database, _DirectedMap()).process_samples("Quarto", "Sala", samples)
+    assert exc.value.status_code == 500
+    assert database.edge is False
+
+
+def test_manager_without_record_walk_still_saves_the_edge():
+    class _Legacy:
+        def __init__(self) -> None:
+            self.saved = None
+
+        def save_sensor_log(self, source, target, csv_data):
+            return 4
+
+        def update_sensor_log(self, *args, **kwargs):
+            return True
+
+        def save_edge(self, source, target, distance, heading):
+            self.saved = (source, target, distance, heading)
+            return True
+
+    from map.topological_map import TopologicalMap
+
+    topo = TopologicalMap()
+    topo.add_checkpoint("Quarto")
+    topo.add_checkpoint("Sala")
+    database = _Legacy()
+    body = RawEdgeProcessor(database, topo).process_samples("Quarto", "Sala", _samples())
+    assert body["valid"] is True
+    assert database.saved is not None
+    assert database.saved[0] == "Quarto"
+    assert database.saved[1] == "Sala"
+    assert len(topo.get_outgoing_edges("Quarto")) == 1
+
+
 def test_record_walk_failure_is_500_and_does_not_touch_the_edge():
     database = _RecordingDB()
     database.record_walk = lambda *args, **kwargs: None

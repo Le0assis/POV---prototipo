@@ -74,7 +74,22 @@ def _succeed(monkeypatch):
     )
     monkeypatch.setattr(app_module.map_db_manager, "get_checkpoint_positions", lambda: {})
     monkeypatch.setattr(app_module.map_db_manager, "list_connections", lambda include_path=True: [])
-    monkeypatch.setattr(app_module.map_db_manager, "save_route", lambda *args, **kwargs: True)
+    monkeypatch.setattr(app_module.map_db_manager, "save_route", lambda *args, **kwargs: 9)
+    monkeypatch.setattr(
+        app_module.map_db_manager,
+        "get_route_by_id",
+        lambda route_id: {
+            "id": route_id,
+            "name": "Rota",
+            "start_node": "A",
+            "end_node": "B",
+            "total_distance_m": 1.0,
+            "total_steps_estimated": 1,
+            "segments": [],
+            "path_sequence": ["A", "B"],
+            "created_at": "2026-01-01",
+        },
+    )
     monkeypatch.setattr(
         app_module.map_db_manager,
         "get_all_routes",
@@ -224,6 +239,12 @@ def test_map_config_and_position_reject_invalid_bodies(monkeypatch):
     assert missing.status_code == 422
     assert zero.status_code == 422
     assert negative.status_code == 422
+    long_image = client.put(
+        "/api/map-config",
+        json={"plan_image": "a" * 513, "px_per_m": 10},
+        headers=OK,
+    )
+    assert long_image.status_code == 422
     assert missing.status_code != 400
     assert zero.status_code != 400
     assert negative.status_code != 400
@@ -231,6 +252,17 @@ def test_map_config_and_position_reject_invalid_bodies(monkeypatch):
     assert client.patch(
         "/api/checkpoints/Sala/position",
         json={"pos_x_px": "no", "pos_y_px": 1},
+        headers=OK,
+    ).status_code == 422
+    assert client.patch(
+        f"/api/checkpoints/{'S' * 101}/position",
+        json={"pos_x_px": 1, "pos_y_px": 1},
+        headers=OK,
+    ).status_code == 422
+    assert client.get("/api/route", params={"start": "A" * 101, "end": "B"}).status_code == 422
+    assert client.post(
+        "/api/checkpoints",
+        json={"name": "N" * 101},
         headers=OK,
     ).status_code == 422
 
@@ -453,6 +485,32 @@ def test_position_patch_sql_error_is_500_not_404(monkeypatch, caplog):
     assert "Checkpoint não encontrado." not in response.text
     assert "Falha ao gravar a posição do checkpoint." in caplog.text
     assert cursor.calls == 1
+
+
+def test_post_route_returns_the_inserted_row(monkeypatch):
+    monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
+    _succeed(monkeypatch)
+    monkeypatch.setattr(app_module.map_db_manager, "save_route", lambda *args, **kwargs: 8)
+    monkeypatch.setattr(
+        app_module.map_db_manager,
+        "get_all_routes",
+        lambda: [{
+            "id": 1,
+            "name": "antiga",
+            "start_node": "A",
+            "end_node": "B",
+            "total_distance_m": 1.0,
+            "total_steps_estimated": 1,
+            "created_at": "2026-01-01",
+        }],
+    )
+    response = TestClient(app).post(
+        "/api/routes",
+        json={"start_node": "A", "end_node": "B", "name": "Rota"},
+        headers=OK,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["route"]["id"] == 8
 
 
 def test_post_routes_requires_editor_password(monkeypatch):

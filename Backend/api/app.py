@@ -1,6 +1,8 @@
 import logging
 import math
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status, Query
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Path as ApiPath, Query, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
@@ -13,6 +15,7 @@ from datasets.ManagerDatabase import (
     drain_pool,
     request_session,
 )
+from map.checkpoint_slug import SLUG_MAX_LENGTH
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
@@ -47,6 +50,7 @@ from map.MapDatabaseManager import (
     UnknownCategoryError,
 )
 from .schema import (
+    NAME_MAX,
     ProcessRawEdgeSchema,
     CheckpointSchema,
     CheckpointCategorySchema,
@@ -371,7 +375,10 @@ def localize_user(
 
 
 @app.get("/api/route", status_code=status.HTTP_200_OK)
-def get_route(start: str = Query(...), end: str = Query(...)):
+def get_route(
+    start: str = Query(..., max_length=NAME_MAX),
+    end: str = Query(..., max_length=NAME_MAX),
+):
     start, end = _canonical_pair(
         start,
         end,
@@ -392,7 +399,10 @@ def get_route(start: str = Query(...), end: str = Query(...)):
 
 
 @app.get("/api/compass_route", status_code=status.HTTP_200_OK)
-def get_compass_route(start: str = Query(...), end: str = Query(...)):
+def get_compass_route(
+    start: str = Query(..., max_length=NAME_MAX),
+    end: str = Query(..., max_length=NAME_MAX),
+):
     """Retorna a rota com segmentos detalhados (heading, distance) para navegação por bússola."""
     start, end = _canonical_pair(
         start,
@@ -414,6 +424,16 @@ def get_compass_route(start: str = Query(...), end: str = Query(...)):
         "path_sequence": [start] + [s["target"] for s in segments],
         "total_distance_m": round(total_distance, 2)
     }
+
+def route_label(given: str | None, start: str, end: str) -> str:
+    """Nome gravado em saved_routes.name (VARCHAR 100). Sem nome, usa os nós."""
+    chosen = (given or "").strip()
+    if not chosen:
+        chosen = f"{start} → {end}"
+    if len(chosen) > NAME_MAX:
+        chosen = chosen[:NAME_MAX].rstrip() or chosen[:NAME_MAX]
+    return chosen
+
 
 # --- ENDPOINTS DE ROTAS SALVAS ---
 
@@ -444,21 +464,25 @@ def create_route(
 
     path_sequence = router.calculate_route(start, end)
 
-    # Nome automático se não fornecido
-    name = route_data.name or f"{start} → {end}"
+    name = route_label(route_data.name, start, end)
 
-    success = map_db_manager.save_route(name, start, end, segments, path_sequence)
-    if not success:
+    route_id = map_db_manager.save_route(name, start, end, segments, path_sequence)
+    if type(route_id) is not int or route_id <= 0:
         raise _internal_error("Erro interno ao salvar.", note="POST /api/routes")
 
-    # Retorna a rota criada (busca pelo último ID)
-    routes = map_db_manager.get_all_routes()
-    new_route = routes[0] if routes else None
+    created = map_db_manager.get_route_by_id(route_id)
+    if created is None:
+        created = {
+            "id": route_id,
+            "name": name,
+            "start_node": start,
+            "end_node": end,
+        }
 
     return {
         "status": "success",
         "message": f"Rota '{name}' salva com sucesso.",
-        "route": new_route
+        "route": created,
     }
 
 @app.get("/api/routes/{route_id}", status_code=status.HTTP_200_OK)
@@ -488,7 +512,7 @@ def delete_route(
 # Modificar reset para aceitar start_node dinâmico
 @app.post("/api/reset")
 def reset_session(
-    start_node: str = Query(default="Recepcao"),
+    start_node: str = Query(default="Recepcao", max_length=NAME_MAX),
     _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
     session_id: str = Depends(require_session_id),
@@ -583,8 +607,8 @@ def list_categories():
 
 @app.get("/api/checkpoints/resolve", status_code=status.HTTP_200_OK)
 def resolve_checkpoint(
-    b: int = Query(...),
-    cp: str = Query(...),
+    b: int = Query(..., ge=1, le=2_147_483_647),
+    cp: str = Query(..., max_length=SLUG_MAX_LENGTH),
 ):
     """Acha o checkpoint do QR ``cp`` (slug) no prédio ``b``."""
     slug = cp.strip()
@@ -605,7 +629,7 @@ def resolve_checkpoint(
 
 @app.patch("/api/checkpoints/{name}", status_code=status.HTTP_200_OK)
 def update_checkpoint_category(
-    name: str,
+    name: Annotated[str, ApiPath(max_length=NAME_MAX)],
     body: CheckpointCategorySchema,
     _editor: None = Depends(require_editor_password),
 ):
@@ -633,7 +657,7 @@ def update_checkpoint_category(
 
 @app.patch("/api/checkpoints/{name}/position", status_code=status.HTTP_200_OK)
 def update_checkpoint_position(
-    name: str,
+    name: Annotated[str, ApiPath(max_length=NAME_MAX)],
     body: CheckpointPositionSchema,
     _editor: None = Depends(require_editor_password),
 ):

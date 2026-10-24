@@ -169,6 +169,8 @@ def test_valid_walk_commits_once_and_counts_sample():
     assert saved["edge_origin"] == "recorded"
     assert saved["edge_distance_m"] == pytest.approx(2.0)
     assert "samples_count" in db.edge_sql
+    assert "dup_rank" in db.edge_sql
+    assert ", 0)" in db.edge_sql
     expected_t = datetime(2026, 10, 20, 16, 5, 11, 20000, tzinfo=timezone.utc).timestamp()
     assert saved["path"][0] == {"x": 0.0, "y": 0.0, "t": pytest.approx(expected_t)}
     assert len(saved["path"]) == 2

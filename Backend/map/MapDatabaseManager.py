@@ -380,8 +380,8 @@ class MapDatabaseManager:
 
     def _upsert_manual_direction(self, source: str, target: str, distance: float, heading_rad: float) -> bool:
         sql = """
-            INSERT INTO edges (source_node, target_node, distance_m, heading_rad, origin)
-            VALUES (%s, %s, %s, %s, 'manual')
+            INSERT INTO edges (source_node, target_node, distance_m, heading_rad, origin, dup_rank)
+            VALUES (%s, %s, %s, %s, 'manual', 0)
             ON DUPLICATE KEY UPDATE
                 distance_m = VALUES(distance_m),
                 heading_rad = VALUES(heading_rad),
@@ -466,7 +466,7 @@ class MapDatabaseManager:
 
     @_sql_method
     def save_route(self, name: str, start_node: str, end_node: str, segments: list, path_sequence: list):
-        """Salva uma rota calculada com todos os segmentos no banco de dados."""
+        """Salva a rota e devolve o id. None quando o INSERT não confirma."""
         import json
 
         total_distance = sum(s["distance_m"] for s in segments)
@@ -478,15 +478,15 @@ class MapDatabaseManager:
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
 
-        success = self.db.execute_query(sql, (
+        route_id = self.db.execute_insert(sql, (
             name, start_node, end_node, total_distance, total_steps_estimated,
             json.dumps(segments), json.dumps(path_sequence)
         ))
 
-        if success:
-            return True
+        if type(route_id) is int and route_id > 0:
+            return int(route_id)
         print(f"Erro ao salvar rota '{name}'")
-        return False
+        return None
 
     @_sql_method
     def get_all_routes(self):
@@ -494,7 +494,7 @@ class MapDatabaseManager:
         sql = """
             SELECT id, name, start_node, end_node, total_distance_m, total_steps_estimated, created_at
             FROM saved_routes
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
         """
         rows = self.db.execute_search(sql)
         if rows is None:
@@ -787,8 +787,8 @@ class MapDatabaseManager:
         sql = """
             INSERT INTO edges (
                 source_node, target_node, distance_m, heading_rad, origin,
-                active_trace_id, samples_count
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                active_trace_id, samples_count, dup_rank
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
             ON DUPLICATE KEY UPDATE
                 distance_m = IF(origin = 'manual', distance_m, VALUES(distance_m)),
                 heading_rad = IF(origin = 'manual', heading_rad, VALUES(heading_rad)),
@@ -1037,6 +1037,8 @@ class MapDatabaseManager:
         return traces
 
     def _traces_by_id(self, trace_ids: list[int]) -> dict[int, dict] | None:
+        if not trace_ids:
+            return {}
         placeholders = ", ".join(["%s"] * len(trace_ids))
         rows = self.db.execute_search(
             f"""
