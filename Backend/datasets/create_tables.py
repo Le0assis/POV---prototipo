@@ -114,8 +114,7 @@ def aplicar_migracao_002(db: ConexaoBD) -> None:
         raise RuntimeError(f"Migração não encontrada: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    preserved = module.apply(db)
-    print(f"[M02] Arestas extras preservadas com dup_rank>0: {len(preserved)}")
+    module.apply(db)
 
 
 def aplicar_migracao_003(db: ConexaoBD) -> None:
