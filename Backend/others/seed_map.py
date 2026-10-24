@@ -39,6 +39,10 @@ EDGES = [
 ]
 
 SQL_SLUGS = "SELECT slug FROM checkpoints WHERE building_id = %s AND slug IS NOT NULL"
+# Mesma regra do grafo: Sala não é sala. O resolve?cp= continua na collation.
+SQL_NAME = (
+    "SELECT slug FROM checkpoints WHERE CAST(name AS BINARY) = CAST(%s AS BINARY)"
+)
 SQL_CHECKPOINT = (
     "INSERT INTO checkpoints (name, building_id, slug) VALUES (%s, %s, %s) "
     "ON DUPLICATE KEY UPDATE name = name"
@@ -62,7 +66,7 @@ def seed(db) -> None:
     taken = {row["slug"] for row in rows if row.get("slug")}
     print("Inserindo checkpoints...")
     for name in CHECKPOINTS:
-        current = db.execute_search("SELECT slug FROM checkpoints WHERE name = %s", (name,))
+        current = db.execute_search(SQL_NAME, (name,))
         if current is None:
             raise RuntimeError(f"Não leu o checkpoint {name}.")
         if current:
