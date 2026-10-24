@@ -28,8 +28,10 @@ def test_unset_env_is_development_with_xampp_defaults(monkeypatch):
     assert cfg.db_host == "localhost"
     assert cfg.db_port == 3306
     assert cfg.db_name == "POV"
-    assert cfg.db_user == "root"
+    assert cfg.db_user == "pov"
     assert cfg.db_password == ""
+    assert not hasattr(cfg, "db_admin_user")
+    assert not hasattr(cfg, "db_admin_password")
 
 
 def test_production_origins_are_only_the_pages_hosts(monkeypatch):

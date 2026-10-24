@@ -36,10 +36,13 @@ class Settings(BaseSettings):
     pov_env: str = "development"
     cors_origins: str = ""
     pov_enable_test_routes: bool = False
+    # Mesmos nomes de create_tables e do seed: DB_HOST, DB_PORT, DB_NAME,
+    # DB_USER, DB_PASSWORD. Sem ambiente a conta é pov, não root.
+    # DB_ADMIN_USER e DB_ADMIN_PASSWORD não são lidas. A API não cria schema.
     db_host: str = "localhost"
     db_port: int = 3306
     db_name: str = "POV"
-    db_user: str = "root"
+    db_user: str = "pov"
     db_password: str = ""
 
     def allowed_origins(self) -> list[str]:

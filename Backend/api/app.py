@@ -76,7 +76,11 @@ FRONTEND_DIR = (BASE_DIR / "../../frontend").resolve()
 
 
 def database_from_settings() -> ConexaoBD:
-    """Sessão modelo. Padrão de dev é o XAMPP local; produção vem do ambiente."""
+    """Sessão da API com DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.
+
+    Sem ambiente a conta é pov no XAMPP local, não root. CREATE DATABASE
+    e GRANT ficam no create_tables (DB_ADMIN_*). Esta função não lê isso.
+    """
     cfg = get_settings()
     return ConexaoBD(
         host=cfg.db_host,

@@ -168,10 +168,26 @@ def test_database_from_settings_reads_the_env(monkeypatch):
     monkeypatch.setenv("DB_NAME", "pov_test")
     monkeypatch.setenv("DB_USER", "pov")
     monkeypatch.setenv("DB_PASSWORD", "local-only")
+    monkeypatch.setenv("DB_ADMIN_USER", "root")
+    monkeypatch.setenv("DB_ADMIN_PASSWORD", "segredo-admin")
     conn = app_module.database_from_settings()
     assert conn.host == "db.internal"
     assert conn.port == 3307
     assert conn.database == "pov_test"
     assert conn.user == "pov"
     assert conn.password == "local-only"
+    assert conn.connection is None
+
+
+def test_database_from_settings_defaults_to_pov_and_ignores_admin(monkeypatch):
+    for name in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DB_ADMIN_USER", "root")
+    monkeypatch.setenv("DB_ADMIN_PASSWORD", "segredo-admin")
+    conn = app_module.database_from_settings()
+    assert conn.host == "localhost"
+    assert conn.port == 3306
+    assert conn.database == "POV"
+    assert conn.user == "pov"
+    assert conn.password == ""
     assert conn.connection is None

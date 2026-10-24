@@ -9,7 +9,7 @@ Notas para quem altera o POV. O README continua sendo o passo a passo de instala
 - `/api/localize`, `/api/current_location` e `/api/reset` só existem com `POV_ENABLE_TEST_ROUTES` (padrão desligado). O nó `Recepcao` é fallback dessas rotas de teste.
 - Em `POV_ENV=production` o CORS aceita só `https://pov-unimar.com` e `https://www.pov-unimar.com`. Sem a variável, o padrão é desenvolvimento e o localhost continua. `CORS_ORIGINS` substitui a lista. Sem `allow_credentials`.
 - O túnel publica só `api.pov-unimar.com` em `127.0.0.1:8000`. O site é o GitHub Pages (ver `docs/dns.md`).
-- MySQL continua o do XAMPP. Host, porta, base, usuário e senha saem de `DB_*`, com padrão `localhost` / `3306` / `POV` / `root` / vazio.
+- MySQL continua o do XAMPP. Host, porta, base, usuário e senha saem de `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD`, com padrão `localhost` / `3306` / `POV` / `pov` / vazio. A API não lê `DB_ADMIN_*`.
 
 ## Frontend
 
