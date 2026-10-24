@@ -38,6 +38,7 @@ export function createRouteLayer(floor) {
     let walkedLine = null;
     let outlineLine = null;
     let mainLine = null;
+    let originMarker = null;
     let visible = !floor.layers || floor.layers.route !== false;
 
     function clear() {
@@ -47,6 +48,7 @@ export function createRouteLayer(floor) {
         walkedLine = null;
         outlineLine = null;
         mainLine = null;
+        originMarker = null;
     }
 
     function applyWeight() {
@@ -65,9 +67,24 @@ export function createRouteLayer(floor) {
         if (!visible && onMap) floor.map.removeLayer(group);
     }
 
+    function syncOrigin(route, markOrigin) {
+        const stops = Array.isArray(route && route.checkpoints) ? route.checkpoints : [];
+        const origin = stops[0];
+        if (!markOrigin || !origin) {
+            if (originMarker && typeof group.removeLayer === 'function') group.removeLayer(originMarker);
+            originMarker = null;
+            return;
+        }
+        if (originMarker) return;
+        originMarker = addOrigin(floor, group, origin) || null;
+    }
+
     function show(route, { markOrigin = true } = {} as any) {
         const next = routeSignature(route);
-        if (next && next === signature) return;
+        if (next && next === signature) {
+            syncOrigin(route, markOrigin);
+            return;
+        }
         clear();
         signature = next;
         if (!route) return;
@@ -100,9 +117,8 @@ export function createRouteLayer(floor) {
         }
 
         const stops = Array.isArray(route.checkpoints) ? route.checkpoints : [];
-        const origin = stops[0];
         const destination = stops.length > 1 ? stops[stops.length - 1] : null;
-        if (origin && markOrigin) addOrigin(floor, group, origin);
+        syncOrigin(route, markOrigin);
         if (destination) addDestination(floor, group, destination);
         bringGroupToFront(group);
         setVisible(floor.layers ? floor.layers.route !== false : visible);
@@ -179,6 +195,7 @@ function addOrigin(floor, group, checkpoint) {
         offset: [16, 0]
     });
     marker.addTo(group);
+    return marker;
 }
 
 function addDestination(floor, group, checkpoint) {

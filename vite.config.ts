@@ -4,6 +4,7 @@ import preact from '@preact/preset-vite';
 import { defineConfig } from 'vitest/config';
 
 const frontend = resolve(__dirname, 'frontend');
+let leafletOutDir = resolve(frontend, 'dist');
 
 export default defineConfig({
   root: frontend,
@@ -14,8 +15,11 @@ export default defineConfig({
     {
       name: 'copy-leaflet',
       apply: 'build',
+      configResolved(config) {
+        leafletOutDir = resolve(config.root, config.build.outDir);
+      },
       closeBundle() {
-        cpSync(resolve(frontend, 'vendor/leaflet'), resolve(frontend, 'dist/vendor/leaflet'), {
+        cpSync(resolve(frontend, 'vendor/leaflet'), resolve(leafletOutDir, 'vendor/leaflet'), {
           recursive: true
         });
       }

@@ -129,6 +129,12 @@ test('axe em index.html no E4 com rota simulada', { timeout: 120000 }, async () 
             const instruction = document.querySelector('.nav-instruction');
             return instruction && instruction.textContent.trim().length > 0;
         });
+        await page.waitForSelector('.blue-dot.has-cone');
+        await page.waitForFunction(() => {
+            const labels = [...document.querySelectorAll('.you-label')]
+                .filter((el) => (el.textContent || '').trim() === 'você');
+            return labels.length === 1;
+        });
         await expectClean(page, 'E4');
         assert.equal(errors.length, 0, errors.join('\n'));
     } finally {
