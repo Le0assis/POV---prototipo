@@ -164,7 +164,10 @@ _PASSWORD_RE = re.compile(r"(?i)\b(password|pwd|passwd)\s*[:=]\s*\S+")
 def _secrets(db) -> list[str]:
     """Senha do ambiente e a da conexão. Vazio não entra: apagaria o texto."""
     found = []
-    for value in (os.environ.get("DB_PASSWORD", ""), getattr(db, "password", "")):
+    values = [os.environ.get("DB_PASSWORD", "")]
+    if db is not None:
+        values.append(getattr(db, "password", ""))
+    for value in values:
         secret = str(value or "")
         if secret and secret not in found:
             found.append(secret)
@@ -185,14 +188,26 @@ def _short_error(exc: BaseException, db) -> str:
     return f"{name}: {text}" if text else name
 
 
-def cli(db) -> int:
+def cli(db=None) -> int:
     """Erro: código 1 e uma linha no stderr. O traceback fica de fora.
 
-    Conflito de caixa mantém a mensagem já combinada. Qualquer outra
-    exceção vira tipo + mensagem, sem senha e sem DSN. O rollback
-    continua em ``seed`` antes de a exceção chegar aqui.
+    Sem ``db``, a conexão sai de ``conexao_from_settings`` aqui dentro:
+    porta inválida ou variável ausente também vira essa linha. Conflito
+    de caixa mantém a mensagem já combinada. Qualquer outra exceção vira
+    tipo + mensagem, sem senha e sem DSN. O rollback continua em ``seed``.
     """
+    created = None
     try:
+        if db is None:
+            db = conexao_from_settings()
+            created = db
+            assert_seed_account(str(db.user))
+            db.connect()
+            if not db.connection:
+                raise SystemExit(
+                    "Erro ao conectar como pov. Confira DB_HOST, DB_PORT, DB_NAME, "
+                    "DB_USER e DB_PASSWORD. O seed não usa a conta administrativa."
+                )
         seed(db)
     except SeedConflict as exc:
         print(exc, file=sys.stderr)
@@ -200,6 +215,9 @@ def cli(db) -> int:
     except Exception as exc:
         print(_short_error(exc, db), file=sys.stderr)
         return 1
+    finally:
+        if created is not None:
+            created.disconnect()
     return 0
 
 
@@ -215,20 +233,6 @@ def assert_seed_account(user: str) -> None:
 
 
 if __name__ == "__main__":
-    db = conexao_from_settings()
-    try:
-        assert_seed_account(str(db.user))
-    except RuntimeError as exc:
-        raise SystemExit(str(exc)) from exc
-    db.connect()
-    if not db.connection:
-        raise SystemExit(
-            "Erro ao conectar como pov. Confira DB_HOST, DB_PORT, DB_NAME, "
-            "DB_USER e DB_PASSWORD. O seed não usa a conta administrativa."
-        )
-    try:
-        code = cli(db)
-    finally:
-        db.disconnect()
+    code = cli()
     if code:
         raise SystemExit(code)

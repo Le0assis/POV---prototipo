@@ -256,6 +256,57 @@ def test_cli_hides_secrets_and_dsn(capsys, monkeypatch):
     assert "File " not in captured.err
 
 
+def _env_without_dotenv(monkeypatch, **values: str) -> str:
+    monkeypatch.setattr("api.envfile.load_env_file", lambda path=None: None)
+    secret = "senha-super-secreta"
+    for key in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("DB_PASSWORD", secret)
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+    return secret
+
+
+def test_cli_reports_invalid_port_on_one_line(monkeypatch, capsys):
+    secret = _env_without_dotenv(
+        monkeypatch,
+        DB_HOST="127.0.0.1",
+        DB_PORT="abc",
+        DB_NAME="POV",
+        DB_USER="pov",
+    )
+    assert cli() == 1
+    captured = capsys.readouterr()
+    assert captured.err == "RuntimeError: DB_PORT inválida: 'abc'.\n"
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert secret not in captured.err
+
+
+def test_cli_reports_missing_db_name_on_one_line(monkeypatch, capsys):
+    secret = _env_without_dotenv(
+        monkeypatch,
+        DB_HOST="127.0.0.1",
+        DB_PORT="3306",
+        DB_USER="pov",
+    )
+    assert cli() == 1
+    captured = capsys.readouterr()
+    assert captured.err.count("\n") == 1
+    assert captured.err.startswith("RuntimeError: Faltam DB_NAME. ")
+    assert "Traceback" not in captured.err
+    assert secret not in captured.err
+    assert secret not in captured.out
+    assert captured.out == ""
+
+
+def test_entrypoint_opens_the_connection_inside_cli():
+    text = (BACKEND_ROOT / "others" / "seed_map.py").read_text(encoding="utf-8")
+    main = text.split('if __name__ == "__main__":', 1)[1]
+    assert "conexao_from_settings" not in main
+    assert "code = cli()" in main
+
+
 def test_cli_success_returns_zero(capsys):
     db = _SeedDB([{"name": "Recepcao", "slug": "recepcao"}])
     assert cli(db) == 0

@@ -196,7 +196,7 @@ class ConexaoBD:
             return self.cursor.fetchall()
 
         def failed(exc):
-            print(f"Erro ao executar consulta: {exc}")
+            print(f"Erro ao executar consulta: {self._redact(exc)}")
             return None
 
         return self._attempt(
@@ -230,7 +230,7 @@ class ConexaoBD:
         def failed(exc):
             if isinstance(exc, IntegrityError):
                 raise exc
-            print(f"Erro ao executar comando: {exc}")
+            print(f"Erro ao executar comando: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -260,7 +260,7 @@ class ConexaoBD:
             return affected
 
         def failed(exc):
-            print(f"Erro ao executar update: {exc}")
+            print(f"Erro ao executar update: {self._redact(exc)}")
             return None
 
         return self._attempt(
@@ -285,7 +285,7 @@ class ConexaoBD:
             return self.cursor.lastrowid
 
         def failed(exc):
-            print(f"Erro ao executar insert: {exc}")
+            print(f"Erro ao executar insert: {self._redact(exc)}")
             return None
 
         return self._attempt(
@@ -310,7 +310,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao executar lote: {exc}")
+            print(f"Erro ao executar lote: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -341,7 +341,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao abrir transação: {exc}")
+            print(f"Erro ao abrir transação: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -358,7 +358,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao confirmar transação: {exc}")
+            print(f"Erro ao confirmar transação: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -377,7 +377,7 @@ class ConexaoBD:
             return True
         except Error as exc:
             self._explicit = False
-            print(f"Erro ao reverter transação: {exc}")
+            print(f"Erro ao reverter transação: {self._redact(exc)}")
             return False
 
     def execute_within(self, sql, params=None):
@@ -389,7 +389,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao executar comando na transação: {exc}")
+            print(f"Erro ao executar comando na transação: {self._redact(exc)}")
             return False
 
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
@@ -403,7 +403,7 @@ class ConexaoBD:
             return self.cursor.lastrowid
 
         def failed(exc):
-            print(f"Erro ao executar insert na transação: {exc}")
+            print(f"Erro ao executar insert na transação: {self._redact(exc)}")
             return None
 
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
@@ -418,7 +418,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao executar lote na transação: {exc}")
+            print(f"Erro ao executar lote na transação: {self._redact(exc)}")
             return False
 
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
