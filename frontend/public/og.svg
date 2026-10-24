@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="POV, mapa do prédio com a rota em azul e o destino em âmbar">
+  <rect width="1200" height="630" fill="#F7F9FC"/>
+  <rect x="48" y="48" width="620" height="534" rx="16" fill="#FFFFFF" stroke="#E3E8EF"/>
+  <g stroke="#2563EB" stroke-opacity="0.12" stroke-width="1">
+    <path d="M88 128H628M88 208H628M88 288H628M88 368H628M88 448H628M168 88V542M248 88V542M328 88V542M408 88V542M488 88V542M568 88V542"/>
+  </g>
+  <g fill="#F7F9FC" stroke="#E3E8EF" stroke-width="2">
+    <rect x="88" y="96" width="220" height="150" rx="12"/>
+    <rect x="340" y="96" width="268" height="150" rx="12"/>
+    <rect x="88" y="278" width="220" height="246" rx="12"/>
+    <rect x="340" y="278" width="268" height="246" rx="12"/>
+  </g>
+  <polyline points="168,470 168,392 430,392 430,188 520,188" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="168,470 168,392 430,392 430,188 520,188" fill="none" stroke="#2563EB" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="168" cy="470" r="26" fill="#93C5FD"/>
+  <circle cx="168" cy="470" r="12" fill="#2563EB"/>
+  <circle cx="520" cy="188" r="16" fill="#FFFFFF"/>
+  <circle cx="520" cy="188" r="11" fill="#F59E0B"/>
+  <text x="720" y="250" fill="#2563EB" font-family="Inter, Liberation Sans, sans-serif" font-size="22" font-weight="600">Navegação no prédio</text>
+  <text x="720" y="340" fill="#1B2433" font-family="Inter, Liberation Sans, sans-serif" font-size="92" font-weight="700">POV</text>
+  <rect x="720" y="372" width="72" height="6" rx="3" fill="#14B8A6"/>
+  <text x="720" y="440" fill="#5B6B80" font-family="Inter, Liberation Sans, sans-serif" font-size="28" font-weight="400">Mapa e rota no prédio</text>
+</svg>
