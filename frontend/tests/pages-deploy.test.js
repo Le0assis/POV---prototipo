@@ -12,6 +12,8 @@ test('o Pages publica o build do Vite no domínio próprio', () => {
 
     const vite = readFileSync(path.join(root, 'vite.config.ts'), 'utf8');
     assert.match(vite, /base:\s*'\/'/);
+    assert.match(vite, /resolve\(config\.root,\s*config\.build\.outDir\)/);
+    assert.doesNotMatch(vite, /dist\/vendor\/leaflet/);
 
     const pages = readFileSync(path.join(root, '.github/workflows/pages.yml'), 'utf8');
     assert.match(pages, /actions\/deploy-pages/);
