@@ -49,8 +49,9 @@ def test_app_and_admin_credentials_come_from_the_environment(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(RuntimeError, match="DB_USER"):
         app_db_config()
-    with pytest.raises(RuntimeError, match="DB_ADMIN_USER"):
+    with pytest.raises(SystemExit, match="DB_ADMIN_USER") as missing_admin:
         admin_db_config()
+    assert missing_admin.value.code != 0
     monkeypatch.setenv("DB_HOST", "127.0.0.1")
     monkeypatch.setenv("DB_PORT", "3306")
     monkeypatch.setenv("DB_NAME", "POV")

@@ -195,7 +195,7 @@ O que isso faz, e o que não faz:
 - `CREATE DATABASE IF NOT EXISTS POV` com `utf8mb4` / `utf8mb4_unicode_ci`. Schema que já existe não é recriado nem esvaziado.
 - `GRANT` de `POV.*` para `pov@localhost` e `pov@127.0.0.1` (a API liga em `127.0.0.1`). Conta que já existe não troca de senha. Sem `DB_POV_PASSWORD` (e sem `DB_USER=pov`), a conta nova não é criada; o GRANT avisa e segue.
 - Tabelas com `CREATE TABLE IF NOT EXISTS`. Coluna e índice novos só entram depois de olhar o `information_schema`.
-- Migração 002 não dá `DELETE` em `edges`. Cópias do mesmo sentido (inclusive `Sala` e `sala`, que o unique trata como iguais) ficam na tabela: a de maior `id` permanece com `dup_rank` 0 e as outras ganham 1, 2, … O mapa e o upsert usam só `dup_rank` 0.
+- Migração 002 não dá `DELETE` em `edges`. Cópias do mesmo sentido (inclusive `Sala` e `sala`, que o unique trata como iguais) ficam na tabela. `dup_rank` 0 é a aresta cujo `source_node` e `target_node` batem com `checkpoints.name` em comparação `BINARY`; empate, o maior `id`. Se nenhuma bater, o maior `id` continua canônico e o script avisa. As outras ficam com 1, 2, … Rodar de novo recalcula o rank (passa por um valor negativo para não colidir no unique) e não apaga linha. O mapa e o upsert usam só `dup_rank` 0.
 - Rode `create_tables` antes de subir esta versão da API. A leitura filtra `dup_rank`. A coluna nasce na migração, com default 0. Sem ela o SELECT do mapa falha; com ela, a linha antiga continua no mapa.
 - Seed (`others/seed_map.py`) usa o mesmo `DB_NAME` e entra como `pov`. Não abre sessão com `DB_ADMIN_USER`. `INSERT ... ON DUPLICATE KEY UPDATE` não muda checkpoint nem distância que já existam.
 - Rodar o comando de novo é seguro. Não há `DROP`, `TRUNCATE` nem `DELETE` de dado de mapa.

@@ -10,9 +10,12 @@ insería e gravava os dois sentidos; ``load_map_into_system`` chamava
 
 O unique usa a collation da coluna. ``Sala`` e ``sala`` são a mesma chave
 em utf8mb4_unicode_ci e o Python não via. O ALTER caía em 1062 depois de
-já ter apagado as cópias exatas. Agora nenhuma linha sai de ``edges``:
-a de maior id do grupo (a comparação é a do banco) fica com ``dup_rank`` 0
-e as outras recebem 1, 2, ... O unique inclui ``dup_rank`` quando há extra.
+já ter apagado as cópias exatas. Agora nenhuma linha sai de ``edges``.
+A canônica (``dup_rank`` 0) é a aresta cujo ``source_node`` e ``target_node``
+batem com ``checkpoints.name`` em comparação ``BINARY``; o desempate é o
+maior id. Se nenhuma bater, fica a de maior id e sai um aviso. As outras
+recebem 1, 2, ... O unique inclui ``dup_rank`` quando há extra. Rodar de
+novo recalcula o rank, em duas fases, sem apagar linha.
 
 ``sensors_log_id ON DELETE CASCADE`` é intencional: a trajetória é derivada
 do log bruto. ``source_node``/``target_node`` copiam o tipo exato de
@@ -66,17 +69,30 @@ SQL_ENGINE = (
     "SELECT ENGINE AS engine FROM information_schema.tables "
     "WHERE table_schema = DATABASE() AND table_name = 'sensors_log'"
 )
+# CAST AS BINARY no JOIN, não no EXISTS. No MariaDB 10.11 o EXISTS
+# correlacionado (BINARY c.name = BINARY e.source_node) usa a collation
+# da coluna e trata Sala e sala como o mesmo nome.
 SQL_DUP_GROUPS = (
     "SELECT e.id AS id, e.source_node AS source_node, e.target_node AS target_node, "
-    "k.keep_id AS keep_id "
+    "e.dup_rank AS dup_rank, k.group_id AS group_id, "
+    "IF(src.name IS NULL OR tgt.name IS NULL, 0, 1) AS exact_name "
     "FROM edges e "
     "JOIN ("
-    "SELECT source_node, target_node, MAX(id) AS keep_id "
+    "SELECT MIN(id) AS group_id, source_node, target_node "
     "FROM edges GROUP BY source_node, target_node HAVING COUNT(*) > 1"
     ") k ON k.source_node = e.source_node AND k.target_node = e.target_node "
-    "ORDER BY k.keep_id, e.id"
+    "LEFT JOIN checkpoints src "
+    "ON CAST(src.name AS BINARY) = CAST(e.source_node AS BINARY) "
+    "LEFT JOIN checkpoints tgt "
+    "ON CAST(tgt.name AS BINARY) = CAST(e.target_node AS BINARY) "
+    "ORDER BY k.group_id, e.id"
 )
-SQL_SET_RANK = "UPDATE edges SET dup_rank = %s WHERE id = %s AND dup_rank = 0"
+SQL_SET_RANK = "UPDATE edges SET dup_rank = %s WHERE id = %s"
+SQL_UNIQUE_HAS_RANK = (
+    "SELECT 1 AS ok FROM information_schema.statistics "
+    "WHERE table_schema = DATABASE() AND table_name = 'edges' "
+    "AND index_name = 'uq_edges_direction' AND column_name = 'dup_rank'"
+)
 SQL_UNIQUE_PAIR = (
     "ALTER TABLE edges ADD UNIQUE KEY uq_edges_direction (source_node, target_node)"
 )
@@ -225,37 +241,92 @@ def backup_edges_once(db) -> None:
     print("[M02] Snapshot edges_backup_m02 criado. Nenhuma aresta é apagada.")
 
 
+def _desired_ranks(group: list[dict]) -> tuple[dict[int, int], int, bool]:
+    """Canônica: nome BINARY igual ao checkpoint. Desempate: maior id.
+
+    Sem nenhum nome exato, a canônica volta a ser o maior id e ``warned`` é True.
+    """
+    exact = [row for row in group if int(row.get("exact_name") or 0) == 1]
+    warned = not exact
+    pool = exact or group
+    keep_id = max(int(row["id"]) for row in pool)
+    ranks: dict[int, int] = {}
+    extra = 1
+    for row in sorted(group, key=lambda item: int(item["id"])):
+        edge_id = int(row["id"])
+        if edge_id == keep_id:
+            ranks[edge_id] = 0
+        else:
+            ranks[edge_id] = extra
+            extra += 1
+    return ranks, keep_id, warned
+
+
+def _apply_rank_changes(db, changes: list[tuple[int, int]], ranked_unique: bool) -> None:
+    """Grava o rank novo. Com unique de 3 colunas, passa por um rank negativo.
+
+    O negativo é ``-id``, distinto de 0, 1, 2, ... Trocar 0 e 1 direto
+    colidiria no unique. A segunda fase grava o rank final.
+    """
+    if not changes:
+        return
+    if ranked_unique:
+        for edge_id, _rank in changes:
+            _exec(db, SQL_SET_RANK, (-int(edge_id), int(edge_id)))
+    for edge_id, rank in changes:
+        _exec(db, SQL_SET_RANK, (int(rank), int(edge_id)))
+
+
 def preserve_duplicate_edges(db) -> list[dict]:
     """Numera cópias do mesmo sentido. Não apaga linha.
 
-    O grupo é o do banco (collation), não o do Python. A de maior id fica
-    com dup_rank 0, que é a linha do mapa e do upsert.
+    O grupo é o do banco (collation). A canônica é a que casa
+    ``checkpoints.name`` em BINARY; empate fica com o maior id. Se o unique
+    já existe, o rank é recalculado do mesmo jeito.
     """
     _add_column(db, "edges", "dup_rank", "dup_rank INT NOT NULL DEFAULT 0")
-    if _fetch(db, SQL_UNIQUE_EXISTS):
-        return []
     grouped = _fetch(db, SQL_DUP_GROUPS)
-    by_keep: dict[int, list[dict]] = {}
+    by_group: dict[int, list[dict]] = {}
     for row in grouped:
-        by_keep.setdefault(int(row["keep_id"]), []).append(row)
+        by_group.setdefault(int(row["group_id"]), []).append(row)
     preserved: list[dict] = []
-    for keep_id, group in by_keep.items():
-        rank = 1
-        for row in sorted(group, key=lambda item: int(item["id"])):
-            if int(row["id"]) == keep_id:
-                continue
-            _exec(db, SQL_SET_RANK, (rank, int(row["id"])))
+    changes: list[tuple[int, int]] = []
+    for group in by_group.values():
+        desired, keep_id, warned = _desired_ranks(group)
+        if warned:
+            sample = min(group, key=lambda item: int(item["id"]))
             print(
-                "[M02] edges "
-                f"id={row['id']} {row['source_node']}->{row['target_node']} "
-                f"permanece com dup_rank={rank} (canônica id={keep_id})"
+                "[M02] aviso: nenhuma aresta "
+                f"{sample['source_node']}->{sample['target_node']} "
+                "bate BINARY com checkpoints.name. "
+                f"Canônica permanece o maior id ({keep_id}). Nenhuma linha foi apagada."
             )
-            preserved.append(row)
-            rank += 1
-    if grouped:
-        _exec(db, SQL_UNIQUE_RANKED)
-    else:
-        _exec(db, SQL_UNIQUE_PAIR)
+        for row in sorted(group, key=lambda item: int(item["id"])):
+            edge_id = int(row["id"])
+            new_rank = desired[edge_id]
+            if int(row.get("dup_rank") or 0) == new_rank:
+                continue
+            changes.append((edge_id, new_rank))
+            if new_rank != 0:
+                print(
+                    "[M02] edges "
+                    f"id={edge_id} {row['source_node']}->{row['target_node']} "
+                    f"permanece com dup_rank={new_rank} (canônica id={keep_id})"
+                )
+                preserved.append(row)
+            else:
+                print(
+                    "[M02] edges "
+                    f"id={edge_id} {row['source_node']}->{row['target_node']} "
+                    f"passa a dup_rank=0 (nome igual ao checkpoint; canônica id={keep_id})"
+                )
+    ranked_unique = bool(_fetch(db, SQL_UNIQUE_HAS_RANK))
+    _apply_rank_changes(db, changes, ranked_unique)
+    if not _fetch(db, SQL_UNIQUE_EXISTS):
+        if grouped:
+            _exec(db, SQL_UNIQUE_RANKED)
+        else:
+            _exec(db, SQL_UNIQUE_PAIR)
     return preserved
 
 

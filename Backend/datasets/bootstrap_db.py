@@ -99,7 +99,7 @@ def admin_db_config() -> tuple[str, str]:
         key for key in ("DB_ADMIN_USER", "DB_ADMIN_PASSWORD") if key not in os.environ
     ]
     if missing:
-        raise RuntimeError(
+        raise SystemExit(
             "Faltam "
             + ", ".join(missing)
             + " para CREATE DATABASE, CREATE USER e GRANT. "
