@@ -86,8 +86,8 @@ export function mountCameraOverlay(root, { onClose, onSubmit, onCameraFailure } 
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'btn btn-primary camera-close';
-    close.textContent = 'Fechar';
-    close.setAttribute('aria-label', 'Fechar câmera');
+    close.textContent = 'Voltar';
+    close.setAttribute('aria-label', 'Voltar para a tela anterior');
 
     actions.append(torch, typeCode, close);
     const dock = document.createElement('div');

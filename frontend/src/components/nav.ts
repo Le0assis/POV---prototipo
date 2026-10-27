@@ -24,6 +24,31 @@ function isActive(link, active) {
     return link.key === active || link.aliases.includes(active);
 }
 
+/** Destino quando não há histórico interno: menu admin ou a página inicial. */
+export function previousScreenFallback() {
+    const path = typeof window === 'undefined' ? '' : (window.location.pathname || '');
+    if (/\/admin\/(?:index\.html)?$/.test(path)) return '../index.html';
+    if (/\/admin\//.test(path)) return 'index.html';
+    return rootPrefix() + 'index.html';
+}
+
+/** Volta para a tela anterior. Sem histórico do próprio site, usa o fallback. */
+export function goToPreviousScreen() {
+    const fallback = previousScreenFallback();
+    let sameOrigin = false;
+    try {
+        sameOrigin = Boolean(document.referrer)
+            && new URL(document.referrer).origin === window.location.origin;
+    } catch (_) {
+        sameOrigin = false;
+    }
+    if (sameOrigin && window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    window.location.assign(fallback);
+}
+
 function setStatus(dot, online) {
     dot.classList.toggle('online', online);
     dot.classList.toggle('offline', !online);
@@ -36,6 +61,14 @@ export function renderTopNav(active) {
     const nav = document.createElement('nav');
     nav.className = 'top-nav';
     nav.setAttribute('aria-label', 'Navegação principal');
+
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'nav-btn nav-back';
+    back.textContent = 'Voltar';
+    back.setAttribute('aria-label', 'Voltar para a tela anterior');
+    back.addEventListener('click', () => goToPreviousScreen());
+    nav.append(back);
 
     LINKS.forEach(link => {
         const a = document.createElement('a');
@@ -67,6 +100,9 @@ export function insertTopNav(active) {
 
     const nav = renderTopNav(active);
     document.body.insertBefore(nav, document.body.firstChild);
+    document.querySelectorAll('[data-pov-back]').forEach((button) => {
+        button.addEventListener('click', () => goToPreviousScreen());
+    });
 
     const dot = nav.querySelector('.status-dot');
 

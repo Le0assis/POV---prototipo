@@ -549,7 +549,11 @@ function renderFlow(planned) {
         const arrived = flowButton('Cheguei', 'Cheguei', 'arrive');
         arrived.classList.remove('btn-secondary');
         arrived.classList.add('btn-primary');
-        flow.append(arrived, flowButton('Encerrar', 'Encerrar', 'back'));
+        flow.append(
+            arrived,
+            flowButton('Voltar para a tela anterior', 'Voltar', 'back'),
+            flowButton('Encerrar', 'Encerrar', 'back')
+        );
         return;
     }
     if (session.state === State.ERRO_CAMERA) {
@@ -563,7 +567,7 @@ function renderFlow(planned) {
         const change = flowButton('Trocar destino', 'Trocar destino', 'open-search');
         change.classList.remove('btn-secondary');
         change.classList.add('btn-primary');
-        flow.append(title, change);
+        flow.append(title, change, flowButton('Voltar para a tela anterior', 'Voltar', 'back'));
         return;
     }
     flow.classList.remove('is-camera-error');

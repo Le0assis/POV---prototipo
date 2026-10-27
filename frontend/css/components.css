@@ -419,6 +419,15 @@ textarea:disabled {
     text-decoration: none;
 }
 
+button.admin-menu-link {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+}
+
 .admin-gate {
     width: min(720px, calc(100% - 32px));
     margin: var(--space-16) auto;
