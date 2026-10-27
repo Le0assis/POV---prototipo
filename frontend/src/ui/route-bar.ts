@@ -37,6 +37,15 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
     points.className = 'route-points';
     points.append(origin, destination);
 
+    const pointsToggle = document.createElement('button');
+    pointsToggle.type = 'button';
+    pointsToggle.className = 'route-points-toggle';
+    pointsToggle.textContent = 'Origem e destino';
+
+    const pointsBody = document.createElement('div');
+    pointsBody.className = 'route-points-body';
+    pointsBody.append(points);
+
     const start = document.createElement('button');
     start.type = 'button';
     start.className = 'btn btn-primary route-start';
@@ -55,8 +64,38 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
     spoken.className = 'sr-only';
     meta.append(visual, spoken);
 
-    expanded.append(points, meta, start);
+    expanded.append(pointsToggle, pointsBody, meta, start);
     root.replaceChildren(compact, expanded);
+
+    let collapsed = false;
+    let autoCollapsedFor = '';
+
+    function phoneLayout() {
+        return typeof window.matchMedia === 'function'
+            && window.matchMedia('(max-width: 900px)').matches;
+    }
+
+    function applyCollapsed(originText, destinationText) {
+        pointsBody.hidden = collapsed;
+        pointsToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        pointsToggle.setAttribute('aria-controls', 'route-points-body');
+        pointsBody.id = 'route-points-body';
+        if (collapsed) {
+            pointsToggle.textContent = `${originText} → ${destinationText}`;
+            pointsToggle.setAttribute('aria-label', `Mostrar origem e destino. ${originText} para ${destinationText}.`);
+        } else {
+            pointsToggle.textContent = 'Recolher origem e destino';
+            pointsToggle.setAttribute('aria-label', 'Recolher origem e destino');
+        }
+    }
+
+    pointsToggle.addEventListener('click', () => {
+        collapsed = !collapsed;
+        autoCollapsedFor = 'user';
+        const originText = originValue.textContent || 'Origem';
+        const destinationText = destinationValue.textContent || 'Destino';
+        applyCollapsed(originText, destinationText);
+    });
 
     compact.addEventListener('click', () => {
         if (typeof onOrigin === 'function') onOrigin();
@@ -119,6 +158,16 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
         if (current.state === 'E4' || current.state === 'E5' || current.state === 'ERRO_ROTA') ready = false;
         start.disabled = !ready;
         start.setAttribute('aria-disabled', ready ? 'false' : 'true');
+
+        const navigating = current.state === 'E4';
+        if (navigating && phoneLayout() && autoCollapsedFor !== 'user' && autoCollapsedFor !== 'E4') {
+            collapsed = true;
+            autoCollapsedFor = 'E4';
+        } else if (!navigating && autoCollapsedFor === 'E4') {
+            collapsed = false;
+            autoCollapsedFor = '';
+        }
+        applyCollapsed(originLabel, destinationLabel);
     }
 
     update({ origin: null, destination: null });

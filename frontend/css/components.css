@@ -647,6 +647,14 @@ html.dark .leaflet-container {
     color: var(--text);
 }
 
+.route-points-toggle {
+    font-weight: 700;
+}
+
+.route-points-body[hidden] {
+    display: none !important;
+}
+
 html.hc .route-line {
     stroke: var(--primary) !important;
 }
