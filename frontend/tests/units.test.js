@@ -6,10 +6,12 @@ import {
     pixelsToMeters as coordsInverse
 } from '../src/map/coords.ts';
 import {
+    formatUserMeters,
     metersToPixels,
     pixelDistanceMeters,
     pixelsToMeters,
-    plantHeadingToScreenDeg
+    plantHeadingToScreenDeg,
+    stripPixelWording
 } from '../src/map/units.ts';
 
 const anchor = { pos_x_px: 100, pos_y_px: 200 };
@@ -47,6 +49,13 @@ test('a origem local cai na âncora e o inverso desfaz', () => {
 test('rejeita escala zero e âncora ausente', () => {
     assert.equal(metersToPixels({ x: 1, y: 1 }, anchor, { px_per_m: 0, rotation_rad: 0 }), null);
     assert.equal(metersToPixels({ x: 1, y: 1 }, { pos_x_px: null, pos_y_px: 1 }, flat), null);
+});
+
+test('o visitante vê metros e não vê pixel', () => {
+    assert.equal(formatUserMeters(12.4, 0), '12 m');
+    assert.equal(formatUserMeters(1.256, 2), '1.26 m');
+    assert.equal(stripPixelWording('parede de 400 px, px_per_m = 100'), 'parede de');
+    assert.equal(stripPixelWording('~12 m'), '~12 m');
 });
 
 test('heading do plano e distância em metros', () => {

@@ -1,5 +1,7 @@
 /** Aviso do mapa: carregando, planta ausente ou falha, com tentativa de novo. */
 
+import { stripPixelWording } from './units.js';
+
 const PLANT_PENDING = 'A planta aparece quando o mapa estiver disponível.';
 
 export function floorNotice(model, planError = '') {
@@ -7,7 +9,7 @@ export function floorNotice(model, planError = '') {
         ? model.problems.filter(Boolean)
         : [];
     const imageError = planError ? String(planError) : '';
-    const message = [...new Set([imageError, ...failures].filter(Boolean))].join(' ');
+    const message = stripPixelWording([...new Set([imageError, ...failures].filter(Boolean))].join(' '));
     if (message) {
         return {
             message,
@@ -64,7 +66,7 @@ export function mountMapStatus(anchor) {
 
     return {
         show(message, { busy = false, error = false, onRetry: nextRetry = null, host = null } = {} as any) {
-            const nextMessage = message || '';
+            const nextMessage = stripPixelWording(message || '');
             if (nextMessage && nextMessage !== dismissedMessage) dismissedMessage = '';
             const visible = Boolean(nextMessage) && nextMessage !== dismissedMessage;
             text.textContent = nextMessage;

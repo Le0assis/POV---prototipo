@@ -11,6 +11,7 @@ import { toast } from '../core/toast.js';
 import { HeadingProvider } from '../sensors/heading.js';
 import { StepDetector } from '../sensors/step-detector.js';
 import { metersToPixels, plantHeadingToScreenDeg } from '../map/coords.js';
+import { formatUserMeters } from '../map/units.js';
 import { createFloorMap, resolvePlanImage } from '../map/floor-map.js';
 import { renderFloorLayers, contentPixels, createBlueDot } from '../map/layers.js';
 import { floorNotice, mountMapStatus } from '../map/map-status.js';
@@ -221,7 +222,7 @@ function simulateStep() {
 function paint() {
     const edge = state.edge;
     $('#loc-steps').textContent = String(state.steps);
-    $('#loc-dist').textContent = `${formatNum(state.walkedM, 2)} m`;
+    $('#loc-dist').textContent = formatUserMeters(state.walkedM, 2);
     if (!edge) {
         $('#loc-node').textContent = '—';
         $('#loc-error').textContent = '—';
@@ -251,7 +252,7 @@ function paint() {
     }
     $('#loc-node').textContent = nearest.name;
     const errorEl = $('#loc-error');
-    errorEl.textContent = `${formatNum(nearest.errorM, 2)} m`;
+    errorEl.textContent = formatUserMeters(nearest.errorM, 2);
     const inside = windowM !== null && nearest.errorM <= windowM;
     errorEl.classList.toggle('goal-ok', inside);
     errorEl.classList.toggle('goal-bad', windowM !== null && !inside);

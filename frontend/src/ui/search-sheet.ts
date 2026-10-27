@@ -13,6 +13,7 @@ import {
     destinationCountLabel,
     searchDestinations
 } from '../core/search.js';
+import { stripPixelWording } from '../map/units.js';
 
 export function mountSearchSheet(root, { onClose, onSelect, loadCatalog, originSlug } = {} as any) {
     const scrim = document.createElement('button');
@@ -305,7 +306,7 @@ export function mountSearchSheet(root, { onClose, onSelect, loadCatalog, originS
             if (item.distanceLabel) {
                 const distance = document.createElement('span');
                 distance.className = 'destination-distance';
-                distance.textContent = item.distanceLabel;
+                distance.textContent = stripPixelWording(item.distanceLabel);
                 option.append(distance);
             }
 
