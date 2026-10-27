@@ -222,7 +222,41 @@
 
 .visitor-map .map-status {
     top: max(var(--space-8), env(safe-area-inset-top));
-    left: max(var(--space-8), env(safe-area-inset-left));
+    right: max(var(--space-8), env(safe-area-inset-right));
+    left: auto;
+}
+
+.map-compass {
+    position: absolute;
+    z-index: 640;
+    top: max(8px, env(safe-area-inset-top));
+    left: max(8px, env(safe-area-inset-left));
+    width: 56px;
+    height: 56px;
+    pointer-events: auto;
+}
+
+.map-compass-needle {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    padding-top: 4px;
+    border: 2px solid var(--text);
+    border-radius: 999px;
+    background:
+        linear-gradient(var(--danger), var(--danger)) center top / 2px 18px no-repeat,
+        var(--surface);
+    color: var(--text);
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+}
+
+.map-compass-n {
+    font-size: 14px;
+    line-height: 1;
 }
 
 .leaflet-control-zoom.leaflet-bar a,
