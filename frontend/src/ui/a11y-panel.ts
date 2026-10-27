@@ -20,8 +20,8 @@ export function mountA11yControl(slot) {
     button.setAttribute('aria-controls', 'a11y-panel');
     const icon = lucideIcon('accessibility');
     if (icon) {
-        icon.setAttribute('width', '48');
-        icon.setAttribute('height', '48');
+        icon.setAttribute('width', '32');
+        icon.setAttribute('height', '32');
         button.append(icon);
     }
 

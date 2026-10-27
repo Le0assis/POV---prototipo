@@ -3,6 +3,27 @@
    Controles, cartão, barra, folha, chips e o mapa Leaflet.
    ========================================================================== */
 
+.a11y-button,
+.qr-button {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--fab-size);
+    height: var(--fab-size);
+    min-width: var(--fab-size);
+    min-height: var(--fab-size);
+    padding: 0;
+    gap: var(--fab-gap);
+}
+
+.a11y-button svg,
+.qr-button svg {
+    width: var(--fab-icon);
+    height: var(--fab-icon);
+    flex: 0 0 auto;
+}
+
 .top-bar,
 .top-nav {
     position: fixed;

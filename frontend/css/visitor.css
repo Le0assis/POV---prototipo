@@ -211,7 +211,7 @@ body.visitor-app {
 .visitor-tools {
     display: flex;
     align-items: center;
-    gap: var(--space-8);
+    gap: var(--fab-gap);
     margin-left: auto;
     flex: 0 0 auto;
 }
@@ -245,17 +245,17 @@ body.visitor-app {
 .a11y-button,
 .qr-button {
     flex: 0 0 auto;
-    min-width: 48px;
-    min-height: 48px;
+    width: var(--fab-size);
+    height: var(--fab-size);
+    min-width: var(--fab-size);
+    min-height: var(--fab-size);
+    padding: 0;
 }
 
 .a11y-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 56px;
-    height: 56px;
-    padding: 0;
     color: var(--text);
     background: var(--surface);
     border: 2px solid var(--text);
@@ -263,27 +263,22 @@ body.visitor-app {
     cursor: pointer;
 }
 
-.a11y-button svg {
-    width: 48px;
-    height: 48px;
+.a11y-button svg,
+.qr-button svg {
+    width: var(--fab-icon);
+    height: var(--fab-icon);
 }
 
 .qr-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0;
     color: var(--primary);
     background: var(--surface);
     border: 2px solid var(--primary);
     border-radius: 999px;
     box-shadow: var(--shadow-soft);
     cursor: pointer;
-}
-
-.qr-button svg {
-    width: 24px;
-    height: 24px;
 }
 
 .visitor-main {
