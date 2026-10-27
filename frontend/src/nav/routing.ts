@@ -158,21 +158,45 @@ function edgePixels(edge, from, to, mapConfig) {
     const trace = recordedTrace(edge.connection);
     if (trace) {
         const local = edge.direction === 'reverse' ? reverseLocalPath(trace) : trace;
-        const anchor = anchorOf(from);
+        const anchor = anchorOf(from) || fallbackAnchor(mapConfig);
         if (anchor && local.length >= 2) {
             const pixels = local
                 .map((point) => metersToPixels(point, anchor, mapConfig))
                 .filter(Boolean);
             if (pixels.length >= 2) return pixels;
         }
+        if (local.length >= 2) {
+            return local.map((point) => ({ x: point.x, y: point.y }));
+        }
     }
     const start = anchorOf(from);
     const end = anchorOf(to);
-    if (!start || !end) return null;
+    if (start && end) {
+        return [
+            { x: start.pos_x_px, y: start.pos_y_px },
+            { x: end.pos_x_px, y: end.pos_y_px }
+        ];
+    }
+    const declared = Number(edge.weight);
+    if (!Number.isFinite(declared) || declared < 0) return null;
+    const origin = start || fallbackAnchor(mapConfig) || { pos_x_px: 0, pos_y_px: 0 };
+    const projected = metersToPixels({ x: declared, y: 0 }, origin, mapConfig);
+    if (projected) {
+        return [
+            { x: origin.pos_x_px, y: origin.pos_y_px },
+            projected
+        ];
+    }
     return [
-        { x: start.pos_x_px, y: start.pos_y_px },
-        { x: end.pos_x_px, y: end.pos_y_px }
+        { x: origin.pos_x_px, y: origin.pos_y_px },
+        { x: origin.pos_x_px + declared, y: origin.pos_y_px }
     ];
+}
+
+function fallbackAnchor(mapConfig) {
+    const scale = Number(mapConfig && mapConfig.px_per_m);
+    if (!Number.isFinite(scale) || scale === 0) return null;
+    return { pos_x_px: 0, pos_y_px: 0 };
 }
 
 function recordedTrace(connection) {

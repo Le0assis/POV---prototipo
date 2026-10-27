@@ -181,6 +181,29 @@ test('sem distância declarada, o peso é a reta em metros', () => {
     assert.equal(route.distance_m, 5);
 });
 
+test('gravação Quarto → Cozinha sem posição na planta ainda devolve a rota', () => {
+    const route = computeRoute({
+        origin: 'quarto',
+        destination: 'cozinha',
+        checkpoints: [
+            { slug: 'quarto', name: 'Quarto', pos_x_px: null, pos_y_px: null },
+            { slug: 'cozinha', name: 'Cozinha', pos_x_px: null, pos_y_px: null }
+        ],
+        connections: [{
+            edge_id: 7,
+            source: 'Quarto',
+            target: 'Cozinha',
+            origin: 'recorded',
+            distance_m: 6.5,
+            path: [{ x: 0, y: 0, t: 1 }, { x: 6.5, y: 0, t: 2 }]
+        }],
+        mapConfig: flat
+    });
+    assert.equal(route.distance_m, 6.5);
+    assert.equal(route.edges.length, 1);
+    closeTo(route.points, [{ x: 0, y: 0 }, { x: 65, y: 0 }]);
+});
+
 test('sem caminho devolve erro tipado', () => {
     const checkpoints = [cp('a', 'A', 0, 0), cp('b', 'B', 10, 0), cp('c', 'C', 40, 0)];
     const connections = [{ edge_id: 1, source: 'A', target: 'B', origin: 'manual', edge_distance_m: 4 }];

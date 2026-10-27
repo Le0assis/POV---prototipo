@@ -159,6 +159,23 @@ class TopologicalMap:
 
                     positions[neighbor] = (round(next_x, 2), round(next_y, 2))
 
+        # Aresta gravada fora do componente da Recepção (o BFS só anda
+        # para a frente). Sem isto, Quarto → Cozinha some do layout.
+        seen_pairs = {e["id"] for e in formatted_edges}
+        for edge in self.edges:
+            pair = tuple(sorted([edge.source, edge.target]))
+            if pair in seen_pairs:
+                continue
+            if edge.source not in self.nodes or edge.target not in self.nodes:
+                continue
+            formatted_edges.append({
+                "id": pair,
+                "source": edge.source,
+                "target": edge.target,
+                "distance_m": edge.distance_m,
+            })
+            seen_pairs.add(pair)
+
         # Garantia: Se existir algum nó isolado fora do BFS, adiciona ele no mapa
         for node in self.nodes:
             if node not in positions:
