@@ -244,9 +244,20 @@
     touch-action: manipulation;
 }
 
+.map-stage.map-preview {
+    height: 9rem;
+    min-height: 9rem;
+}
+
+.map-stage.map-preview .leaflet-control-zoom,
+.map-stage.map-preview .leaflet-control-attribution {
+    display: none;
+}
+
 @media (max-width: 900px) {
     .map-layout { grid-template-columns: 1fr; }
     .map-stage { height: 420px; }
+    .map-stage.map-preview { height: 9rem; min-height: 9rem; }
 
     .map-layers-toggle {
         display: inline-flex;

@@ -44,6 +44,7 @@ window.addEventListener('pagehide', stopSensors);
 async function init() {
     insertTopNav('locate');
     const host = $('#floor-map');
+    if (host) host.classList.add('map-preview');
     const status = mountMapStatus(host);
     try {
         state.floor = createFloorMap(host);
