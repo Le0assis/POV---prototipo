@@ -46,7 +46,7 @@ export function mountCameraOverlay(root, { onClose, onSubmit, onCameraFailure } 
     const manualLabel = document.createElement('label');
     manualLabel.className = 'camera-manual-label';
     manualLabel.setAttribute('for', 'camera-manual-code');
-    manualLabel.textContent = 'Código do ponto';
+    manualLabel.textContent = 'Nome do ponto';
     const manualInput = document.createElement('input');
     manualInput.id = 'camera-manual-code';
     manualInput.className = 'text-field';
@@ -55,13 +55,13 @@ export function mountCameraOverlay(root, { onClose, onSubmit, onCameraFailure } 
     manualInput.autocapitalize = 'off';
     manualInput.spellcheck = false;
     manualInput.enterKeyHint = 'go';
-    manualInput.placeholder = 'Código do ponto';
-    manualInput.setAttribute('aria-label', 'Código do ponto');
+    manualInput.placeholder = 'Nome do ponto';
+    manualInput.setAttribute('aria-label', 'Nome do ponto');
     const manualSubmit = document.createElement('button');
     manualSubmit.type = 'submit';
     manualSubmit.className = 'btn btn-primary';
-    manualSubmit.textContent = 'Usar este código';
-    manualSubmit.setAttribute('aria-label', 'Usar este código');
+    manualSubmit.textContent = 'Usar este nome';
+    manualSubmit.setAttribute('aria-label', 'Usar este nome');
     manual.append(manualLabel, manualInput, manualSubmit);
 
     const actions = document.createElement('div');
@@ -78,8 +78,8 @@ export function mountCameraOverlay(root, { onClose, onSubmit, onCameraFailure } 
     const typeCode = document.createElement('button');
     typeCode.type = 'button';
     typeCode.className = 'btn btn-secondary';
-    typeCode.textContent = 'Digitar código';
-    typeCode.setAttribute('aria-label', 'Digitar código');
+    typeCode.textContent = 'Digitar nome';
+    typeCode.setAttribute('aria-label', 'Digitar nome');
     typeCode.setAttribute('aria-expanded', 'false');
     typeCode.setAttribute('aria-controls', 'camera-manual-code');
 

@@ -284,6 +284,7 @@ export function mountSearchSheet(root, { onClose, onSelect, loadCatalog, originS
             option.setAttribute('role', 'option');
             option.setAttribute('aria-selected', index === activeIndex ? 'true' : 'false');
             option.dataset.slug = item.slug;
+            option.setAttribute('aria-label', item.name);
             option.tabIndex = -1;
 
             const copy = document.createElement('span');

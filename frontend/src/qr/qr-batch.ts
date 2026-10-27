@@ -48,7 +48,7 @@ export function qrCheckpoints(list) {
         .filter(Boolean);
 }
 
-/** Filtro por nome ou categoria (rótulo e código). */
+/** Filtro pelo nome do ponto ou pelo rótulo da categoria. */
 export function filterQrCheckpoints(rows, query) {
     const needle = String(query || '').trim().toLowerCase();
     const list = Array.isArray(rows) ? rows : [];

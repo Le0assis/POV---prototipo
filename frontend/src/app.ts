@@ -610,7 +610,7 @@ function cameraErrorForm(kept) {
     form.className = 'camera-error-form';
     const label = document.createElement('label');
     label.setAttribute('for', 'camera-error-code');
-    label.textContent = 'Código do ponto';
+    label.textContent = 'Nome do ponto';
     const input = document.createElement('input');
     input.id = 'camera-error-code';
     input.className = 'text-field';
@@ -618,14 +618,14 @@ function cameraErrorForm(kept) {
     input.autocomplete = 'off';
     input.autocapitalize = 'off';
     input.spellcheck = false;
-    input.placeholder = 'Código do ponto';
-    input.setAttribute('aria-label', 'Código do ponto');
+    input.placeholder = 'Nome do ponto';
+    input.setAttribute('aria-label', 'Nome do ponto');
     input.value = kept;
     const submit = document.createElement('button');
     submit.type = 'submit';
     submit.className = 'btn btn-primary';
-    submit.textContent = 'Usar este código';
-    submit.setAttribute('aria-label', 'Usar este código');
+    submit.textContent = 'Usar este nome';
+    submit.setAttribute('aria-label', 'Usar este nome');
     form.append(label, input, submit);
     form.addEventListener('submit', (event) => {
         event.preventDefault();
