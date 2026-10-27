@@ -2,11 +2,18 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
 import {
+    MAP_CONFIG_HELP,
     PX_INVALID_MESSAGE,
     PX_MISSING_MESSAGE,
     formatMapConfigSaveError,
     validateMapConfigInput
 } from '../src/pages/map-config-form.ts';
+
+test('dicas da planta explicam imagem, px_per_m e rotação', () => {
+    assert.match(MAP_CONFIG_HELP.plan_image, /vista de cima/);
+    assert.match(MAP_CONFIG_HELP.px_per_m, /px_per_m = 100/);
+    assert.match(MAP_CONFIG_HELP.rotation_deg, /sentido horário/);
+});
 
 test('px_per_m ausente ou <= 0 explica o 422', () => {
     assert.equal(validateMapConfigInput({ planImage: 'assets/planta.png', rawPx: '', degrees: 0 }).error, PX_MISSING_MESSAGE);

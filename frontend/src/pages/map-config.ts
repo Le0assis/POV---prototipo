@@ -5,6 +5,7 @@ import { whenAdminGranted } from '../core/role-toggle.js';
 import { toast } from '../core/toast.js';
 import { normalizeMapConfig } from '../route/model.js';
 import {
+    MAP_CONFIG_HELP,
     degreesFromRadians,
     formatMapConfigSaveError,
     validateMapConfigInput
@@ -14,7 +15,41 @@ document.addEventListener('DOMContentLoaded', init);
 
 function init() {
     insertTopNav('admin');
+    bindFieldHelp();
     whenAdminGranted(start);
+}
+
+function bindFieldHelp() {
+    Object.entries(MAP_CONFIG_HELP).forEach(([key, text]) => {
+        const tip = document.getElementById(`${key}-help`);
+        const input = document.getElementById(key === 'rotation_deg' ? 'rotation-deg' : key === 'px_per_m' ? 'px-per-m' : 'plan-image');
+        const button = document.querySelector(`[aria-controls="${key}-help"]`);
+        if (tip) tip.textContent = text;
+        if (input) input.setAttribute('aria-describedby', `${key}-help`);
+        if (button) button.title = text;
+    });
+    document.querySelectorAll('.field-help').forEach((button) => {
+        const tipId = button.getAttribute('aria-controls');
+        const tip = tipId ? document.getElementById(tipId) : null;
+        if (!tip) return;
+        button.addEventListener('click', () => {
+            const open = !tip.classList.contains('is-open');
+            closeFieldHelp();
+            tip.classList.toggle('is-open', open);
+            button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeFieldHelp();
+    });
+}
+
+function closeFieldHelp() {
+    document.querySelectorAll('.field-tip.is-open').forEach((tip) => tip.classList.remove('is-open'));
+    document.querySelectorAll('.field-help[aria-expanded="true"]').forEach((button) => {
+        button.setAttribute('aria-expanded', 'false');
+    });
 }
 
 async function start() {

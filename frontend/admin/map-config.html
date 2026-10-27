@@ -51,19 +51,31 @@
     <main class="home hidden" id="map-config-app">
         <h1>Configurar planta</h1>
         <form class="card" id="form-map-config" novalidate>
-            <label class="form-group" for="plan-image">
-                Caminho da imagem
-                <input id="plan-image" name="plan_image" type="text" placeholder="assets/planta.png" autocomplete="off">
-            </label>
+            <div class="form-group">
+                <div class="field-label-row">
+                    <label for="plan-image">Caminho da imagem</label>
+                    <button type="button" class="field-help" aria-expanded="false" aria-controls="plan_image-help">?</button>
+                </div>
+                <input id="plan-image" name="plan_image" type="text" placeholder="assets/planta.png" autocomplete="off" aria-describedby="plan_image-help">
+                <p class="field-tip" id="plan_image-help" role="tooltip"></p>
+            </div>
             <p class="hint">Caminho relativo ao frontend, servido junto com as páginas. Sem upload.</p>
-            <label class="form-group" for="px-per-m">
-                Pixels por metro
-                <input id="px-per-m" name="px_per_m" type="number" step="0.01" inputmode="decimal">
-            </label>
-            <label class="form-group" for="rotation-deg">
-                Rotação da planta (graus, anti-horário)
-                <input id="rotation-deg" name="rotation_deg" type="number" step="0.1" value="0">
-            </label>
+            <div class="form-group">
+                <div class="field-label-row">
+                    <label for="px-per-m">Pixels por metro</label>
+                    <button type="button" class="field-help" aria-expanded="false" aria-controls="px_per_m-help">?</button>
+                </div>
+                <input id="px-per-m" name="px_per_m" type="number" step="0.01" inputmode="decimal" aria-describedby="px_per_m-help">
+                <p class="field-tip" id="px_per_m-help" role="tooltip"></p>
+            </div>
+            <div class="form-group">
+                <div class="field-label-row">
+                    <label for="rotation-deg">Rotação da planta (graus, anti-horário)</label>
+                    <button type="button" class="field-help" aria-expanded="false" aria-controls="rotation_deg-help">?</button>
+                </div>
+                <input id="rotation-deg" name="rotation_deg" type="number" step="0.1" value="0" aria-describedby="rotation_deg-help">
+                <p class="field-tip" id="rotation_deg-help" role="tooltip"></p>
+            </div>
             <p class="hint">rotation_rad: <span class="mono" id="rotation-rad">0.0000</span></p>
             <p class="hint" id="map-config-error" role="alert"></p>
             <button type="submit" class="btn btn-primary">Salvar planta</button>
