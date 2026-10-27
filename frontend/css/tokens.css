@@ -57,6 +57,10 @@
     --fab-icon: 32px;
     --fab-gap: var(--space-8);
 
+    /* Controles do Leaflet ficam abaixo de menu, painel, fluxo e folha. */
+    --z-map-control: 400;
+    --z-map-chrome: 500;
+
     /* Folhas que ainda usam os nomes antigos (home, rotas, bússola). */
     --muted: var(--text-muted);
     --ok: var(--success-ink);

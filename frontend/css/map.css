@@ -91,7 +91,7 @@
 
 .map-layers {
     position: absolute;
-    z-index: 650;
+    z-index: var(--z-map-chrome);
     top: 8px;
     right: 8px;
     left: auto;
@@ -159,7 +159,7 @@
     top: var(--space-8);
     right: var(--space-8);
     left: auto;
-    z-index: 800;
+    z-index: var(--z-map-chrome);
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
@@ -226,9 +226,17 @@
     left: auto;
 }
 
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-control,
+.leaflet-control-zoom,
+.leaflet-control-attribution {
+    z-index: var(--z-map-control);
+}
+
 .map-compass {
     position: absolute;
-    z-index: 640;
+    z-index: var(--z-map-chrome);
     top: max(8px, env(safe-area-inset-top));
     left: max(8px, env(safe-area-inset-left));
     width: 56px;
