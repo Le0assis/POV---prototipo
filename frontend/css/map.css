@@ -157,21 +157,30 @@
 .map-status {
     position: absolute;
     top: var(--space-8);
-    left: var(--space-8);
+    right: var(--space-8);
+    left: auto;
     z-index: 800;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: var(--space-8);
-    max-width: min(20rem, calc(100% - 8.5rem));
+    gap: var(--space-4);
+    width: max-content;
+    max-width: min(16rem, calc(100% - 4.5rem));
     margin: 0;
-    padding: var(--space-8) var(--space-12);
+    padding: var(--space-4) var(--space-8);
     color: var(--text);
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: 999px;
     box-shadow: var(--shadow);
     pointer-events: auto;
+}
+
+.map-status-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .map-status[hidden] {
@@ -182,18 +191,33 @@
     border-color: var(--danger);
 }
 
-.map-status-retry {
+.map-status-retry,
+.map-status-close {
+    flex: 0 0 auto;
     min-width: 44px;
     min-height: 44px;
     touch-action: manipulation;
 }
 
+.map-status-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
 .map-stage .map-status {
-    top: auto;
+    top: var(--space-8);
     right: var(--space-8);
-    bottom: 2.75rem;
-    left: var(--space-8);
-    max-width: none;
+    bottom: auto;
+    left: auto;
+    max-width: min(16rem, calc(100% - 4.5rem));
 }
 
 .visitor-map .map-status {
