@@ -26,7 +26,7 @@ function bindFieldHelp() {
         const button = document.querySelector(`[aria-controls="${key}-help"]`);
         if (tip) tip.textContent = text;
         if (input) input.setAttribute('aria-describedby', `${key}-help`);
-        if (button) button.title = text;
+        if (button) button.setAttribute('title', text);
     });
     document.querySelectorAll('.field-help').forEach((button) => {
         const tipId = button.getAttribute('aria-controls');

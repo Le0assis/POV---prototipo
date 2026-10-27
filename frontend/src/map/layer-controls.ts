@@ -127,8 +127,12 @@ function mountCompass(host) {
     host.addEventListener('pov-plan-rotation', readRotation);
     if (host.dataset && host.dataset.planRotation) readRotation(null);
 
-    const needsGesture = typeof DeviceOrientationEvent !== 'undefined'
-        && typeof DeviceOrientationEvent.requestPermission === 'function';
+    const orientationEvent = typeof DeviceOrientationEvent === 'undefined'
+        ? null
+        : DeviceOrientationEvent as any;
+    const needsGesture = Boolean(
+        orientationEvent && typeof orientationEvent.requestPermission === 'function'
+    );
     if (!needsGesture) void heading.start();
     needle.addEventListener('click', () => {
         void heading.start();
