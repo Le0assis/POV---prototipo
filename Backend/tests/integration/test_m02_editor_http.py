@@ -430,6 +430,20 @@ class _PositionCursor:
             raise step
         self.rowcount = int(step)
 
+    def fetchall(self):
+        if self.rowcount <= 0:
+            return []
+        return [{
+            "id": 1,
+            "name": "Sala",
+            "slug": "sala",
+            "building_id": 1,
+            "pos_x_px": 1.0,
+            "pos_y_px": 2.0,
+            "category_code": None,
+            "category_label": None,
+        }]
+
 
 class _PositionConnection:
     def commit(self):
@@ -479,12 +493,12 @@ def test_position_patch_missing_checkpoint_is_404(monkeypatch):
 
 def test_position_patch_sql_error_is_500_not_404(monkeypatch, caplog):
     with caplog.at_level("ERROR"):
-        cursor, response = _patch_position_request(monkeypatch, [_lock_error(1064)])
+        cursor, response = _patch_position_request(monkeypatch, [1, _lock_error(1064)])
     assert response.status_code == 500
     assert response.json() == {"detail": "Erro interno."}
     assert "Checkpoint não encontrado." not in response.text
     assert "Falha ao gravar a posição do checkpoint." in caplog.text
-    assert cursor.calls == 1
+    assert cursor.calls == 2
 
 
 def test_post_route_returns_the_inserted_row(monkeypatch):

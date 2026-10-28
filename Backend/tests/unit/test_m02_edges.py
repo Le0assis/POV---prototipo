@@ -76,30 +76,29 @@ def test_recorded_distance_is_median_and_active_is_latest():
     assert resolved["active_trace_id"] == 4
 
 
-def test_edge_matches_the_checkpoint_name_byte_for_byte():
-    """A aresta canônica é o nome exato. ``sala`` não reescreve ``Sala``."""
+def test_edge_matches_checkpoint_ignoring_case_and_space():
+    """``quarto``, `` quarto `` e ``QUARTO`` são o mesmo nó. O rótulo fica o primeiro."""
     topo = TopologicalMap()
     topo.add_checkpoint("Sala")
     topo.add_checkpoint("Quarto")
-    topo.add_checkpoint("Sala")
+    topo.add_checkpoint(" sala ")
+    topo.add_checkpoint("QUARTO")
     assert list(topo.nodes) == ["Sala", "Quarto"]
     assert topo.canonical_name("Sala") == "Sala"
-    assert topo.canonical_name("sala") is None
-    with pytest.raises(ValueError):
-        topo.load_directed_edges([
-            {"id": 1, "source_node": "Sala", "target_node": "Quarto", "distance_m": 3.0, "heading_rad": 0.1},
-            {"id": 2, "source_node": "sala", "target_node": "quarto", "distance_m": 9.0, "heading_rad": 0.4},
-        ])
+    assert topo.canonical_name("  sala ") == "Sala"
+    assert topo.canonical_name("QUARTO") == "Quarto"
+    topo.load_directed_edges([
+        {"id": 1, "source_node": "Sala", "target_node": "Quarto", "distance_m": 3.0, "heading_rad": 0.1},
+        {"id": 2, "source_node": "sala", "target_node": "quarto", "distance_m": 9.0, "heading_rad": 0.4},
+    ])
     assert [(edge.source, edge.target, edge.distance_m) for edge in topo.edges] == [
-        ("Sala", "Quarto", 3.0),
+        ("Sala", "Quarto", 9.0),
     ]
-    assert topo.get_outgoing_edges("Sala")[0].target == "Quarto"
-    with pytest.raises(ValueError):
-        topo.get_outgoing_edges("sala")
+    assert topo.get_outgoing_edges("sala")[0].target == "Quarto"
     from map.router import TopologicalRouter
     router = TopologicalRouter(topo)
     assert router.calculate_route("Sala", "Quarto") == ["Sala", "Quarto"]
-    assert router.calculate_route("sala", "quarto") == []
+    assert router.calculate_route(" sala ", "QUARTO") == ["Sala", "Quarto"]
 
 
 def test_accents_stay_distinct_from_case():
@@ -108,11 +107,13 @@ def test_accents_stay_distinct_from_case():
     topo.add_checkpoint("Recepcao")
     assert set(topo.nodes) == {"Recepção", "Recepcao"}
     topo.upsert_directed_edge("Recepcao", "Recepção", 1.0, 0.0)
-    with pytest.raises(ValueError):
-        topo.upsert_directed_edge("recepcao", "Recepção", 2.0, 0.0)
+    topo.upsert_directed_edge("recepcao", "Recepção", 2.0, 0.0)
     assert [(edge.source, edge.target, edge.distance_m) for edge in topo.edges] == [
-        ("Recepcao", "Recepção", 1.0),
+        ("Recepcao", "Recepção", 2.0),
     ]
+    assert topo.canonical_name("recepção") == "Recepção"
+    assert topo.canonical_name("recepcao") == "Recepcao"
+    assert topo.canonical_name("Recepção") != topo.canonical_name("Recepcao")
 
 
 def test_load_does_not_mirror_duplicate_rows():

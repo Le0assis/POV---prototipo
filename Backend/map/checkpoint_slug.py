@@ -16,6 +16,26 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _FALLBACK = "checkpoint"
 
 
+def display_checkpoint_name(name: str | None) -> str:
+    """Rótulo para gravar um nome novo.
+
+    ``strip`` e um espaço entre palavras. A caixa e o acento ficam como
+    foram digitados. Não é a chave de comparação.
+    """
+    return " ".join(str(name or "").strip().split())
+
+
+def checkpoint_name_key(name: str | None) -> str:
+    """Chave de comparação. Não substitui o nome exibido.
+
+    ``strip``, colapso de espaços e ``casefold`` (Unicode; melhor que
+    ``lower``). O acento fica: ``Recepção`` e ``Recepcao`` já podem ser
+    checkpoints diferentes, cada um com o seu slug. Tirar o acento
+    fundiria esses nomes.
+    """
+    return display_checkpoint_name(name).casefold()
+
+
 def slugify(name: str, max_length: int = SLUG_MAX_LENGTH) -> str:
     """Forma o slug base. Não consulta o banco e não numera colisão."""
     decomposed = unicodedata.normalize("NFD", name or "")

@@ -293,11 +293,19 @@ def test_create_checkpoint_conflict_is_409(monkeypatch):
     assert response.status_code != 500
 
 
-def test_checkpoint_routes_404_when_the_name_case_differs(monkeypatch):
+def test_checkpoint_routes_match_case_and_keep_the_stored_label(monkeypatch):
     monkeypatch.setenv("EDITOR_PASSWORD_HASH", PASSWORD_HASH)
     store = CollationStore()
+    app_module.topo_map.add_checkpoint("Sala")
     monkeypatch.setattr(app_module, "map_db_manager", MapDatabaseManager(store))
     client = TestClient(app)
+    missed = client.patch(
+        "/api/checkpoints/S%C3%A1la/position",
+        json={"pos_x_px": 4.0, "pos_y_px": 4.0},
+        headers=OK,
+    )
+    assert missed.status_code == 404
+    assert store.checkpoint["pos_x_px"] == 1.0
     position = client.patch(
         "/api/checkpoints/sala/position",
         json={"pos_x_px": 9.0, "pos_y_px": 8.0},
@@ -308,14 +316,9 @@ def test_checkpoint_routes_404_when_the_name_case_differs(monkeypatch):
         json={"category_code": None},
         headers=OK,
     )
-    assert position.status_code == 404
-    assert category.status_code == 404
-    assert store.checkpoint["pos_x_px"] == 1.0
-    saved = client.patch(
-        "/api/checkpoints/Sala/position",
-        json={"pos_x_px": 9.0, "pos_y_px": 8.0},
-        headers=OK,
-    )
-    assert saved.status_code == 200
-    assert saved.json()["checkpoint"]["name"] == "Sala"
+    assert position.status_code == 200
+    assert position.json()["checkpoint"]["name"] == "Sala"
+    assert category.status_code == 200
+    assert category.json()["checkpoint"]["name"] == "Sala"
+    assert store.checkpoint["name"] == "Sala"
     assert store.checkpoint["pos_x_px"] == 9.0

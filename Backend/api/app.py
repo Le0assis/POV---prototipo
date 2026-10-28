@@ -16,9 +16,10 @@ from datasets.ManagerDatabase import (
     drain_pool,
     request_session,
 )
-from map.checkpoint_slug import SLUG_MAX_LENGTH
+from map.checkpoint_slug import SLUG_MAX_LENGTH, display_checkpoint_name
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
+from map.topological_matcher import PositionUndefined
 from map.router import TopologicalRouter
 from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
@@ -207,8 +208,7 @@ def _load_map_once() -> None:
 
 boot_or_exit(_load_map_once)
 
-starting_node = "Recepcao"
-walk_sessions = WalkSessions(topo_map, default_start=starting_node)
+walk_sessions = WalkSessions(topo_map)
 
 # --- ROTAS DA API ---
 
@@ -256,7 +256,7 @@ def health():
 
 
 def _canonical_pair(source: str, target: str, *, missing: str) -> tuple[str, str]:
-    """Nomes exatos do checkpoint. ``Sala`` não casa com ``sala``."""
+    """Rótulos já gravados. ``quarto`` casa com ``Quarto``. Acento continua distinto."""
     resolved_source = topo_map.canonical_name(source)
     resolved_target = topo_map.canonical_name(target)
     if resolved_source is None or resolved_target is None:
@@ -288,7 +288,7 @@ def create_checkpoint(
     checkpoint: CheckpointSchema,
     _editor: None = Depends(require_editor_password),
 ):
-    node_name = checkpoint.name.strip()
+    node_name = display_checkpoint_name(checkpoint.name)
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     
@@ -314,6 +314,8 @@ def create_checkpoint(
             detail="O slug gerado ainda está em uso neste prédio. Tente de novo.",
         ) from exc
     if success:
+        if isinstance(success, dict) and success.get("name"):
+            node_name = success["name"]
         if topo_map.canonical_name(node_name) is None:
             topo_map.add_checkpoint(node_name)
         body = {
@@ -378,11 +380,14 @@ def localize_user(
     try:
         step_event = StepEventAdapter(step_length_m=sensor_data.step_length_m)
         with hold_session(session_id, request) as state:
-            current_node = state.matcher.process_step(
-                step=step_event,
-                current_yaw_rad=sensor_data.yaw_rad,
-            )
-            if state.visited_path[-1] != current_node:
+            try:
+                current_node = state.matcher.process_step(
+                    step=step_event,
+                    current_yaw_rad=sensor_data.yaw_rad,
+                )
+            except PositionUndefined as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if not state.visited_path or state.visited_path[-1] != current_node:
                 state.visited_path.append(current_node)
             distance_m = state.matcher.accumulated_distance
         return {
@@ -531,26 +536,34 @@ def delete_route(
 
     return {"status": "success", "message": "Rota removida com sucesso."}
 
-# Modificar reset para aceitar start_node dinâmico
 @app.post("/api/reset")
 def reset_session(
     request: Request,
-    start_node: str = Query(default="Recepcao", max_length=NAME_MAX),
+    start_node: str | None = Query(default=None, max_length=NAME_MAX),
     _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
     session_id: str = Depends(require_session_id),
 ):
-    """Zera o matcher e o caminho desta sessão. As outras ficam como estão."""
-    resolved_start = topo_map.canonical_name(start_node)
-    if resolved_start is None:
-        start_node = next(iter(topo_map.nodes), starting_node)
+    """Zera o matcher desta sessão. Sem nome, a posição fica vazia."""
+    asked = (start_node or "").strip()
+    if not asked:
+        resolved = ""
     else:
-        start_node = resolved_start
-    with hold_session(session_id, request, reset=True, start_node=start_node) as state:
-        started = state.visited_path[0]
+        resolved = topo_map.canonical_name(asked)
+        if resolved is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Checkpoint não encontrado. Informe um ponto que já existe no mapa.",
+            )
+    with hold_session(session_id, request, reset=True, start_node=resolved or None) as state:
+        started = state.visited_path[0] if state.visited_path else None
+    if started:
+        message = f"Posição definida em '{started}'."
+    else:
+        message = "Nenhuma posição definida. Informe o checkpoint ao reiniciar a posição."
     return {
         "status": "success",
-        "message": "Estado do PDR e sensores resetados.",
+        "message": message,
         "start_node": started,
     }
 
@@ -567,11 +580,13 @@ def get_current_location(
     session_id: str = Depends(require_session_id),
 ):
     with hold_session(session_id, request) as state:
+        current = state.matcher.current_node or None
         return {
-            "current_node": state.matcher.current_node,
+            "current_node": current,
             "accumulated_distance_m": state.matcher.accumulated_distance,
             "steps_count": getattr(state.matcher, "steps_count", 0),
             "visited_path": list(state.visited_path),
+            "detail": None if current else "Nenhuma posição definida. Informe o checkpoint ao reiniciar a posição.",
         }
 
 def _checkpoint_meta(raw):
@@ -658,7 +673,7 @@ def update_checkpoint_category(
     _editor: None = Depends(require_editor_password),
 ):
     """Define ou limpa a categoria. ``category_code`` null remove. Slug não entra no corpo."""
-    node_name = name.strip()
+    node_name = display_checkpoint_name(name)
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     try:
@@ -686,16 +701,17 @@ def update_checkpoint_position(
     _editor: None = Depends(require_editor_password),
 ):
     """Posição do checkpoint na planta (origem no canto superior esquerdo, y para baixo)."""
-    node_name = name.strip()
+    node_name = display_checkpoint_name(name)
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     saved = map_db_manager.update_checkpoint_position(node_name, body.pos_x_px, body.pos_y_px)
     if not saved:
         raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
+    shown = topo_map.canonical_name(node_name) or node_name
     return {
         "status": "success",
         "checkpoint": {
-            "name": node_name,
+            "name": shown,
             "pos_x_px": body.pos_x_px,
             "pos_y_px": body.pos_y_px,
         },

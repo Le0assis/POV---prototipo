@@ -11,7 +11,7 @@ export const PX_INVALID_MESSAGE = 'px_per_m deve ser um número maior que zero. 
 export const MAP_CONFIG_HELP = {
     plan_image: 'Use uma imagem vista de cima, reta, sem perspectiva (PNG ou JPG da planta do prédio ou foto bem alinhada), com o norte para cima se possível.',
     px_per_m: 'Quantos pixels da imagem equivalem a 1 metro. Exemplo: uma parede de 4 m mede 400 px na imagem, então px_per_m = 100.',
-    rotation_deg: 'Quanto girar a planta para alinhar com o norte real, em graus no sentido horário.'
+    rotation_deg: 'Quanto girar a planta para alinhar com o norte real, em graus no sentido anti-horário. O valor gravado é rotation_rad, com o mesmo sentido.'
 };
 
 export function validateMapConfigInput({ planImage, rawPx, degrees }) {

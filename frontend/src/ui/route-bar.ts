@@ -7,8 +7,9 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
     const compact = document.createElement('button');
     compact.type = 'button';
     compact.className = 'route-compact';
-    compact.textContent = 'Leia um QR para saber onde você está';
-    compact.setAttribute('aria-label', 'Leia um QR para saber onde você está');
+    const emptyOrigin = 'Nenhuma posição definida. Leia um QR para saber onde você está ou digite o nome do ponto.';
+    compact.textContent = emptyOrigin;
+    compact.setAttribute('aria-label', emptyOrigin);
 
     const expanded = document.createElement('div');
     expanded.className = 'route-expanded';
@@ -133,7 +134,7 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
             meta.hidden = true;
         }
 
-        const originLabel = hasOrigin ? `${current.origin.label} (QR)` : 'Toque para ler o QR';
+        const originLabel = hasOrigin ? `${current.origin.label} (QR)` : 'Posição não definida';
         const destinationLabel = hasDestination ? current.destination.label : 'Toque para buscar';
         originKicker.textContent = hasOrigin ? 'Origem:' : 'Origem';
         originValue.textContent = originLabel;
@@ -143,8 +144,8 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
         origin.setAttribute(
             'aria-label',
             hasOrigin
-                ? `Origem: ${current.origin.label} (QR). Toque para ler o QR.`
-                : 'Origem. Toque para ler o QR.'
+                ? `Origem: ${current.origin.label} (QR). Toque para ler o QR ou digitar o nome do ponto.`
+                : 'Origem. Posição não definida. Toque para ler o QR ou digitar o nome do ponto.'
         );
         destination.setAttribute(
             'aria-label',
