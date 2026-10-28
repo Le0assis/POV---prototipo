@@ -1,4 +1,4 @@
-"""O seed confere a caixa antes de gravar e desfaz a transação se errar."""
+"""O seed reusa a mesma chave e desfaz a transação se a unique juntar outra grafia."""
 
 from __future__ import annotations
 
@@ -126,38 +126,33 @@ def test_seed_name_lookup_is_binary():
     assert exact.rows[0] == {"name": "Recepcao", "slug": "recepcao"}
 
 
-def test_case_conflict_stops_before_any_insert():
+def test_case_variant_reuses_the_stored_label_and_writes_edges():
     original = [{"name": "recepcao", "slug": "recepcao"}]
     different_case = _SeedDB(original)
-    with pytest.raises(SeedConflict) as exc:
-        seed(different_case)
-    message = str(exc.value)
-    assert message == (
-        "Conflito de maiúsculas: 'Recepcao' já está como 'recepcao'. "
-        "Nada foi gravado e nenhuma aresta foi criada."
-    )
-    assert _inserted(different_case) == []
-    assert _edge_calls(different_case) == []
-    assert _tx(different_case) == []
-    assert different_case.rows == original
+    seed(different_case)
+    assert "Recepcao" not in _inserted(different_case)
+    assert "recepcao" not in _inserted(different_case)
+    assert _edge_calls(different_case)[0][0] == "recepcao"
+    assert _edge_calls(different_case)[0][1] == "Corredor A"
+    assert _tx(different_case) == ["begin", "commit"]
+    assert different_case.rows[0] == {"name": "recepcao", "slug": "recepcao"}
 
 
-def test_every_case_conflict_is_reported_before_the_transaction():
+def test_every_case_variant_keeps_the_stored_label():
     original = [
         {"name": "recepcao", "slug": "recepcao"},
         {"name": "sala 101", "slug": "sala-101"},
     ]
     db = _SeedDB(original)
-    with pytest.raises(SeedConflict) as exc:
-        seed(db)
-    assert str(exc.value) == (
-        "Conflito de maiúsculas: 'Recepcao' já está como 'recepcao'; "
-        "'Sala 101' já está como 'sala 101'. "
-        "Nada foi gravado e nenhuma aresta foi criada."
-    )
-    assert _inserted(db) == []
-    assert "begin" not in db.log
-    assert db.rows == original
+    seed(db)
+    assert "Recepcao" not in _inserted(db)
+    assert "Sala 101" not in _inserted(db)
+    assert _tx(db) == ["begin", "commit"]
+    stored = {row["name"] for row in db.rows}
+    assert "recepcao" in stored
+    assert "sala 101" in stored
+    assert "Recepcao" not in stored
+    assert "Sala 101" not in stored
 
 
 def test_accent_collision_rolls_the_transaction_back():
@@ -196,12 +191,13 @@ def test_failed_commit_rolls_back():
 
 
 def test_cli_conflict_exits_with_only_the_message(capsys):
-    original = [{"name": "recepcao", "slug": "recepcao"}]
+    original = [{"name": "Corredor Á", "slug": "corredor-a"}]
     db = _SeedDB(original)
     assert cli(db) == 1
     captured = capsys.readouterr()
     assert captured.err == (
-        "Conflito de maiúsculas: 'Recepcao' já está como 'recepcao'. "
+        "Conflito de grafia: 'Corredor A' não foi gravado. "
+        "A unique de checkpoints.name junta essa grafia com outra já existente. "
         "Nada foi gravado e nenhuma aresta foi criada.\n"
     )
     assert "Traceback" not in captured.err

@@ -16,7 +16,7 @@ from datasets.ManagerDatabase import (
     drain_pool,
     request_session,
 )
-from map.checkpoint_slug import SLUG_MAX_LENGTH
+from map.checkpoint_slug import SLUG_MAX_LENGTH, display_checkpoint_name
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.topological_matcher import PositionUndefined
@@ -256,7 +256,7 @@ def health():
 
 
 def _canonical_pair(source: str, target: str, *, missing: str) -> tuple[str, str]:
-    """Nomes exatos do checkpoint. ``Sala`` não casa com ``sala``."""
+    """Rótulos já gravados. ``quarto`` casa com ``Quarto``. Acento continua distinto."""
     resolved_source = topo_map.canonical_name(source)
     resolved_target = topo_map.canonical_name(target)
     if resolved_source is None or resolved_target is None:
@@ -288,7 +288,7 @@ def create_checkpoint(
     checkpoint: CheckpointSchema,
     _editor: None = Depends(require_editor_password),
 ):
-    node_name = checkpoint.name.strip()
+    node_name = display_checkpoint_name(checkpoint.name)
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     
@@ -314,6 +314,8 @@ def create_checkpoint(
             detail="O slug gerado ainda está em uso neste prédio. Tente de novo.",
         ) from exc
     if success:
+        if isinstance(success, dict) and success.get("name"):
+            node_name = success["name"]
         if topo_map.canonical_name(node_name) is None:
             topo_map.add_checkpoint(node_name)
         body = {
@@ -671,7 +673,7 @@ def update_checkpoint_category(
     _editor: None = Depends(require_editor_password),
 ):
     """Define ou limpa a categoria. ``category_code`` null remove. Slug não entra no corpo."""
-    node_name = name.strip()
+    node_name = display_checkpoint_name(name)
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     try:
@@ -699,16 +701,17 @@ def update_checkpoint_position(
     _editor: None = Depends(require_editor_password),
 ):
     """Posição do checkpoint na planta (origem no canto superior esquerdo, y para baixo)."""
-    node_name = name.strip()
+    node_name = display_checkpoint_name(name)
     if not node_name:
         raise HTTPException(status_code=400, detail="O nome do checkpoint não pode ser vazio.")
     saved = map_db_manager.update_checkpoint_position(node_name, body.pos_x_px, body.pos_y_px)
     if not saved:
         raise HTTPException(status_code=404, detail="Checkpoint não encontrado.")
+    shown = topo_map.canonical_name(node_name) or node_name
     return {
         "status": "success",
         "checkpoint": {
-            "name": node_name,
+            "name": shown,
             "pos_x_px": body.pos_x_px,
             "pos_y_px": body.pos_y_px,
         },

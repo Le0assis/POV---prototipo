@@ -168,6 +168,23 @@ def test_save_assigns_slug_once_and_rename_keeps_it():
     assert fresh["slug"] == "recepcao-3"
 
 
+def test_save_reuses_case_and_space_and_keeps_the_first_label():
+    store = _Store()
+    manager = MapDatabaseManager(store)
+    created = manager.save_checkpoint("Quarto")
+    again = manager.save_checkpoint("  QUARTO ")
+    lower = manager.save_checkpoint("quarto")
+    assert created["name"] == "Quarto"
+    assert again["name"] == "Quarto"
+    assert again["slug"] == created["slug"]
+    assert lower["name"] == "Quarto"
+    assert len(store.checkpoints) == 1
+    accent = manager.save_checkpoint("Quartô")
+    assert accent["name"] == "Quartô"
+    assert accent["slug"] == "quarto-2"
+    assert len(store.checkpoints) == 2
+
+
 def test_invalid_category_is_rejected_before_insert():
     store = _Store()
     manager = MapDatabaseManager(store)

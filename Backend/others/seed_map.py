@@ -1,8 +1,10 @@
 """Seed do mapa de exemplo. Pode rodar de novo: não apaga e não sobrescreve.
 
 Entra com ``DB_USER=pov`` e a senha de ``DB_PASSWORD``. Só consulta e
-insere. Não usa ``DB_ADMIN_*`` e não aceita a conta root. Checkpoint
-repetido fica como está. Aresta que já existe não muda distância nem
+insere. Não usa ``DB_ADMIN_*`` e não aceita a conta root. Checkpoint com
+a mesma chave (caixa e espaço) fica com o rótulo já gravado. Acento
+diferente continua outro nome; se a unique do MySQL juntar as duas
+grafias, a transação desfaz. Aresta que já existe não muda distância nem
 origin. Rode depois de ``python -m datasets.create_tables``.
 """
 
@@ -16,7 +18,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from datasets.create_tables import conexao_from_settings
-from map.checkpoint_slug import DEFAULT_BUILDING_ID, allocate_slug
+from map.checkpoint_slug import (
+    DEFAULT_BUILDING_ID,
+    allocate_slug,
+    checkpoint_name_key,
+    display_checkpoint_name,
+)
 
 CHECKPOINTS = [
     "Recepcao",
@@ -76,59 +83,49 @@ def _exact_checkpoint(db, name: str):
     return rows
 
 
-def _case_conflicts(rows, names) -> list[tuple[str, str]]:
-    """Nomes do seed cuja grafia exata não existe, mas a caixa já ocupa a chave."""
-    exact = {row["name"] for row in rows if row.get("name")}
-    folded: dict[str, str] = {}
+def _alias_from(rows) -> dict[str, str]:
+    """Chave → rótulo já gravado. A primeira linha fica com a exibição."""
+    found: dict[str, str] = {}
     for row in rows:
         stored = row.get("name")
         if stored:
-            folded.setdefault(stored.casefold(), stored)
-    found = []
-    for name in names:
-        if name in exact:
-            continue
-        stored = folded.get(name.casefold())
-        if stored is not None and stored != name:
-            found.append((name, stored))
+            found.setdefault(checkpoint_name_key(stored), stored)
     return found
-
-
-def _conflict_message(conflicts: list[tuple[str, str]]) -> str:
-    parts = [f"'{wanted}' já está como '{stored}'" for wanted, stored in conflicts]
-    return (
-        "Conflito de maiúsculas: "
-        + "; ".join(parts)
-        + ". Nada foi gravado e nenhuma aresta foi criada."
-    )
 
 
 def _write_seed(db, rows) -> None:
     taken = {row["slug"] for row in rows if row.get("slug")}
+    alias = _alias_from(rows)
     print("Inserindo checkpoints...")
     for name in CHECKPOINTS:
-        current = _exact_checkpoint(db, name)
-        if current:
-            if current[0].get("slug"):
-                taken.add(current[0]["slug"])
+        key = checkpoint_name_key(name)
+        if key in alias:
             continue
-        slug = allocate_slug(name, taken)
-        if not db.execute_within(SQL_CHECKPOINT, (name, DEFAULT_BUILDING_ID, slug)):
-            raise RuntimeError(f"Não gravou o checkpoint {name}. Nada foi gravado.")
-        # A unique de name segue a collation. Se o INSERT não deixou o texto
-        # exato, a transação desfaz o que esta rodada já escreveu.
-        if not _exact_checkpoint(db, name):
+        label = display_checkpoint_name(name)
+        slug = allocate_slug(label, taken)
+        if not db.execute_within(SQL_CHECKPOINT, (label, DEFAULT_BUILDING_ID, slug)):
+            raise RuntimeError(f"Não gravou o checkpoint {label}. Nada foi gravado.")
+        # A unique de name segue a collation e também junta acento. Se o
+        # INSERT não deixou este texto, a transação desfaz a rodada.
+        if not _exact_checkpoint(db, label):
             raise SeedConflict(
-                f"Conflito de maiúsculas: '{name}' não foi gravado. "
-                "A unique de checkpoints.name ignora caixa e manteve a outra grafia. "
+                f"Conflito de grafia: '{label}' não foi gravado. "
+                "A unique de checkpoints.name junta essa grafia com outra já existente. "
                 "Nada foi gravado e nenhuma aresta foi criada."
             )
+        alias[key] = label
         taken.add(slug)
     print("Inserindo conexões...")
     for source, target, distance, heading in EDGES:
+        src_name = alias.get(checkpoint_name_key(source))
+        tgt_name = alias.get(checkpoint_name_key(target))
+        if not src_name or not tgt_name:
+            raise RuntimeError(
+                f"Não achou o checkpoint de {source}->{target}. Nada foi gravado."
+            )
         directions = (
-            (source, target, distance, heading),
-            (target, source, distance, _inverse_heading(heading)),
+            (src_name, tgt_name, distance, heading),
+            (tgt_name, src_name, distance, _inverse_heading(heading)),
         )
         for src, tgt, dist, rad in directions:
             if not db.execute_within(SQL_EDGE, (src, tgt, dist, rad)):
@@ -139,9 +136,6 @@ def seed(db) -> None:
     known = db.execute_search(SQL_NAMES)
     if known is None:
         raise RuntimeError("Não leu os checkpoints. Rode create_tables antes do seed.")
-    conflicts = _case_conflicts(known, CHECKPOINTS)
-    if conflicts:
-        raise SeedConflict(_conflict_message(conflicts))
     rows = db.execute_search(SQL_EXISTING, (DEFAULT_BUILDING_ID,))
     if rows is None:
         raise RuntimeError("Não leu os checkpoints. Rode create_tables antes do seed.")
@@ -193,8 +187,9 @@ def cli(db=None) -> int:
 
     Sem ``db``, a conexão sai de ``conexao_from_settings`` aqui dentro:
     porta inválida ou variável ausente também vira essa linha. Conflito
-    de caixa mantém a mensagem já combinada. Qualquer outra exceção vira
-    tipo + mensagem, sem senha e sem DSN. O rollback continua em ``seed``.
+    de grafia (a unique juntou um acento) mantém a mensagem já combinada.
+    Qualquer outra exceção vira tipo + mensagem, sem senha e sem DSN.
+    O rollback continua em ``seed``.
     """
     created = None
     try:

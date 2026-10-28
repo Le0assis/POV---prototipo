@@ -15,7 +15,12 @@ from datasets.ManagerDatabase import (
     request_connection,
     request_session,
 )
-from map.checkpoint_slug import DEFAULT_BUILDING_ID, allocate_slug
+from map.checkpoint_slug import (
+    DEFAULT_BUILDING_ID,
+    allocate_slug,
+    checkpoint_name_key,
+    display_checkpoint_name,
+)
 from map.edge_rules import group_edge_pairs
 from pdr.trajectory import (
     displacement_m,
@@ -67,7 +72,11 @@ _NAME_COLUMN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
 
 def _exact_name(column: str) -> str:
-    """Nome exato, como o ``CAST AS BINARY`` da migração 002. ``Sala`` não é ``sala``."""
+    """Texto já resolvido, como o ``CAST AS BINARY`` da migração 002.
+
+    A busca do checkpoint compara a chave em Python. Este predicado grava
+    e trava o rótulo que já está na linha. ``Recepção`` não vira ``Recepcao``.
+    """
     if not _NAME_COLUMN.fullmatch(column):
         raise ValueError(column)
     return f"CAST({column} AS BINARY) = CAST(%s AS BINARY)"
@@ -162,14 +171,20 @@ class MapDatabaseManager:
         category_id = None
         if category_code is not None:
             category_id = int(self._require_category(category_code)["id"])
+        label = display_checkpoint_name(name)
+        if not label:
+            return False
+        existing = self._row_for_name(label)
+        if existing is not None:
+            return _public_checkpoint(existing)
         sql = """INSERT INTO checkpoints (name, building_id, slug, category_id) VALUES (%s, %s, %s, %s)"""
         slug = ""
         for attempt in range(2):
             taken = self._slugs_for_building(DEFAULT_BUILDING_ID)
-            slug = allocate_slug(name, taken)
+            slug = allocate_slug(label, taken)
             try:
                 success = self.db.execute_query(
-                    sql, (name, DEFAULT_BUILDING_ID, slug, category_id)
+                    sql, (label, DEFAULT_BUILDING_ID, slug, category_id)
                 )
             except IntegrityError:
                 print(
@@ -180,13 +195,13 @@ class MapDatabaseManager:
                     continue
                 raise CheckpointConflictError(slug)
             if not success:
-                print(f"Erro ao adicionar checkpoint {name}")
+                print(f"Erro ao adicionar checkpoint {label}")
                 return False
-            loaded = self.get_checkpoint_by_name(name)
+            loaded = self.get_checkpoint_by_name(label)
             if loaded is not None:
                 return loaded
             return _public_checkpoint({
-                "name": name,
+                "name": label,
                 "slug": slug,
                 "building_id": DEFAULT_BUILDING_ID,
                 "category_code": category_code,
@@ -198,34 +213,28 @@ class MapDatabaseManager:
 
     @_sql_method
     def update_checkpoint_name(self, name: str, new_name: str) -> bool:
-        """Troca o nome e mantém o slug gerado na criação."""
-        cleaned = new_name.strip()
+        """Troca o rótulo e mantém o slug gerado na criação."""
+        cleaned = display_checkpoint_name(new_name)
         if not cleaned:
             return False
-        current = self.db.execute_search(
-            "SELECT slug FROM checkpoints WHERE " + _exact_name("name"),
-            (name,),
-        )
+        current = self._row_for_name(name)
         if current is None:
-            raise CheckpointLookupError("Falha ao buscar checkpoint.")
-        if not current:
             return False
-        previous_slug = current[0]["slug"]
+        stored = current["name"]
+        other = self._row_for_name(cleaned)
+        if other is not None and other["name"] != stored:
+            return False
+        previous_slug = current["slug"]
         updated = self.db.execute_query(
             "UPDATE checkpoints SET name = %s WHERE " + _exact_name("name"),
-            (cleaned, name),
+            (cleaned, stored),
         )
         if not updated:
             raise DatabaseQueryError("Falha ao renomear o checkpoint.")
-        renamed = self.db.execute_search(
-            "SELECT slug FROM checkpoints WHERE " + _exact_name("name"),
-            (cleaned,),
-        )
+        renamed = self._row_for_name(cleaned)
         if renamed is None:
-            raise CheckpointLookupError("Falha ao buscar checkpoint.")
-        if not renamed:
             return False
-        return renamed[0]["slug"] == previous_slug
+        return renamed["slug"] == previous_slug
 
     @_sql_method
     def update_checkpoint_category(self, name: str, category_code: str | None) -> dict | None:
@@ -233,21 +242,17 @@ class MapDatabaseManager:
         category_id = None
         if category_code is not None:
             category_id = int(self._require_category(category_code)["id"])
-        found = self.db.execute_search(
-            "SELECT name FROM checkpoints WHERE " + _exact_name("name"),
-            (name,),
-        )
+        found = self._row_for_name(name)
         if found is None:
-            raise CheckpointLookupError("Falha ao buscar checkpoint.")
-        if not found:
             return None
+        stored = found["name"]
         updated = self.db.execute_query(
             "UPDATE checkpoints SET category_id = %s WHERE " + _exact_name("name"),
-            (category_id, name),
+            (category_id, stored),
         )
         if not updated:
             raise DatabaseQueryError("Falha ao atualizar a categoria do checkpoint.")
-        return self.get_checkpoint_by_name(name)
+        return self.get_checkpoint_by_name(stored)
 
     @_sql_method
     def list_categories(self) -> list | None:
@@ -279,16 +284,33 @@ class MapDatabaseManager:
         return _public_checkpoint(rows[0])
 
     @_sql_method
-    def get_checkpoint_by_name(self, name: str) -> dict | None:
-        rows = self.db.execute_search(
-            _CHECKPOINT_COLUMNS + " WHERE " + _exact_name("c.name"),
-            (name,),
-        )
+    def _checkpoint_rows(self) -> list[dict]:
+        """Todas as linhas. A chave casa em Python, não na collation."""
+        rows = self.db.execute_search(_CHECKPOINT_COLUMNS)
         if rows is None:
             raise CheckpointLookupError("Falha ao buscar checkpoint.")
-        if not rows:
+        if not isinstance(rows, list):
+            return []
+        return sorted(
+            (row for row in rows if isinstance(row, dict)),
+            key=lambda row: int(row.get("id") or 0),
+        )
+
+    def _row_for_name(self, name: str) -> dict | None:
+        """Primeira linha (menor id) com a mesma chave. O rótulo não muda."""
+        key = checkpoint_name_key(name)
+        if not key:
             return None
-        return _public_checkpoint(rows[0])
+        for row in self._checkpoint_rows():
+            if checkpoint_name_key(row.get("name")) == key:
+                return row
+        return None
+
+    def get_checkpoint_by_name(self, name: str) -> dict | None:
+        row = self._row_for_name(name)
+        if row is None:
+            return None
+        return _public_checkpoint(row)
 
     def _require_category(self, code: str) -> dict:
         rows = self.db.execute_search(
@@ -1094,10 +1116,13 @@ class MapDatabaseManager:
 
     @_sql_method
     def update_checkpoint_position(self, name: str, pos_x_px, pos_y_px) -> bool:
-        """Um UPDATE pelo UNIQUE(name). Sem SELECT antes, que abria transação."""
+        """UPDATE no rótulo já gravado. A chave acha ``quarto`` em ``Quarto``."""
+        found = self._row_for_name(name)
+        if found is None:
+            return False
         affected = self.db.execute_update(
             "UPDATE checkpoints SET pos_x_px = %s, pos_y_px = %s WHERE " + _exact_name("name"),
-            (pos_x_px, pos_y_px, name),
+            (pos_x_px, pos_y_px, found["name"]),
         )
         if affected is None:
             raise DatabaseQueryError("Falha ao gravar a posição do checkpoint.")

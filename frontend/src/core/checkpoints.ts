@@ -137,16 +137,30 @@ function networkError(cause) {
     return error;
 }
 
-function sameSlug(item, slug) {
-    if (!item || !slug) return false;
-    return item.slug === slug || item.name === slug;
+/** Mesma chave do backend: pontas, espaços internos e caixa. Acento fica. */
+export function checkpointNameKey(value) {
+    return String(value == null ? '' : value)
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .join(' ')
+        .toLocaleLowerCase('pt-BR');
+}
+
+function sameCheckpoint(item, wanted) {
+    if (!item || !wanted) return false;
+    const text = String(wanted).trim();
+    const slug = item.slug == null ? '' : String(item.slug);
+    if (slug && slug === text) return true;
+    const key = checkpointNameKey(text);
+    return Boolean(key) && checkpointNameKey(item.name) === key;
 }
 
 /** Procura o slug na lista já carregada. Com `b`, respeita o prédio quando ele vier no item. */
 export function findLoadedCheckpoint(list, slug, buildingId) {
     const wanted = slug == null ? '' : String(slug).trim();
     if (!wanted) return null;
-    const rows = (Array.isArray(list) ? list : []).filter((item) => sameSlug(item, wanted));
+    const rows = (Array.isArray(list) ? list : []).filter((item) => sameCheckpoint(item, wanted));
     if (buildingId == null || buildingId === '') return adaptCheckpoint(rows[0]);
     const building = Number(buildingId);
     const inBuilding = rows.find((item) => item.building_id == null || Number(item.building_id) === building);

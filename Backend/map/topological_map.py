@@ -5,6 +5,8 @@ from collections import deque
 
 from typing import Any, Dict
 
+from map.checkpoint_slug import checkpoint_name_key
+
 
 @dataclass
 class SemanticNode:
@@ -27,18 +29,29 @@ class TopologicalMap:
         self.edges: list[TopologicalEdge] = []
 
     def canonical_name(self, name: str) -> str | None:
-        """Nome exato de ``checkpoints.name``, como ``CAST(... AS BINARY)``.
+        """Nome já gravado cuja chave casa com ``name``.
 
-        ``Sala`` não é ``sala``. A collation do MySQL junta as duas; a aresta
-        canônica da migração 002 não. Acento também continua distinto.
+        A chave é ``strip``, espaços colapsados e ``casefold``. O texto
+        devolvido é o que está no grafo, para exibir e para a aresta.
+        ``quarto`` casa com ``Quarto``. ``Recepção`` não casa com ``Recepcao``.
         """
-        if name in self.nodes:
-            return name
+        key = checkpoint_name_key(name)
+        if not key:
+            return None
+        for stored in self.nodes:
+            if checkpoint_name_key(stored) == key:
+                return stored
         return None
 
     def add_checkpoint(self, name: str) -> None:
-        """Adiciona um nó. A mesma string não duplica; outra caixa é outro nome."""
-        if name in self.nodes:
+        """Adiciona o rótulo recebido. A mesma chave não duplica.
+
+        Quem grava um nome novo manda o rótulo já limpo. Quem carrega o
+        banco manda o texto da linha, para a aresta continuar batendo.
+        """
+        if not checkpoint_name_key(name):
+            return
+        if self.canonical_name(name) is not None:
             return
         self.nodes[name] = SemanticNode(name=name)
         print(f"Checkpoint {name} ")
@@ -46,8 +59,8 @@ class TopologicalMap:
     def upsert_directed_edge(self, source: str, target: str, distance_m: float, heading_rad: float) -> None:
         """Uma aresta em memória por sentido. Não cria a volta.
 
-        As pontas têm de ser o nome exato do checkpoint. Outra caixa não
-        reescreve a aresta canônica.
+        As pontas passam por ``canonical_name``. Outra caixa ou espaço
+        reusa o rótulo já gravado. Outro acento continua outro nó.
         """
         source_name = self.canonical_name(source)
         target_name = self.canonical_name(target)

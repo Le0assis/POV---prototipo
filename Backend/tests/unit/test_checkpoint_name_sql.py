@@ -1,4 +1,4 @@
-"""Nome de checkpoint no SQL é byte a byte. ``sala`` não grava em ``Sala``."""
+"""A chave do checkpoint ignora caixa e espaço. O UPDATE grava o rótulo já salvo."""
 
 from __future__ import annotations
 
@@ -65,6 +65,12 @@ class CollationStore:
 
     def execute_search(self, sql, params=None):
         params = params or ()
+        if "FROM checkpoints c" in sql and "CAST(" not in sql:
+            return [{
+                **self.checkpoint,
+                "category_code": None,
+                "category_label": None,
+            }]
         if "CAST(c.name AS BINARY)" in sql:
             if _same(sql, self.checkpoint["name"], params[0]):
                 return [dict(self.checkpoint)]
@@ -84,24 +90,27 @@ class CollationStore:
         raise AssertionError(sql)
 
 
-def test_checkpoint_name_sql_does_not_follow_the_collation():
+def test_checkpoint_lookup_folds_case_and_space_and_keeps_the_label():
     text = (BACKEND_ROOT / "map" / "MapDatabaseManager.py").read_text(encoding="utf-8")
     assert "WHERE name = %s" not in text
     assert "WHERE c.name = %s" not in text
     assert "WHERE source_node = %s" not in text
     assert "name IN (%s, %s)" not in text
+    assert "checkpoint_name_key" in text
 
     store = CollationStore()
     manager = MapDatabaseManager(store)
-    assert manager.update_checkpoint_position("sala", 9.0, 8.0) is False
+    assert manager.get_checkpoint_by_name("Sála") is None
+    assert manager.update_checkpoint_position("Sála", 3.0, 3.0) is False
     assert store.checkpoint["pos_x_px"] == 1.0
-    assert manager.get_checkpoint_by_name("sala") is None
-    assert manager.update_checkpoint_category("sala", None) is None
-    assert manager._edge_row("sala", "Quarto") is None
 
-    assert manager.update_checkpoint_position("Sala", 9.0, 8.0) is True
+    found = manager.get_checkpoint_by_name(" sala ")
+    assert found["name"] == "Sala"
+    assert manager.update_checkpoint_position("SALA", 9.0, 8.0) is True
+    assert store.checkpoint["name"] == "Sala"
     assert store.checkpoint["pos_x_px"] == 9.0
     assert store.checkpoint["pos_y_px"] == 8.0
-    found = manager.get_checkpoint_by_name("Sala")
-    assert found["name"] == "Sala"
-    assert manager._edge_row("Sala", "Quarto")["id"] == 10
+    cleared = manager.update_checkpoint_category("sala", None)
+    assert cleared["name"] == "Sala"
+    assert manager._edge_row("sala", "Quarto") is None
+    assert manager._edge_row(found["name"], "Quarto")["id"] == 10

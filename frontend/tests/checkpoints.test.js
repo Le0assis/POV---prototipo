@@ -11,6 +11,8 @@ import {
     adaptCheckpoints,
     adaptResolve,
     checkpointSlug,
+    checkpointNameKey,
+    findLoadedCheckpoint,
     isResolveNotFound
 } from '../src/core/checkpoints.ts';
 
@@ -95,6 +97,19 @@ test('lista, categorias e o resolve público', () => {
     assert.equal(isResolveNotFound({ status: 404 }), true);
     assert.equal(isResolveNotFound({ status: 500 }), false);
     assert.equal(isResolveNotFound(null), false);
+});
+
+test('buscar o ponto ignora caixa e espaço e não tira acento do nome', () => {
+    const list = [
+        { name: 'Quarto', slug: 'quarto', building_id: 1 },
+        { name: 'Recepção', slug: 'recepcao', building_id: 1 }
+    ];
+    assert.equal(checkpointNameKey('  QUARTO '), 'quarto');
+    assert.notEqual(checkpointNameKey('Recepção'), checkpointNameKey('Recepcao'));
+    assert.equal(findLoadedCheckpoint(list, ' quarto ').name, 'Quarto');
+    assert.equal(findLoadedCheckpoint(list, 'QUARTO').slug, 'quarto');
+    assert.equal(findLoadedCheckpoint(list, 'Recepção').name, 'Recepção');
+    assert.equal(findLoadedCheckpoint(list, 'Recepcao'), null);
 });
 
 test('polilinha, marcador e sparkline leem token em vez de cor solta', () => {
