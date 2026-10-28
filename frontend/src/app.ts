@@ -549,7 +549,11 @@ function renderFlow(planned) {
         const arrived = flowButton('Cheguei', 'Cheguei', 'arrive');
         arrived.classList.remove('btn-secondary');
         arrived.classList.add('btn-primary');
-        flow.append(arrived, flowButton('Encerrar', 'Encerrar', 'back'));
+        flow.append(
+            arrived,
+            flowButton('Voltar para a tela anterior', 'Voltar', 'back'),
+            flowButton('Encerrar', 'Encerrar', 'back')
+        );
         return;
     }
     if (session.state === State.ERRO_CAMERA) {
@@ -563,7 +567,7 @@ function renderFlow(planned) {
         const change = flowButton('Trocar destino', 'Trocar destino', 'open-search');
         change.classList.remove('btn-secondary');
         change.classList.add('btn-primary');
-        flow.append(title, change);
+        flow.append(title, change, flowButton('Voltar para a tela anterior', 'Voltar', 'back'));
         return;
     }
     flow.classList.remove('is-camera-error');
@@ -610,7 +614,7 @@ function cameraErrorForm(kept) {
     form.className = 'camera-error-form';
     const label = document.createElement('label');
     label.setAttribute('for', 'camera-error-code');
-    label.textContent = 'Código do ponto';
+    label.textContent = 'Nome do ponto';
     const input = document.createElement('input');
     input.id = 'camera-error-code';
     input.className = 'text-field';
@@ -618,14 +622,14 @@ function cameraErrorForm(kept) {
     input.autocomplete = 'off';
     input.autocapitalize = 'off';
     input.spellcheck = false;
-    input.placeholder = 'Código do ponto';
-    input.setAttribute('aria-label', 'Código do ponto');
+    input.placeholder = 'Nome do ponto';
+    input.setAttribute('aria-label', 'Nome do ponto');
     input.value = kept;
     const submit = document.createElement('button');
     submit.type = 'submit';
     submit.className = 'btn btn-primary';
-    submit.textContent = 'Usar este código';
-    submit.setAttribute('aria-label', 'Usar este código');
+    submit.textContent = 'Usar este nome';
+    submit.setAttribute('aria-label', 'Usar este nome');
     form.append(label, input, submit);
     form.addEventListener('submit', (event) => {
         event.preventDefault();

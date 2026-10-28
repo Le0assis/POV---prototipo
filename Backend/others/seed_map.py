@@ -8,6 +8,8 @@ origin. Rode depois de ``python -m datasets.create_tables``.
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -38,8 +40,11 @@ EDGES = [
     ("Corredor B", "Escada", 4.0, 0.0),
 ]
 
-SQL_SLUGS = "SELECT slug FROM checkpoints WHERE building_id = %s AND slug IS NOT NULL"
-# Mesma regra do grafo: Sala não é sala. O resolve?cp= continua na collation.
+# Leitura de uma vez, antes de qualquer INSERT. O resolve?cp= continua na collation.
+# A unique de name é da tabela, não do prédio: o conflito de caixa olha todos.
+SQL_NAMES = "SELECT name FROM checkpoints"
+SQL_EXISTING = "SELECT name, slug FROM checkpoints WHERE building_id = %s"
+# Mesma regra do grafo: Sala não é sala.
 SQL_NAME = (
     "SELECT slug FROM checkpoints WHERE CAST(name AS BINARY) = CAST(%s AS BINARY)"
 )
@@ -54,28 +59,70 @@ SQL_EDGE = (
 )
 
 
+class SeedConflict(RuntimeError):
+    """Outra caixa já ocupa a unique. O script sai com 1, sem traceback."""
+
+
 def _inverse_heading(heading: float) -> float:
     import math
     return (heading + math.pi) % (2 * math.pi)
 
 
-def seed(db) -> None:
-    rows = db.execute_search(SQL_SLUGS, (DEFAULT_BUILDING_ID,))
+def _exact_checkpoint(db, name: str):
+    """Linha cujo nome é o texto exato. Outra caixa não conta."""
+    rows = db.execute_search(SQL_NAME, (name,))
     if rows is None:
-        raise RuntimeError("Não leu os slugs. Rode create_tables antes do seed.")
+        raise RuntimeError(f"Não leu o checkpoint {name}.")
+    return rows
+
+
+def _case_conflicts(rows, names) -> list[tuple[str, str]]:
+    """Nomes do seed cuja grafia exata não existe, mas a caixa já ocupa a chave."""
+    exact = {row["name"] for row in rows if row.get("name")}
+    folded: dict[str, str] = {}
+    for row in rows:
+        stored = row.get("name")
+        if stored:
+            folded.setdefault(stored.casefold(), stored)
+    found = []
+    for name in names:
+        if name in exact:
+            continue
+        stored = folded.get(name.casefold())
+        if stored is not None and stored != name:
+            found.append((name, stored))
+    return found
+
+
+def _conflict_message(conflicts: list[tuple[str, str]]) -> str:
+    parts = [f"'{wanted}' já está como '{stored}'" for wanted, stored in conflicts]
+    return (
+        "Conflito de maiúsculas: "
+        + "; ".join(parts)
+        + ". Nada foi gravado e nenhuma aresta foi criada."
+    )
+
+
+def _write_seed(db, rows) -> None:
     taken = {row["slug"] for row in rows if row.get("slug")}
     print("Inserindo checkpoints...")
     for name in CHECKPOINTS:
-        current = db.execute_search(SQL_NAME, (name,))
-        if current is None:
-            raise RuntimeError(f"Não leu o checkpoint {name}.")
+        current = _exact_checkpoint(db, name)
         if current:
             if current[0].get("slug"):
                 taken.add(current[0]["slug"])
             continue
         slug = allocate_slug(name, taken)
-        if not db.execute_query(SQL_CHECKPOINT, (name, DEFAULT_BUILDING_ID, slug)):
-            raise RuntimeError(f"Não gravou o checkpoint {name}. Nada foi apagado.")
+        if not db.execute_within(SQL_CHECKPOINT, (name, DEFAULT_BUILDING_ID, slug)):
+            raise RuntimeError(f"Não gravou o checkpoint {name}. Nada foi gravado.")
+        # A unique de name segue a collation. Se o INSERT não deixou o texto
+        # exato, a transação desfaz o que esta rodada já escreveu.
+        if not _exact_checkpoint(db, name):
+            raise SeedConflict(
+                f"Conflito de maiúsculas: '{name}' não foi gravado. "
+                "A unique de checkpoints.name ignora caixa e manteve a outra grafia. "
+                "Nada foi gravado e nenhuma aresta foi criada."
+            )
         taken.add(slug)
     print("Inserindo conexões...")
     for source, target, distance, heading in EDGES:
@@ -84,9 +131,94 @@ def seed(db) -> None:
             (target, source, distance, _inverse_heading(heading)),
         )
         for src, tgt, dist, rad in directions:
-            if not db.execute_query(SQL_EDGE, (src, tgt, dist, rad)):
-                raise RuntimeError(f"Não gravou a aresta {src}->{tgt}. Nada foi apagado.")
+            if not db.execute_within(SQL_EDGE, (src, tgt, dist, rad)):
+                raise RuntimeError(f"Não gravou a aresta {src}->{tgt}. Nada foi gravado.")
+
+
+def seed(db) -> None:
+    known = db.execute_search(SQL_NAMES)
+    if known is None:
+        raise RuntimeError("Não leu os checkpoints. Rode create_tables antes do seed.")
+    conflicts = _case_conflicts(known, CHECKPOINTS)
+    if conflicts:
+        raise SeedConflict(_conflict_message(conflicts))
+    rows = db.execute_search(SQL_EXISTING, (DEFAULT_BUILDING_ID,))
+    if rows is None:
+        raise RuntimeError("Não leu os checkpoints. Rode create_tables antes do seed.")
+    if not db.begin_transaction():
+        raise RuntimeError("Não abriu a transação do seed. Nada foi gravado.")
+    try:
+        _write_seed(db, rows)
+        if not db.commit_transaction():
+            raise RuntimeError("Não confirmou o seed. Nada foi gravado.")
+    except Exception:
+        db.rollback_transaction()
+        raise
     print("Mapa de exemplo garantido. Linha que já existia não foi alterada.")
+
+
+_DSN_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
+_PASSWORD_RE = re.compile(r"(?i)\b(password|pwd|passwd)\s*[:=]\s*\S+")
+
+
+def _secrets(db) -> list[str]:
+    """Senha do ambiente e a da conexão. Vazio não entra: apagaria o texto."""
+    found = []
+    values = [os.environ.get("DB_PASSWORD", "")]
+    if db is not None:
+        values.append(getattr(db, "password", ""))
+    for value in values:
+        secret = str(value or "")
+        if secret and secret not in found:
+            found.append(secret)
+    return found
+
+
+def _short_error(exc: BaseException, db) -> str:
+    """Tipo e mensagem, numa linha. Sem traceback, senha ou DSN."""
+    text = " ".join(str(exc).split())
+    for secret in _secrets(db):
+        text = text.replace(secret, "***")
+    text = _DSN_RE.sub("[DSN omitido]", text)
+    text = _PASSWORD_RE.sub(r"\1=***", text)
+    trace_at = text.find("Traceback (most recent call last)")
+    if trace_at != -1:
+        text = text[:trace_at].rstrip()
+    name = type(exc).__name__
+    return f"{name}: {text}" if text else name
+
+
+def cli(db=None) -> int:
+    """Erro: código 1 e uma linha no stderr. O traceback fica de fora.
+
+    Sem ``db``, a conexão sai de ``conexao_from_settings`` aqui dentro:
+    porta inválida ou variável ausente também vira essa linha. Conflito
+    de caixa mantém a mensagem já combinada. Qualquer outra exceção vira
+    tipo + mensagem, sem senha e sem DSN. O rollback continua em ``seed``.
+    """
+    created = None
+    try:
+        if db is None:
+            db = conexao_from_settings()
+            created = db
+            assert_seed_account(str(db.user))
+            db.connect()
+            if not db.connection:
+                raise SystemExit(
+                    "Erro ao conectar como pov. Confira DB_HOST, DB_PORT, DB_NAME, "
+                    "DB_USER e DB_PASSWORD. O seed não usa a conta administrativa."
+                )
+        seed(db)
+    except SeedConflict as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(_short_error(exc, db), file=sys.stderr)
+        return 1
+    finally:
+        if created is not None:
+            created.disconnect()
+    return 0
 
 
 def assert_seed_account(user: str) -> None:
@@ -101,18 +233,6 @@ def assert_seed_account(user: str) -> None:
 
 
 if __name__ == "__main__":
-    db = conexao_from_settings()
-    try:
-        assert_seed_account(str(db.user))
-    except RuntimeError as exc:
-        raise SystemExit(str(exc)) from exc
-    db.connect()
-    if not db.connection:
-        raise SystemExit(
-            "Erro ao conectar como pov. Confira DB_HOST, DB_PORT, DB_NAME, "
-            "DB_USER e DB_PASSWORD. O seed não usa a conta administrativa."
-        )
-    try:
-        seed(db)
-    finally:
-        db.disconnect()
+    code = cli()
+    if code:
+        raise SystemExit(code)

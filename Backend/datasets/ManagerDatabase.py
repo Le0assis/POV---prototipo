@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+import os
+import re
 import threading
 import time
 
@@ -59,6 +61,105 @@ class DatabaseQueryError(Exception):
 
 # innodb_lock_wait_timeout (1205) e deadlock (1213).
 _LOCK_ERRNOS = (1205, 1213)
+# Senha menor que isso não entra no replace: "a" ou "pov" comem a mensagem.
+_MIN_SECRET_LEN = 6
+# Corta depois de redigir. O corte antes deixava um pedaço da senha.
+_REDACT_MAX_CHARS = 4096
+# Caracteres de esquema (RFC 3986): letra, dígito, + . -
+_SCHEME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+.-")
+# Delimitador só encerra o userinfo quando vem depois de um @.
+# Antes do @, / ; espaço ( , ' ? # < ainda podem ser a senha.
+_URL_DELIMS = frozenset("/;()<>," + "'" + '" \t\r\n?#')
+_WORD = re.compile(r"\w")
+
+
+def _scheme_starts(text: str) -> list[tuple[int, int]]:
+    """Início do esquema e fim de ``://`` para cada URL, em tempo linear.
+
+    Equivale a ``\\b[A-Za-z][A-Za-z0-9+.-]*://``: para cada ``://`` volta só
+    pela corrida de caracteres de esquema logo antes dele. As corridas não se
+    sobrepõem (não contêm ``:`` nem ``/``), então o total é O(n).
+    """
+    found: list[tuple[int, int]] = []
+    search = 0
+    while True:
+        sep = text.find("://", search)
+        if sep < 0:
+            return found
+        search = sep + 3
+        run = sep
+        while run > 0 and text[run - 1] in _SCHEME_CHARS:
+            run -= 1
+        for start in range(run, sep):
+            char = text[start]
+            if not char.isascii() or not char.isalpha():
+                continue
+            if start == 0 or not _WORD.match(text[start - 1]):
+                found.append((start, sep + 3))
+                break
+
+
+def _mask_url_userinfo(text: str) -> str:
+    """``esquema://user:senha@host`` vira ``esquema://***@host``.
+
+    A senha vai até o último ``@`` antes do primeiro delimitador que aparece
+    depois de um ``@``. ``mysql://u:p@db/x;a@b.com`` preserva host e caminho.
+    ``http://x/a:b@c`` não tem credencial e fica como está.
+
+    Linear: tabelas de próximo ``@``, ``:`` e delimitador, e do último ``@``,
+    calculadas uma vez. Antes cada esquema varria até o fim do texto (O(n²)).
+    """
+    size = len(text)
+    if "://" not in text:
+        return text
+    next_at = [size] * (size + 1)
+    next_colon = [size] * (size + 1)
+    next_delim = [size] * (size + 1)
+    for index in range(size - 1, -1, -1):
+        char = text[index]
+        next_at[index] = index if char == "@" else next_at[index + 1]
+        next_colon[index] = index if char == ":" else next_colon[index + 1]
+        next_delim[index] = index if char in _URL_DELIMS else next_delim[index + 1]
+    prev_at = [-1] * size
+    last = -1
+    for index in range(size):
+        if text[index] == "@":
+            last = index
+        prev_at[index] = last
+
+    pieces: list[str] = []
+    cursor = 0
+    for start, body in _scheme_starts(text):
+        if start < cursor:
+            continue
+        first_at = next_at[body]
+        if first_at >= size:
+            continue
+        first_delim = next_delim[body]
+        # Delimitador antes do @ só vale se já houve ``:`` (pode ser a senha).
+        if first_delim < first_at and next_colon[body] > first_delim:
+            continue
+        stop = next_delim[first_at + 1]
+        if next_colon[body] >= stop:
+            continue
+        last_at = prev_at[stop - 1]
+        pieces.append(text[cursor:start])
+        pieces.append(text[start:body])
+        pieces.append("***@")
+        cursor = last_at + 1
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
+def _known_secrets(password: object) -> list[str]:
+    """DB_PASSWORD e a senha da conexão. Só entram com 6 caracteres ou mais."""
+    found: list[str] = []
+    for value in (password, os.environ.get("DB_PASSWORD", "")):
+        secret = str(value or "")
+        if len(secret) >= _MIN_SECRET_LEN and secret not in found:
+            found.append(secret)
+    found.sort(key=len, reverse=True)
+    return found
 
 
 def _tcp_host(host: str) -> str:
@@ -196,7 +297,7 @@ class ConexaoBD:
             return self.cursor.fetchall()
 
         def failed(exc):
-            print(f"Erro ao executar consulta: {exc}")
+            print(f"Erro ao executar consulta: {self._redact(exc)}")
             return None
 
         return self._attempt(
@@ -230,7 +331,7 @@ class ConexaoBD:
         def failed(exc):
             if isinstance(exc, IntegrityError):
                 raise exc
-            print(f"Erro ao executar comando: {exc}")
+            print(f"Erro ao executar comando: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -260,7 +361,7 @@ class ConexaoBD:
             return affected
 
         def failed(exc):
-            print(f"Erro ao executar update: {exc}")
+            print(f"Erro ao executar update: {self._redact(exc)}")
             return None
 
         return self._attempt(
@@ -285,7 +386,7 @@ class ConexaoBD:
             return self.cursor.lastrowid
 
         def failed(exc):
-            print(f"Erro ao executar insert: {exc}")
+            print(f"Erro ao executar insert: {self._redact(exc)}")
             return None
 
         return self._attempt(
@@ -310,7 +411,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao executar lote: {exc}")
+            print(f"Erro ao executar lote: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -341,7 +442,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao abrir transação: {exc}")
+            print(f"Erro ao abrir transação: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -358,7 +459,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao confirmar transação: {exc}")
+            print(f"Erro ao confirmar transação: {self._redact(exc)}")
             return False
 
         return self._attempt(
@@ -377,7 +478,7 @@ class ConexaoBD:
             return True
         except Error as exc:
             self._explicit = False
-            print(f"Erro ao reverter transação: {exc}")
+            print(f"Erro ao reverter transação: {self._redact(exc)}")
             return False
 
     def execute_within(self, sql, params=None):
@@ -389,7 +490,7 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao executar comando na transação: {exc}")
+            print(f"Erro ao executar comando na transação: {self._redact(exc)}")
             return False
 
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
@@ -403,7 +504,7 @@ class ConexaoBD:
             return self.cursor.lastrowid
 
         def failed(exc):
-            print(f"Erro ao executar insert na transação: {exc}")
+            print(f"Erro ao executar insert na transação: {self._redact(exc)}")
             return None
 
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
@@ -418,18 +519,21 @@ class ConexaoBD:
             return True
 
         def failed(exc):
-            print(f"Erro ao executar lote na transação: {exc}")
+            print(f"Erro ao executar lote na transação: {self._redact(exc)}")
             return False
 
         return self._attempt(operation, retry_lock=False, cleanup=lambda: None, failed=failed)
 
     def _redact(self, exc: BaseException) -> str:
-        """Texto de erro sem a senha. Log e print passam por aqui."""
+        """Troca senha e userinfo, e só então corta.
+
+        O corte vem depois: senha que atravessa os 4096 não deixa pedaço.
+        Senha curta no meio de ``user:pass@`` ainda some na máscara da URL.
+        """
         text = str(exc)
-        secret = str(self.password or "")
-        if secret:
+        for secret in _known_secrets(getattr(self, "password", "")):
             text = text.replace(secret, "***")
-        return text
+        return _mask_url_userinfo(text)[:_REDACT_MAX_CHARS]
 
     def ensure_live(self) -> bool:
         """Ping da sessão ociosa. Se caiu, abre outra no mesmo objeto."""

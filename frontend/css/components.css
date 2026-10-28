@@ -3,6 +3,27 @@
    Controles, cartão, barra, folha, chips e o mapa Leaflet.
    ========================================================================== */
 
+.a11y-button,
+.qr-button {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--fab-size);
+    height: var(--fab-size);
+    min-width: var(--fab-size);
+    min-height: var(--fab-size);
+    padding: 0;
+    gap: var(--fab-gap);
+}
+
+.a11y-button svg,
+.qr-button svg {
+    width: var(--fab-icon);
+    height: var(--fab-icon);
+    flex: 0 0 auto;
+}
+
 .top-bar,
 .top-nav {
     position: fixed;
@@ -231,6 +252,70 @@ html.hc textarea {
     color: var(--text);
 }
 
+.field-label-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+}
+
+.field-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 2px solid var(--text-muted);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.field-help:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.form-group:has(.field-tip) {
+    position: relative;
+}
+
+.field-tip {
+    position: absolute;
+    z-index: 5;
+    left: 0;
+    right: 0;
+    top: 100%;
+    margin: 0;
+    padding: var(--space-8) var(--space-12);
+    font-weight: 400;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.form-group:hover > .field-tip,
+.form-group:focus-within > .field-tip,
+.field-tip.is-open {
+    position: static;
+    clip: auto;
+    clip-path: none;
+    height: auto;
+    overflow: visible;
+    white-space: normal;
+}
+
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
 select,
 textarea,
@@ -417,6 +502,15 @@ textarea:disabled {
     color: var(--text-muted);
     font-weight: 600;
     text-decoration: none;
+}
+
+button.admin-menu-link {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
 }
 
 .admin-gate {
@@ -645,6 +739,14 @@ html.dark .leaflet-container {
     font-size: max(16px, var(--font-size-body));
     line-height: 1.45;
     color: var(--text);
+}
+
+.route-points-toggle {
+    font-weight: 700;
+}
+
+.route-points-body[hidden] {
+    display: none !important;
 }
 
 html.hc .route-line {

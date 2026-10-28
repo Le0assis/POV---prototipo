@@ -21,6 +21,8 @@ from pdr.trajectory import (
     path_points,
 )
 
+from api.schema import MAX_RAW_SAMPLES
+
 from .pipeline import detect_steps_from_samples
 from .steps import StepDetectorConfig, StepEvent
 
@@ -81,6 +83,11 @@ class RawEdgeProcessor:
                 status_code=400,
                 detail=f"Amostras insuficientes (mínimo {minimum}).",
             )
+        if len(samples) > MAX_RAW_SAMPLES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Amostras demais (máximo {MAX_RAW_SAMPLES}).",
+            )
 
         csv_string = generate_sensors_csv(samples)
         log_result = self.db_manager.save_sensor_log(
@@ -88,7 +95,7 @@ class RawEdgeProcessor:
             target=target,
             csv_data=csv_string,
         )
-        log_id = log_result if type(log_result) is int else None
+        log_id = log_result if type(log_result) is int and log_result > 0 else None
 
         result = detect_steps_from_samples(samples, config=self.config)
         if log_id is not None and hasattr(self.db_manager, "update_sensor_log"):
@@ -101,6 +108,13 @@ class RawEdgeProcessor:
             )
         if not result.time_valid:
             raise HTTPException(status_code=400, detail="Tempo de amostragem inválido.")
+
+        # Gerenciador antigo não tem record_walk e ainda usa save_edge.
+        # Quem grava trajetória não pode cair nesse caminho se o log falhou:
+        # save_edge reescreve a aresta como manual, sem trace.
+        if hasattr(self.db_manager, "record_walk") and log_id is None:
+            logger.error("save_sensor_log não devolveu o id de %s para %s", source, target)
+            raise HTTPException(status_code=500, detail="Erro interno ao salvar.")
 
         t0 = _first_timestamp(samples)
         built = integrate_walk(result.steps, t0)

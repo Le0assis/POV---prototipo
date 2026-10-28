@@ -15,7 +15,7 @@ tempo constante, e senha ausente ou vazia nunca passa pelo cache. A
 senha é conferida antes de qualquer conexão MySQL.
 
 ``CF-Connecting-IP`` e ``X-Forwarded-For`` só valem se o par do socket
-estiver em ``TRUSTED_PROXIES`` (lista explícita; ``*`` não entra). No
+estiver em ``TRUSTED_PROXIES`` (lista explícita de IPs ou CIDRs; ``*`` e ``/0`` não entram). No
 ``X-Forwarded-For`` o cliente é o endereço mais à direita que não está
 nessa lista. O uvicorn sobe com ``--no-proxy-headers``: o padrão dele
 trata ``127.0.0.1`` como proxy e reescreve o par a partir do header.
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import secrets
 import threading
@@ -82,52 +83,93 @@ def set_attempt_limit(limit: int) -> None:
     _MAX_ATTEMPTS = int(limit)
 
 
+def _parse_ip(value: str):
+    """Endereço válido ou None. ``::ffff:1.2.3.4`` vira ``1.2.3.4``."""
+    try:
+        address = ipaddress.ip_address(value.strip().strip("[]"))
+    except ValueError:
+        return None
+    mapped = getattr(address, "ipv4_mapped", None)
+    return mapped or address
+
+
+def trusted_proxy_networks() -> list:
+    """Redes de ``TRUSTED_PROXIES``: IP solto ou CIDR, separados por vírgula.
+
+    ``*``, ``0.0.0.0/0``, ``::/0`` e item inválido são ignorados: confiar em
+    todo mundo deixaria qualquer um forjar o IP pelo header.
+    """
+    networks = []
+    for item in os.environ.get("TRUSTED_PROXIES", "").split(","):
+        entry = item.strip()
+        if not entry or entry == "*":
+            continue
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            continue
+        if network.prefixlen == 0:
+            continue
+        networks.append(network)
+    return networks
+
+
 def trusted_proxy_peers() -> set[str]:
-    """Pares de socket que podem informar o cliente. ``*`` não é aceito."""
-    raw = os.environ.get("TRUSTED_PROXIES", "")
-    peers = set()
-    for item in raw.split(","):
-        peer = item.strip()
-        if peer and peer != "*":
-            peers.add(peer)
-    return peers
+    """Texto normalizado dos itens aceitos (compatibilidade e diagnóstico)."""
+    return {str(network) for network in trusted_proxy_networks()}
 
 
-def _rightmost_untrusted(header: str, trusted: set[str]) -> str:
-    """O endereço mais à direita que o proxy não assina.
+def _is_trusted(value: str, networks: list) -> bool:
+    address = _parse_ip(value)
+    if address is None:
+        return False
+    return any(address.version == network.version and address in network for network in networks)
+
+
+def _rightmost_untrusted(header: str, networks: list) -> str:
+    """O endereço mais à direita que não é proxy de confiança.
 
     A esquerda do ``X-Forwarded-For`` pode ser forjada. Andando da
-    direita para a esquerda, o primeiro que não está em ``trusted`` é
-    o cliente. Se todos forem de confiança, sobra o da esquerda.
+    direita para a esquerda, o primeiro que não está em ``networks`` é
+    o cliente. Item que não é IP encerra a busca sem cliente. Se todos
+    forem de confiança, sobra o da esquerda.
     """
-    parts = []
-    for item in header.split(","):
-        part = item.strip()
-        if part and part != "*":
-            parts.append(part)
+    parts = [item.strip() for item in header.split(",") if item.strip()]
     for part in reversed(parts):
-        if part not in trusted:
-            return part
-    return parts[0] if parts else ""
+        if _is_trusted(part, networks):
+            continue
+        address = _parse_ip(part)
+        return str(address) if address is not None else ""
+    if parts:
+        address = _parse_ip(parts[0])
+        return str(address) if address is not None else ""
+    return ""
 
 
-def _forwarded_client(request: Request) -> str:
-    trusted = trusted_proxy_peers()
+def _forwarded_client(request: Request, networks: list) -> str:
     cloudflare = request.headers.get("cf-connecting-ip", "").strip()
     if cloudflare:
-        return _rightmost_untrusted(cloudflare, trusted)
+        return _rightmost_untrusted(cloudflare, networks)
     forwarded = request.headers.get("x-forwarded-for", "").strip()
     if forwarded:
-        return _rightmost_untrusted(forwarded, trusted)
+        return _rightmost_untrusted(forwarded, networks)
     return ""
 
 
 def client_key(request: Request) -> str:
+    """IP do cliente para limites (senha do editor, sessões por IP).
+
+    Os headers só contam quando o par do socket está em ``TRUSTED_PROXIES``.
+    Atrás do cloudflared o par é ``127.0.0.1`` (ou ``::1``): sem essa
+    variável todo mundo divide o mesmo IP e a 9ª sessão é recusada.
+    """
     peer = request.client.host if request.client is not None and request.client.host else ""
-    if peer and peer in trusted_proxy_peers():
-        forwarded = _forwarded_client(request)
-        if forwarded and forwarded != "*":
-            return forwarded
+    if peer:
+        networks = trusted_proxy_networks()
+        if networks and _is_trusted(peer, networks):
+            forwarded = _forwarded_client(request, networks)
+            if forwarded:
+                return forwarded
     return peer or "unknown"
 
 

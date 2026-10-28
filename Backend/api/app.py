@@ -1,6 +1,9 @@
 import logging
 import math
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status, Query
+from contextlib import contextmanager
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Path as ApiPath, Query, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
@@ -13,15 +16,22 @@ from datasets.ManagerDatabase import (
     drain_pool,
     request_session,
 )
+from map.checkpoint_slug import SLUG_MAX_LENGTH
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
 from map.router import TopologicalRouter
 from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
-from .editor_auth import require_editor_password
+from .editor_auth import client_key, require_editor_password
 from .envfile import load_env_file
-from .settings import assert_production_database, get_settings
-from .walk_session import InvalidSessionId, WalkSessions, parse_session_id
+from .settings import BootRefusal, assert_production_database, boot_or_exit, get_settings
+from .walk_session import (
+    SESSION_LIMIT_DETAIL,
+    InvalidSessionId,
+    SessionLimit,
+    WalkSessions,
+    parse_session_id,
+)
 
 load_env_file()
 
@@ -47,6 +57,7 @@ from map.MapDatabaseManager import (
     UnknownCategoryError,
 )
 from .schema import (
+    NAME_MAX,
     ProcessRawEdgeSchema,
     CheckpointSchema,
     CheckpointCategorySchema,
@@ -96,7 +107,7 @@ def database_from_settings() -> ConexaoBD:
     )
 
 
-db = database_from_settings()
+db = boot_or_exit(database_from_settings)
 map_db_manager = MapDatabaseManager(db, per_request=True)
 
 # Por fora das rotas: o preflight não abre MySQL.
@@ -130,7 +141,7 @@ topo_map = TopologicalMap()
 router = TopologicalRouter(topo_map)
 
 
-class MapLoadError(RuntimeError):
+class MapLoadError(BootRefusal):
     """Produção não sobe sem grafo. A mensagem não leva senha nem SQL."""
 
 
@@ -194,7 +205,7 @@ def _load_map_once() -> None:
     _raise_if_production_map_unusable()
 
 
-_load_map_once()
+boot_or_exit(_load_map_once)
 
 starting_node = "Recepcao"
 walk_sessions = WalkSessions(topo_map, default_start=starting_node)
@@ -216,6 +227,20 @@ def require_session_id(x_pov_session: str | None = Header(default=None)) -> str:
         return parse_session_id(x_pov_session)
     except InvalidSessionId as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@contextmanager
+def hold_session(session_id: str, request: Request, **kwargs):
+    """Sessão deste IP. O IP é o mesmo do limite de senha. Cheio responde 429."""
+    try:
+        with walk_sessions.hold(session_id, client_ip=client_key(request), **kwargs) as state:
+            yield state
+    except SessionLimit as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=SESSION_LIMIT_DETAIL,
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
 
 
 @app.get("/health")
@@ -343,6 +368,7 @@ def create_edge(
 @app.post("/api/localize", status_code=status.HTTP_200_OK)
 def localize_user(
     sensor_data: StepSensorSchema,
+    request: Request,
     _test: None = Depends(require_test_routes),
     session_id: str = Depends(require_session_id),
 ):
@@ -351,7 +377,7 @@ def localize_user(
 
     try:
         step_event = StepEventAdapter(step_length_m=sensor_data.step_length_m)
-        with walk_sessions.hold(session_id) as state:
+        with hold_session(session_id, request) as state:
             current_node = state.matcher.process_step(
                 step=step_event,
                 current_yaw_rad=sensor_data.yaw_rad,
@@ -371,7 +397,10 @@ def localize_user(
 
 
 @app.get("/api/route", status_code=status.HTTP_200_OK)
-def get_route(start: str = Query(...), end: str = Query(...)):
+def get_route(
+    start: str = Query(..., max_length=NAME_MAX),
+    end: str = Query(..., max_length=NAME_MAX),
+):
     start, end = _canonical_pair(
         start,
         end,
@@ -392,7 +421,10 @@ def get_route(start: str = Query(...), end: str = Query(...)):
 
 
 @app.get("/api/compass_route", status_code=status.HTTP_200_OK)
-def get_compass_route(start: str = Query(...), end: str = Query(...)):
+def get_compass_route(
+    start: str = Query(..., max_length=NAME_MAX),
+    end: str = Query(..., max_length=NAME_MAX),
+):
     """Retorna a rota com segmentos detalhados (heading, distance) para navegação por bússola."""
     start, end = _canonical_pair(
         start,
@@ -414,6 +446,16 @@ def get_compass_route(start: str = Query(...), end: str = Query(...)):
         "path_sequence": [start] + [s["target"] for s in segments],
         "total_distance_m": round(total_distance, 2)
     }
+
+def route_label(given: str | None, start: str, end: str) -> str:
+    """Nome gravado em saved_routes.name (VARCHAR 100). Sem nome, usa os nós."""
+    chosen = (given or "").strip()
+    if not chosen:
+        chosen = f"{start} → {end}"
+    if len(chosen) > NAME_MAX:
+        chosen = chosen[:NAME_MAX].rstrip() or chosen[:NAME_MAX]
+    return chosen
+
 
 # --- ENDPOINTS DE ROTAS SALVAS ---
 
@@ -444,21 +486,25 @@ def create_route(
 
     path_sequence = router.calculate_route(start, end)
 
-    # Nome automático se não fornecido
-    name = route_data.name or f"{start} → {end}"
+    name = route_label(route_data.name, start, end)
 
-    success = map_db_manager.save_route(name, start, end, segments, path_sequence)
-    if not success:
+    route_id = map_db_manager.save_route(name, start, end, segments, path_sequence)
+    if type(route_id) is not int or route_id <= 0:
         raise _internal_error("Erro interno ao salvar.", note="POST /api/routes")
 
-    # Retorna a rota criada (busca pelo último ID)
-    routes = map_db_manager.get_all_routes()
-    new_route = routes[0] if routes else None
+    created = map_db_manager.get_route_by_id(route_id)
+    if created is None:
+        created = {
+            "id": route_id,
+            "name": name,
+            "start_node": start,
+            "end_node": end,
+        }
 
     return {
         "status": "success",
         "message": f"Rota '{name}' salva com sucesso.",
-        "route": new_route
+        "route": created,
     }
 
 @app.get("/api/routes/{route_id}", status_code=status.HTTP_200_OK)
@@ -488,7 +534,8 @@ def delete_route(
 # Modificar reset para aceitar start_node dinâmico
 @app.post("/api/reset")
 def reset_session(
-    start_node: str = Query(default="Recepcao"),
+    request: Request,
+    start_node: str = Query(default="Recepcao", max_length=NAME_MAX),
     _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
     session_id: str = Depends(require_session_id),
@@ -499,7 +546,7 @@ def reset_session(
         start_node = next(iter(topo_map.nodes), starting_node)
     else:
         start_node = resolved_start
-    with walk_sessions.hold(session_id, reset=True, start_node=start_node) as state:
+    with hold_session(session_id, request, reset=True, start_node=start_node) as state:
         started = state.visited_path[0]
     return {
         "status": "success",
@@ -515,10 +562,11 @@ for _mount, _folder in (("/css", "css"), ("/js", "js"), ("/assets", "assets"), (
 
 @app.get("/api/current_location")
 def get_current_location(
+    request: Request,
     _test: None = Depends(require_test_routes),
     session_id: str = Depends(require_session_id),
 ):
-    with walk_sessions.hold(session_id) as state:
+    with hold_session(session_id, request) as state:
         return {
             "current_node": state.matcher.current_node,
             "accumulated_distance_m": state.matcher.accumulated_distance,
@@ -583,8 +631,8 @@ def list_categories():
 
 @app.get("/api/checkpoints/resolve", status_code=status.HTTP_200_OK)
 def resolve_checkpoint(
-    b: int = Query(...),
-    cp: str = Query(...),
+    b: int = Query(..., ge=1, le=2_147_483_647),
+    cp: str = Query(..., max_length=SLUG_MAX_LENGTH),
 ):
     """Acha o checkpoint do QR ``cp`` (slug) no prédio ``b``."""
     slug = cp.strip()
@@ -605,7 +653,7 @@ def resolve_checkpoint(
 
 @app.patch("/api/checkpoints/{name}", status_code=status.HTTP_200_OK)
 def update_checkpoint_category(
-    name: str,
+    name: Annotated[str, ApiPath(max_length=NAME_MAX)],
     body: CheckpointCategorySchema,
     _editor: None = Depends(require_editor_password),
 ):
@@ -633,7 +681,7 @@ def update_checkpoint_category(
 
 @app.patch("/api/checkpoints/{name}/position", status_code=status.HTTP_200_OK)
 def update_checkpoint_position(
-    name: str,
+    name: Annotated[str, ApiPath(max_length=NAME_MAX)],
     body: CheckpointPositionSchema,
     _editor: None = Depends(require_editor_password),
 ):

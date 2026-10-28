@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import api.app as app_module
-from api.walk_session import InvalidSessionId, WalkSessions, parse_session_id
+from api.walk_session import InvalidSessionId, SessionLimit, WalkSessions, parse_session_id
 
 pytestmark = pytest.mark.unit
 
@@ -44,25 +44,98 @@ def test_session_id_accepts_a_device_token_and_rejects_the_rest():
             parse_session_id(raw)
 
 
-def test_expired_session_starts_over_and_the_cap_drops_the_oldest():
+def test_inactivity_expires_the_session_and_a_touch_renews_it():
     clock = _Clock()
-    store = WalkSessions(_Map(), ttl_s=10, max_sessions=2, clock=clock)
+    store = WalkSessions(_Map(), ttl_s=10, clock=clock)
     clock.now = 1
-    with store.hold("aaaaaaaa") as state:
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        state.visited_path.append("marca-a")
+    clock.now = 9
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path[-1] == "marca-a"
+    clock.now = 19
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path[-1] == "marca-a"
+    clock.now = 30
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path == ["Recepcao"]
+
+
+def test_a_full_table_refuses_the_newcomer_and_keeps_the_others():
+    clock = _Clock()
+    store = WalkSessions(_Map(), ttl_s=10, max_sessions=2, max_per_ip=8, clock=clock)
+    clock.now = 1
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
         state.visited_path.append("marca-a")
     clock.now = 2
-    with store.hold("bbbbbbbb") as state:
+    with store.hold("bbbbbbbb", client_ip="203.0.113.2") as state:
         state.visited_path.append("marca-b")
-    clock.now = 12
-    with store.hold("aaaaaaaa") as state:
+    clock.now = 3
+    with pytest.raises(SessionLimit) as exc:
+        with store.hold("cccccccc", client_ip="198.51.100.3"):
+            pass
+    assert exc.value.retry_after >= 1
+    with store.hold("bbbbbbbb", client_ip="203.0.113.2") as state:
+        assert state.visited_path[-1] == "marca-b"
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path[-1] == "marca-a"
+    assert len(store) == 2
+
+
+def test_one_address_stops_at_eight_and_does_not_evict_another():
+    clock = _Clock()
+    store = WalkSessions(_Map(), ttl_s=100, max_per_ip=2, clock=clock)
+    clock.now = 5
+    with store.hold("aaaaaaa1", client_ip="203.0.113.1") as state:
+        state.visited_path.append("fica")
+    with store.hold("aaaaaaa2", client_ip="203.0.113.1"):
+        pass
+    with pytest.raises(SessionLimit) as exc:
+        with store.hold("aaaaaaa3", client_ip="203.0.113.1"):
+            pass
+    assert exc.value.retry_after == 100
+    with store.hold("bbbbbbb1", client_ip="203.0.113.2") as state:
+        state.visited_path.append("outro")
+    with store.hold("bbbbbbb2", client_ip="203.0.113.2"):
+        pass
+    with store.hold("aaaaaaa1", client_ip="203.0.113.1", reset=True) as state:
         assert state.visited_path == ["Recepcao"]
-    clock.now = 13
-    with store.hold("cccccccc") as state:
-        state.visited_path.append("marca-c")
-    with store.hold("bbbbbbbb") as state:
+    with pytest.raises(SessionLimit):
+        with store.hold("aaaaaaa1", client_ip="203.0.113.2", reset=True):
+            pass
+    with store.hold("bbbbbbb1", client_ip="203.0.113.2") as state:
+        assert state.visited_path[-1] == "outro"
+    with store.hold("aaaaaaa1", client_ip="203.0.113.1") as state:
         assert state.visited_path == ["Recepcao"]
-    with store.hold("cccccccc") as state:
-        assert state.visited_path[-1] == "marca-c"
+    assert len(store) == 4
+
+
+def test_another_ip_does_not_see_the_path_or_renew_the_owner():
+    clock = _Clock()
+    store = WalkSessions(_Map(), ttl_s=10, clock=clock)
+    clock.now = 0
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        state.visited_path.append("marca-a")
+    clock.now = 9
+    with store.hold("aaaaaaaa", client_ip="203.0.113.2") as state:
+        assert state.visited_path == ["Recepcao"]
+        state.visited_path.append("intruso")
+    assert len(store) == 2
+    clock.now = 11
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path == ["Recepcao"]
+    with store.hold("aaaaaaaa", client_ip="203.0.113.2") as state:
+        assert state.visited_path[-1] == "intruso"
+
+
+def test_reset_from_another_ip_does_not_replace_the_owner():
+    store = WalkSessions(_Map(), ttl_s=100)
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        state.visited_path.append("fica")
+    with store.hold("aaaaaaaa", client_ip="203.0.113.2", reset=True) as state:
+        assert state.visited_path == ["Recepcao"]
+    with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
+        assert state.visited_path[-1] == "fica"
     assert len(store) == 2
 
 

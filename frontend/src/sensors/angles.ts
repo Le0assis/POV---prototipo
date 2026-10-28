@@ -1,3 +1,5 @@
+import { plantHeadingToScreenDeg } from '../map/units.js';
+
 /**
  * Utilitários de ângulo (puros, sem DOM — testáveis em node).
  *
@@ -15,6 +17,20 @@
  * 'cw'  = o heading do grafo já é um rumo de bússola (horário).
  */
 export const HEADING_CONVENTION = 'ccw';
+
+/**
+ * Graus CSS da agulha: 0 aponta para cima.
+ * O rumo do aparelho é horário a partir do norte. A rotação da planta
+ * é a mesma de `plantHeadingToScreenDeg` (norte local = +y).
+ */
+export function compassNeedleDeg(headingDeg, rotationRad = 0) {
+    const heading = Number(headingDeg);
+    if (!Number.isFinite(heading)) return null;
+    const rotation = Number(rotationRad);
+    const north = plantHeadingToScreenDeg(Math.PI / 2, Number.isFinite(rotation) ? rotation : 0);
+    if (north == null) return null;
+    return normalizeDeg(north + heading);
+}
 
 /** Normaliza um ângulo em graus para [0, 360). */
 export function normalizeDeg(a) {

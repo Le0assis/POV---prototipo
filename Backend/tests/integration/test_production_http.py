@@ -119,6 +119,41 @@ def test_production_does_not_start_when_the_graph_is_empty_or_failed(monkeypatch
         _restore_map(snapshot)
 
 
+def test_production_map_boot_exits_without_a_traceback(monkeypatch, capsys):
+    from api.settings import boot_or_exit
+
+    monkeypatch.setenv("POV_ENV", "production")
+    monkeypatch.setattr(app_module, "request_session", lambda *_args, **_kwargs: contextlib.nullcontext())
+    snapshot = _snapshot_map()
+
+    def empty_load(target):
+        target.nodes.clear()
+        target.edges.clear()
+
+    def broken_load(_target):
+        raise RuntimeError("segredo-do-banco")
+
+    try:
+        monkeypatch.setattr(app_module.map_db_manager, "load_map_into_system", empty_load)
+        with pytest.raises(SystemExit) as empty_exc:
+            boot_or_exit(app_module._load_map_once)
+        assert empty_exc.value.code == 1
+        empty = capsys.readouterr()
+        assert empty.err == "Produção não sobe: Grafo vazio.\n"
+        assert "Traceback" not in empty.err
+
+        monkeypatch.setattr(app_module.map_db_manager, "load_map_into_system", broken_load)
+        with pytest.raises(SystemExit) as failed_exc:
+            boot_or_exit(app_module._load_map_once)
+        assert failed_exc.value.code == 1
+        failed = capsys.readouterr()
+        assert failed.err == "Produção não sobe: Falha ao carregar o grafo.\n"
+        assert "Traceback" not in failed.err
+        assert "segredo-do-banco" not in failed.err
+    finally:
+        _restore_map(snapshot)
+
+
 def test_production_cors_allows_only_the_pages(monkeypatch):
     _clear_cors(monkeypatch, "production")
     client = TestClient(app)

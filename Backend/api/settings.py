@@ -8,7 +8,11 @@ a variável e a próxima chamada vê o valor novo.
 from __future__ import annotations
 
 import os
+import sys
+from collections.abc import Callable
+from typing import TypeVar
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Pages. Em produção a lista é esta, a menos que CORS_ORIGINS substitua.
@@ -42,10 +46,21 @@ class Settings(BaseSettings):
     # DB_USER, DB_PASSWORD. Host, porta e schema têm default de desenvolvimento.
     # Usuário e senha não: None não vira root nem senha vazia. DB_ADMIN_* não é lido.
     db_host: str = "localhost"
-    db_port: int = 3306
+    # Número vira int. Texto como ``abc`` fica str: get_settings() não pode
+    # estourar ValidationError antes do seed dizer que a porta é inválida.
+    db_port: int | str = 3306
     db_name: str = "POV"
     db_user: str | None = None
     db_password: str | None = None
+
+    @field_validator("db_port", mode="before")
+    @classmethod
+    def _port_number_stays_int(cls, value: object) -> object:
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.isdigit():
+                return int(raw)
+        return value
 
     def allowed_origins(self) -> list[str]:
         raw = self.cors_origins.strip()
@@ -67,20 +82,26 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Produção não herda conta. Senha vazia e usuário root param a subida.
+# Produção não herda conta. Senha vazia, curta e usuário root param a subida.
 _PRODUCTION_DB_KEYS = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD")
 _PRODUCTION_DB_NONEMPTY = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER")
+_MIN_PRODUCTION_PASSWORD = 12
 
 
-class DatabaseConfigError(RuntimeError):
+class BootRefusal(RuntimeError):
+    """A subida para. A mensagem vai para o stderr, sem traceback."""
+
+
+class DatabaseConfigError(BootRefusal):
     """Conta do MySQL inválida em produção. A mensagem não leva a senha."""
 
 
 def assert_production_database() -> None:
     """Para a subida em produção sem conta de aplicação.
 
-    Falta variável, ``DB_USER`` root ou senha vazia. Fora de produção não
-    inventa usuário nem senha.
+    Falta variável, ``DB_USER`` root, senha vazia ou senha com menos de
+    12 caracteres. Fora de produção a senha curta continua válida. A
+    mensagem não mostra o valor.
     """
     if get_settings().pov_env.strip().lower() != "production":
         return
@@ -96,8 +117,14 @@ def assert_production_database() -> None:
     refused: list[str] = []
     if user.casefold() == "root":
         refused.append("DB_USER=root")
-    if "DB_PASSWORD" in os.environ and not str(password).strip() and "DB_PASSWORD" not in missing:
-        refused.append("DB_PASSWORD vazia")
+    if "DB_PASSWORD" in os.environ and "DB_PASSWORD" not in missing:
+        stripped_password = str(password).strip()
+        if not stripped_password:
+            refused.append("DB_PASSWORD vazia")
+        elif len(stripped_password) < _MIN_PRODUCTION_PASSWORD:
+            refused.append(
+                f"DB_PASSWORD com menos de {_MIN_PRODUCTION_PASSWORD} caracteres"
+            )
     problems = missing + refused
     if not problems:
         return
@@ -105,6 +132,19 @@ def assert_production_database() -> None:
         "Produção sem conta de aplicação ("
         + ", ".join(problems)
         + "). Defina DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD. "
-        "DB_USER não pode ser root e a senha não pode ser vazia. "
+        "DB_USER não pode ser root. A senha não pode ser vazia e, em produção, "
+        f"precisa de {_MIN_PRODUCTION_PASSWORD} caracteres ou mais. "
         "A API não lê DB_ADMIN_*."
     )
+
+
+_T = TypeVar("_T")
+
+
+def boot_or_exit(load: Callable[[], _T]) -> _T:
+    """Sobe o processo. Recusa de produção sai com a mensagem, sem traceback."""
+    try:
+        return load()
+    except BootRefusal as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from None

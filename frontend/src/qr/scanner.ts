@@ -13,10 +13,10 @@ export const CAMERA_REASON = Object.freeze({
 });
 
 export const CAMERA_REASON_TEXT = Object.freeze({
-    insecure: 'A câmera só abre em HTTPS. Digite o código do ponto.',
-    denied: 'A permissão da câmera foi negada. Libere o acesso nas configurações do navegador ou digite o código do ponto.',
-    unavailable: 'Nenhuma câmera disponível neste aparelho. Digite o código do ponto.',
-    generic: 'Não foi possível abrir a câmera. Digite o código do ponto.'
+    insecure: 'A câmera só abre em HTTPS. Digite o nome do ponto.',
+    denied: 'A permissão da câmera foi negada. Libere o acesso nas configurações do navegador ou digite o nome do ponto.',
+    unavailable: 'Nenhuma câmera disponível neste aparelho. Digite o nome do ponto.',
+    generic: 'Não foi possível abrir a câmera. Digite o nome do ponto.'
 });
 
 const SCAN_INTERVAL_MS = 200;

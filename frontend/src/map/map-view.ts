@@ -72,6 +72,12 @@ export async function mountMapView(element) {
         model.missingAnchor = next && next.missingAnchor;
         model.problems = (next && next.problems) || [];
         if (view) view.pxPerM = scaleOf();
+        const rotation = model.config && Number(model.config.rotation_rad);
+        const planRotation = Number.isFinite(rotation) ? rotation : 0;
+        if (element && element.dataset) element.dataset.planRotation = String(planRotation);
+        if (element && typeof element.dispatchEvent === 'function') {
+            element.dispatchEvent(new CustomEvent('pov-plan-rotation', { detail: planRotation }));
+        }
     }
 
     function paintNotice(planError) {

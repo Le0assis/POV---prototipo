@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
-import { relativeHeadingRad } from '../src/sensors/angles.ts';
+import { compassNeedleDeg, relativeHeadingRad } from '../src/sensors/angles.ts';
+
+test('a agulha aponta para cima com norte e planta sem rotação', () => {
+    assert.ok(Math.abs(compassNeedleDeg(0, 0)) < 1e-9);
+    assert.ok(Math.abs(compassNeedleDeg(90, 0) - 90) < 1e-9);
+});
+
+test('a agulha acompanha a rotação da planta', () => {
+    const turned = compassNeedleDeg(0, Math.PI / 2);
+    assert.ok(Math.abs(turned - 90) < 1e-6);
+});
 
 test('sem giro, o heading relativo é o heading_rad da aresta', () => {
     const ref = 0.4;

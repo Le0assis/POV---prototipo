@@ -15,6 +15,12 @@
 import { STORAGE_KEYS } from '../core/config.js';
 import { circularEma, normalizeDeg, signedDelta, bearingToBackendYaw } from './angles.js';
 
+/** Rumo de bússola já suavizado, horário a partir do norte, sem o offset do grafo. */
+export function compassBearingDeg(provider) {
+    const value = provider && provider.headingDeg;
+    return Number.isFinite(value) ? value : null;
+}
+
 const EMA_ALPHA = 0.15;
 const KEY_STEP_DEG = 5;
 

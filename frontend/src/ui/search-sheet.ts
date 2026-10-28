@@ -13,13 +13,14 @@ import {
     destinationCountLabel,
     searchDestinations
 } from '../core/search.js';
+import { stripPixelWording } from '../map/units.js';
 
 export function mountSearchSheet(root, { onClose, onSelect, loadCatalog, originSlug } = {} as any) {
     const scrim = document.createElement('button');
     scrim.type = 'button';
     scrim.className = 'sheet-scrim';
     scrim.tabIndex = -1;
-    scrim.setAttribute('aria-label', 'Fechar busca');
+    scrim.setAttribute('aria-label', 'Voltar para a tela anterior');
     scrim.hidden = true;
 
     const sheet = document.createElement('section');
@@ -48,8 +49,8 @@ export function mountSearchSheet(root, { onClose, onSelect, loadCatalog, originS
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'btn btn-ghost sheet-close';
-    close.textContent = 'Fechar';
-    close.setAttribute('aria-label', 'Fechar busca');
+    close.textContent = 'Voltar';
+    close.setAttribute('aria-label', 'Voltar para a tela anterior');
     head.append(title, close);
 
     const queryInput = document.createElement('input');
@@ -304,7 +305,7 @@ export function mountSearchSheet(root, { onClose, onSelect, loadCatalog, originS
             if (item.distanceLabel) {
                 const distance = document.createElement('span');
                 distance.className = 'destination-distance';
-                distance.textContent = item.distanceLabel;
+                distance.textContent = stripPixelWording(item.distanceLabel);
                 option.append(distance);
             }
 

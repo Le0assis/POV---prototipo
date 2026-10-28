@@ -17,6 +17,17 @@ class _MemDB:
     def __init__(self) -> None:
         self.edges = [
             {
+                "id": 3,
+                "source_node": "Quarto",
+                "target_node": "Sala",
+                "distance_m": 999.0,
+                "heading_rad": 1.2,
+                "origin": "recorded",
+                "active_trace_id": 99,
+                "samples_count": 9,
+                "dup_rank": 1,
+            },
+            {
                 "id": 7,
                 "source_node": "Recepcao",
                 "target_node": "Corredor",
@@ -94,15 +105,18 @@ class _MemDB:
                 row for row in self.traces
                 if row["source_node"] == params[0] and row["target_node"] == params[1]
             ]
-        if "FROM edges" in sql and "WHERE id = %s" in sql:
-            return [row for row in self.edges if row["id"] == params[0]]
-        if "FROM edges" in sql and "CAST(source_node AS BINARY)" in sql:
-            return [
-                row for row in self.edges
-                if row["source_node"] == params[0] and row["target_node"] == params[1]
-            ]
         if "FROM edges" in sql:
-            return list(self.edges)
+            rows = self.edges
+            if "dup_rank = 0" in sql:
+                rows = [row for row in rows if int(row.get("dup_rank") or 0) == 0]
+            if "WHERE id = %s" in sql:
+                return [row for row in rows if row["id"] == params[0]]
+            if "CAST(source_node AS BINARY)" in sql:
+                return [
+                    row for row in rows
+                    if row["source_node"] == params[0] and row["target_node"] == params[1]
+                ]
+            return list(rows)
         raise AssertionError(sql)
 
 
@@ -167,3 +181,7 @@ def test_detail_returns_the_requested_direction():
     assert forward["traces"][0]["is_valid"] is True
     assert len(forward["traces"][0]["path"]) == 2
     assert MapDatabaseManager(_MemDB()).get_connection(99) is None
+    extra = MapDatabaseManager(_MemDB()).get_connection(3)
+    assert extra["edge_id"] == 3
+    assert extra["distance_m"] == 999.0
+    assert extra["reverse_edge_id"] == 43

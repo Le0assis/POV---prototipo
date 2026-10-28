@@ -1,4 +1,5 @@
 import re
+import sys
 
 from datasets.ManagerDatabase import ConexaoBD  # Ajuste o import conforme o nome exato do seu arquivo
 
@@ -182,9 +183,11 @@ def conexao_from_settings() -> ConexaoBD:
     em vez de entrar como root.
     """
     from api.envfile import load_env_file
+    from api.settings import assert_production_database
     from datasets.bootstrap_db import app_db_config
 
     load_env_file()
+    assert_production_database()
     cfg = app_db_config()
     return ConexaoBD(
         host=str(cfg["host"]),
@@ -195,14 +198,19 @@ def conexao_from_settings() -> ConexaoBD:
     )
 
 
-if __name__ == "__main__":
-    # CREATE DATABASE/USER/GRANT com DB_ADMIN_*. Tabelas com DB_USER (pov).
-    # Não apaga um schema que já exista com outro nome.
+def main() -> None:
+    """Cria o schema. Em produção, senha curta sai com código 1 e sem traceback.
+
+    Se a conta pov não abre sessão, sai com código 1. A mensagem não leva a senha.
+    CREATE DATABASE/USER/GRANT usam DB_ADMIN_*. Tabelas usam DB_USER (pov).
+    Não apaga um schema que já exista com outro nome.
+    """
     from api.envfile import load_env_file
+    from api.settings import boot_or_exit
     from datasets.bootstrap_db import ensure_app_database
 
     load_env_file()
-    conexao = conexao_from_settings()
+    conexao = boot_or_exit(conexao_from_settings)
     ensure_app_database(
         str(conexao.database),
         str(conexao.host),
@@ -211,7 +219,16 @@ if __name__ == "__main__":
         str(conexao.password),
     )
     conexao.connect()
+    if not conexao.connection:
+        print(
+            "Não conectou como pov. Confira DB_HOST, DB_PORT, DB_NAME, DB_USER e DB_PASSWORD.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
-    if conexao.connection:
-        criar_tabelas_sistema(conexao)
-        conexao.disconnect()
+    criar_tabelas_sistema(conexao)
+    conexao.disconnect()
+
+
+if __name__ == "__main__":
+    main()

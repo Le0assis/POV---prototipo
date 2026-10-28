@@ -417,3 +417,25 @@ def test_env_example_has_no_secret_and_gitignore_covers_dotenv():
     assert "EDITOR_PASSWORD=" not in example
     ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert ".env" in {line.strip() for line in ignored}
+
+
+def test_trusted_proxies_accepts_cidr_and_ipv6_loopback(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.0/8, ::1")
+    inside = _Client("10.1.2.3", {"cf-connecting-ip": "203.0.113.50"})
+    assert client_key(inside) == "203.0.113.50"
+    ipv6 = _Client("::1", {"x-forwarded-for": "198.51.100.7"})
+    assert client_key(ipv6) == "198.51.100.7"
+    outside = _Client("11.0.0.1", {"cf-connecting-ip": "203.0.113.50"})
+    assert client_key(outside) == "11.0.0.1"
+
+
+def test_trusted_proxies_refuses_catch_all_and_garbage(monkeypatch):
+    for value in ("0.0.0.0/0", "::/0", "*", "não-é-ip"):
+        monkeypatch.setenv("TRUSTED_PROXIES", value)
+        request = _Client("127.0.0.1", {"cf-connecting-ip": "203.0.113.50"})
+        assert client_key(request) == "127.0.0.1", value
+    monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1")
+    junk = _Client("127.0.0.1", {"cf-connecting-ip": "nada-a-ver"})
+    assert client_key(junk) == "127.0.0.1"
+    mapped = _Client("::ffff:127.0.0.1", {"cf-connecting-ip": "203.0.113.51"})
+    assert client_key(mapped) == "203.0.113.51"

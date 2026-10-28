@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from datasets.ManagerDatabase import ConexaoBD
 from map.MapDatabaseManager import MapDatabaseManager
 
 pytestmark = pytest.mark.unit
@@ -40,6 +41,9 @@ class _TxDB:
         self.next_edge = 10
         self.edge_sql = ""
         self.searches: list[str] = []
+
+    def _redact(self, exc):
+        return ConexaoBD._redact(self, exc)
 
     def begin_transaction(self):
         self.open = True
@@ -169,6 +173,8 @@ def test_valid_walk_commits_once_and_counts_sample():
     assert saved["edge_origin"] == "recorded"
     assert saved["edge_distance_m"] == pytest.approx(2.0)
     assert "samples_count" in db.edge_sql
+    assert "dup_rank" in db.edge_sql
+    assert ", 0)" in db.edge_sql
     expected_t = datetime(2026, 10, 20, 16, 5, 11, 20000, tzinfo=timezone.utc).timestamp()
     assert saved["path"][0] == {"x": 0.0, "y": 0.0, "t": pytest.approx(expected_t)}
     assert len(saved["path"]) == 2
@@ -265,6 +271,61 @@ def test_save_edge_commits_both_directions_in_name_order():
     assert [pair for pair in again.order] == [("Quarto", "Sala"), ("Sala", "Quarto")]
 
 
+def test_save_edge_rollback_redacts_the_password_and_the_url(capsys):
+    secret = "senha12"
+    db = _EdgeTx()
+    db.password = secret
+
+    def execute_within(sql, params=None):
+        raise RuntimeError(f"mysql://pov:{secret}@127.0.0.1:3306/POV {secret}")
+
+    db.execute_within = execute_within
+    assert MapDatabaseManager(db).save_edge("Sala", "Quarto", 4.0, 0.2) is False
+    assert "rollback" in db.ops
+    printed = capsys.readouterr().out
+    assert printed.startswith("Aresta revertida:")
+    assert secret not in printed
+    assert "pov:" not in printed
+    assert "mysql://***@127.0.0.1:3306/POV" in printed
+
+
+def test_save_edge_masks_a_short_password_inside_the_url(capsys):
+    db = _EdgeTx()
+    db.password = "ab"
+
+    def execute_within(sql, params=None):
+        raise RuntimeError("mysql://pov:ab@127.0.0.1/POV")
+
+    db.execute_within = execute_within
+    assert MapDatabaseManager(db).save_edge("Sala", "Quarto", 4.0, 0.2) is False
+    printed = capsys.readouterr().out
+    assert "pov:ab@" not in printed
+    assert "ab" not in printed
+    assert "mysql://***@127.0.0.1/POV" in printed
+
+
+def test_walk_rollback_redacts_the_password_and_the_url(capsys):
+    secret = "senha12"
+    db = _TxDB()
+    db.password = secret
+
+    def insert_within(sql, params=None):
+        raise RuntimeError(f"mysql://root:{secret}@10.0.0.5/POV {secret}")
+
+    db.insert_within = insert_within
+    saved = MapDatabaseManager(db).record_walk(
+        "Quarto", "Sala", 4, "2026-10-20 16:05:11.020", "2026-10-20 16:05:12.020",
+        _built(), is_valid=True,
+    )
+    assert saved is None
+    assert "rollback" in db.ops
+    printed = capsys.readouterr().out
+    assert printed.startswith("Trajetória revertida:")
+    assert secret not in printed
+    assert "root:" not in printed
+    assert "mysql://***@10.0.0.5/POV" in printed
+
+
 def test_save_edge_rolls_back_when_the_second_direction_fails():
     db = _EdgeTx(fail_second=True)
     assert MapDatabaseManager(db).save_edge("Sala", "Quarto", 4.0, 0.2) is False
@@ -281,6 +342,9 @@ class _EdgeTx:
         self.edges: dict[tuple[str, str], tuple] = {}
         self.open = False
         self.upserts = 0
+
+    def _redact(self, exc):
+        return ConexaoBD._redact(self, exc)
 
     def begin_transaction(self):
         self.open = True

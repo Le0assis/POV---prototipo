@@ -57,6 +57,28 @@ export function plantHeadingToScreenDeg(headingRad, rotationRad) {
     return fromEastDeg + 90;
 }
 
+/** Texto de distância para o visitante. Só metros, sem pixel nem px_per_m. */
+export function formatUserMeters(meters, digits = 0) {
+    const value = Number(meters);
+    if (!Number.isFinite(value)) return '-- m';
+    const places = Number.isFinite(digits) && digits > 0 ? Math.floor(digits) : 0;
+    const shown = places ? value.toFixed(places) : String(Math.round(value));
+    return `${shown} m`;
+}
+
+/** Tira px, px_per_m e a palavra pixel de um texto que o visitante vai ler. */
+export function stripPixelWording(value) {
+    return String(value == null ? '' : value)
+        .replace(/px_per_m\s*[:=]?\s*-?\d+(?:[.,]\d+)?/gi, '')
+        .replace(/-?\d+(?:[.,]\d+)?\s*px\b/gi, '')
+        .replace(/\bpixels?\b/gi, '')
+        .replace(/\s+,/g, ',')
+        .replace(/,\s*,/g, ',')
+        .replace(/^[,\s]+|[,\s]+$/g, '')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+}
+
 /** Distância em metros entre dois pixels, com escala uniforme (rotação preserva comprimento). */
 export function pixelDistanceMeters(a, b, pxPerM) {
     const scale = num(pxPerM);

@@ -4,7 +4,7 @@
  */
 
 const QR_ICON = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
     <rect width="5" height="5" x="3" y="3" rx="1"></rect>
     <rect width="5" height="5" x="16" y="3" rx="1"></rect>
     <rect width="5" height="5" x="3" y="16" rx="1"></rect>
