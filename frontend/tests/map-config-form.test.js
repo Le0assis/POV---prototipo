@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'vitest';
+
+const html = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../admin/map-config.html'),
+    'utf8'
+);
 
 import {
     MAP_CONFIG_HELP,
@@ -12,7 +20,10 @@ import {
 test('dicas da planta explicam imagem, px_per_m e rotação', () => {
     assert.match(MAP_CONFIG_HELP.plan_image, /vista de cima/);
     assert.match(MAP_CONFIG_HELP.px_per_m, /px_per_m = 100/);
-    assert.match(MAP_CONFIG_HELP.rotation_deg, /sentido horário/);
+    assert.match(MAP_CONFIG_HELP.rotation_deg, /sentido anti-horário/);
+    assert.match(MAP_CONFIG_HELP.rotation_deg, /rotation_rad/);
+    assert.match(html, /Rotação da planta \(graus, anti-horário\)/);
+    assert.doesNotMatch(MAP_CONFIG_HELP.rotation_deg, /sentido horário/);
 });
 
 test('px_per_m ausente ou <= 0 explica o 422', () => {
