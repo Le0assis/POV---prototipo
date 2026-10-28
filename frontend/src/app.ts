@@ -63,11 +63,11 @@ const ERROR_TEXT = {
 };
 
 const INSTRUCTION = {
-    [State.E0]: 'Leia um QR para saber onde você está.',
+    [State.E0]: 'Nenhuma posição definida. Leia um QR para saber onde você está ou digite o nome do ponto.',
     [State.E1]: 'Aponte para o QR code do ponto.',
     [State.E2]: 'Busca de destino aberta.',
     [State.E3]: 'Prévia da rota.',
-    previewNotice: 'Leia um QR para saber onde você está',
+    previewNotice: 'Nenhuma posição definida. Leia um QR para saber onde você está ou digite o nome do ponto',
     [State.E4]: 'Navegando até o destino.',
     [State.E5]: 'Você chegou ao destino.',
     [State.ERRO_CAMERA]: ERROR_TEXT[State.ERRO_CAMERA],
@@ -404,7 +404,7 @@ function instructionFor(current, summary) {
         return `${INSTRUCTION[State.E3]} ${INSTRUCTION.previewNotice}`;
     }
     if (current.state === State.E0 && (current.origin || current.destination)) {
-        const origin = current.origin ? current.origin.label : 'sem origem';
+        const origin = current.origin ? current.origin.label : 'posição não definida';
         const destination = current.destination ? current.destination.label : 'sem destino';
         return `Origem ${origin}. Destino ${destination}.`;
     }
@@ -463,7 +463,7 @@ function render() {
     if (mapHost) {
         const where = session.origin && session.origin.label
             ? `Mapa do prédio. Você está em ${session.origin.label}`
-            : 'Mapa do prédio';
+            : 'Mapa do prédio. Nenhuma posição definida.';
         mapHost.setAttribute('aria-label', where);
     }
     renderFlow(planned);

@@ -105,95 +105,66 @@ class TopologicalMap:
         return connection
 
     def get_map_layout(self) -> dict:
-        """Gera as coordenadas (x, y) de todos os nós para o Canvas HTML5."""
+        """Coordenadas de cada componente. Publica toda aresta gravada.
+
+        Não há raiz fixa. Cada componente fraco começa no primeiro nó
+        ainda sem posição, na ordem em que entrou no grafo. O seguinte
+        fica à direita do que já foi colocado, para não empilhar em (0, 0).
+        """
         if not self.nodes:
             return {"status": "success", "nodes": [], "edges": []}
 
-        # 1. Ponto inicial
-        start_node = self.canonical_name("Recepcao") or next(iter(self.nodes))
-
-        positions = {start_node: (0.0, 0.0)}
-        visited = {start_node}
-        queue = deque([start_node])
-        formatted_edges = [] #type: ignore
-
-        # 2. Algoritmo BFS percorrendo o grafo via get_outgoing_edges
-        while queue:
-            curr_node = queue.popleft()
-            curr_x, curr_y = positions[curr_node]
-
-            outgoing_edges = self.get_outgoing_edges(curr_node)
-
-            for edge in outgoing_edges:
-                neighbor = edge.target
-
-                # Pega a distância e o ângulo do objeto TopologicalEdge
-                dist = getattr(edge, 'distance_m', getattr(edge, 'distance', 0.0))
-                
-                # Se o ângulo estiver em graus ou radianos no seu objeto
-                if hasattr(edge, 'angle_deg'):
-                    angle_deg = edge.angle_deg
-                elif hasattr(edge, 'heading_rad'):
-                    angle_deg = math.degrees(edge.heading_rad)
-                else:
-                    angle_deg = getattr(edge, 'angle', 0.0)
-
-                # Registra a aresta formatada para o Canvas desenhar a linha
-                edge_id = tuple(sorted([curr_node, neighbor]))
-                if not any(e['id'] == edge_id for e in formatted_edges):
-                    formatted_edges.append({
-                        "id": edge_id,
-                        "source": curr_node,
-                        "target": neighbor,
-                        "distance_m": dist
-                    })
-
-                # Se o nó vizinho ainda não foi visitado, calcula a posição (x, y) dele
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append(neighbor)
-
-                    angle_rad = math.radians(angle_deg)
-                    next_x = curr_x + dist * math.cos(angle_rad)
-                    next_y = curr_y + dist * math.sin(angle_rad)
-
-                    positions[neighbor] = (round(next_x, 2), round(next_y, 2))
-
-        # Aresta gravada fora do componente da Recepção (o BFS só anda
-        # para a frente). Sem isto, Quarto → Cozinha some do layout.
-        seen_pairs = {e["id"] for e in formatted_edges}
+        formatted_edges = []
+        seen_pairs = set()
         for edge in self.edges:
-            pair = tuple(sorted([edge.source, edge.target]))
-            if pair in seen_pairs:
-                continue
             if edge.source not in self.nodes or edge.target not in self.nodes:
                 continue
+            pair = tuple(sorted((edge.source, edge.target)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
             formatted_edges.append({
-                "id": pair,
                 "source": edge.source,
                 "target": edge.target,
                 "distance_m": edge.distance_m,
             })
-            seen_pairs.add(pair)
 
-        # Garantia: Se existir algum nó isolado fora do BFS, adiciona ele no mapa
-        for node in self.nodes:
-            if node not in positions:
-                positions[node] = (0.0, 0.0)
+        adjacency: dict[str, list[tuple[str, float, float, bool]]] = {
+            name: [] for name in self.nodes
+        }
+        for edge in self.edges:
+            if edge.source not in self.nodes or edge.target not in self.nodes:
+                continue
+            adjacency[edge.source].append((edge.target, edge.distance_m, edge.heading_rad, True))
+            adjacency[edge.target].append((edge.source, edge.distance_m, edge.heading_rad, False))
 
-        # 3. Formata os Nós para o front-end
+        positions: dict[str, tuple[float, float]] = {}
+        cursor_x = 0.0
+        for root in self.nodes:
+            if root in positions:
+                continue
+            positions[root] = (round(cursor_x, 2), 0.0)
+            queue = deque([root])
+            while queue:
+                current = queue.popleft()
+                curr_x, curr_y = positions[current]
+                for neighbor, dist, heading, forward in adjacency[current]:
+                    if neighbor in positions:
+                        continue
+                    angle = heading if forward else heading + math.pi
+                    positions[neighbor] = (
+                        round(curr_x + dist * math.cos(angle), 2),
+                        round(curr_y + dist * math.sin(angle), 2),
+                    )
+                    queue.append(neighbor)
+            cursor_x = max(point[0] for point in positions.values()) + 1.0
+
         formatted_nodes = [
-            {"id": node, "label": node, "x": pos[0], "y": pos[1]}
-            for node, pos in positions.items()
+            {"id": node, "label": node, "x": positions[node][0], "y": positions[node][1]}
+            for node in self.nodes
         ]
-
-        clean_edges = [
-            {"source": e["source"], "target": e["target"], "distance_m": e["distance_m"]}
-            for e in formatted_edges
-        ]
-
         return {
             "status": "success",
             "nodes": formatted_nodes,
-            "edges": clean_edges
+            "edges": formatted_edges,
         }

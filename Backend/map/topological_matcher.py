@@ -2,12 +2,16 @@ from map.topological_map import TopologicalMap
 from pdr.steps import StepEvent
 import numpy as np
 
+class PositionUndefined(RuntimeError):
+    """A sessão ainda não tem checkpoint. O passo não inventa um."""
+
+
 class TopologicalMatcher:
     """Gerencia a localização atual do usuário dentro do grafo semântico."""
     
-    def __init__(self, topo_map: TopologicalMap, starting_node: str) -> None:
+    def __init__(self, topo_map: TopologicalMap, starting_node: str = "") -> None:
         self.map = topo_map
-        self.current_node_name: str = starting_node
+        self.current_node_name: str = starting_node or ""
         
         # Acumuladores de caminhada dentro do corredor atual
         self.accumulated_distance: float = 0.0
@@ -17,6 +21,11 @@ class TopologicalMatcher:
         Invocada a cada passo detectado pelo PDR. Atualiza a posição do utilizador
         dentro do grafo semântico/topológico se ele atingir um checkpoint.
         """
+        if not self.current_node_name:
+            raise PositionUndefined(
+                "Nenhuma posição definida. Informe o checkpoint ao reiniciar a posição."
+            )
+
         # 1. Acumular a distância percorrida pelo passo atual
         self.accumulated_distance += step.step_length_m
 

@@ -52,7 +52,7 @@ def parse_session_id(raw: str | None) -> str:
 class _Walk:
     def __init__(self, matcher: TopologicalMatcher, start: str, touched: float, client_ip: str) -> None:
         self.matcher = matcher
-        self.visited_path = [start]
+        self.visited_path = [start] if start else []
         self.touched = touched
         self.client_ip = client_ip
 
@@ -64,7 +64,7 @@ class WalkSessions:
         self,
         topo_map,
         *,
-        default_start: str = "Recepcao",
+        default_start: str = "",
         ttl_s: float = SESSION_TTL_S,
         max_sessions: int = SESSION_MAX,
         max_per_ip: int = SESSION_MAX_PER_IP,
@@ -88,14 +88,19 @@ class WalkSessions:
             return len(self._items)
 
     def _start_for_new(self, preferred: str | None, *, explicit: bool) -> str:
+        """Sem checkpoint pedido, a sessão nasce sem posição.
+
+        Não escolhe o primeiro nó nem um nome fixo. Quem define o ponto
+        manda o nome no reinício.
+        """
         nodes = getattr(self._map, "nodes", None) or {}
-        if explicit and preferred and preferred in nodes:
-            return preferred
-        if not explicit and self._default_start in nodes:
+        if explicit:
+            if preferred and preferred in nodes:
+                return preferred
+            return ""
+        if self._default_start and self._default_start in nodes:
             return self._default_start
-        if nodes:
-            return next(iter(nodes))
-        return self._default_start
+        return ""
 
     def _purge(self, now: float) -> None:
         """Sai quem não foi usado dentro do TTL. Uso renova ``touched``."""

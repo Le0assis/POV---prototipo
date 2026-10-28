@@ -19,6 +19,7 @@ from datasets.ManagerDatabase import (
 from map.checkpoint_slug import SLUG_MAX_LENGTH
 from map.MapDatabaseManager import MapDatabaseManager
 from map.topological_map import TopologicalMap
+from map.topological_matcher import PositionUndefined
 from map.router import TopologicalRouter
 from pdr.processor import RawEdgeProcessor
 from .cors import OriginCORSMiddleware
@@ -207,8 +208,7 @@ def _load_map_once() -> None:
 
 boot_or_exit(_load_map_once)
 
-starting_node = "Recepcao"
-walk_sessions = WalkSessions(topo_map, default_start=starting_node)
+walk_sessions = WalkSessions(topo_map)
 
 # --- ROTAS DA API ---
 
@@ -378,11 +378,14 @@ def localize_user(
     try:
         step_event = StepEventAdapter(step_length_m=sensor_data.step_length_m)
         with hold_session(session_id, request) as state:
-            current_node = state.matcher.process_step(
-                step=step_event,
-                current_yaw_rad=sensor_data.yaw_rad,
-            )
-            if state.visited_path[-1] != current_node:
+            try:
+                current_node = state.matcher.process_step(
+                    step=step_event,
+                    current_yaw_rad=sensor_data.yaw_rad,
+                )
+            except PositionUndefined as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if not state.visited_path or state.visited_path[-1] != current_node:
                 state.visited_path.append(current_node)
             distance_m = state.matcher.accumulated_distance
         return {
@@ -531,26 +534,34 @@ def delete_route(
 
     return {"status": "success", "message": "Rota removida com sucesso."}
 
-# Modificar reset para aceitar start_node dinâmico
 @app.post("/api/reset")
 def reset_session(
     request: Request,
-    start_node: str = Query(default="Recepcao", max_length=NAME_MAX),
+    start_node: str | None = Query(default=None, max_length=NAME_MAX),
     _test: None = Depends(require_test_routes),
     _editor: None = Depends(require_editor_password),
     session_id: str = Depends(require_session_id),
 ):
-    """Zera o matcher e o caminho desta sessão. As outras ficam como estão."""
-    resolved_start = topo_map.canonical_name(start_node)
-    if resolved_start is None:
-        start_node = next(iter(topo_map.nodes), starting_node)
+    """Zera o matcher desta sessão. Sem nome, a posição fica vazia."""
+    asked = (start_node or "").strip()
+    if not asked:
+        resolved = ""
     else:
-        start_node = resolved_start
-    with hold_session(session_id, request, reset=True, start_node=start_node) as state:
-        started = state.visited_path[0]
+        resolved = topo_map.canonical_name(asked)
+        if resolved is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Checkpoint não encontrado. Informe um ponto que já existe no mapa.",
+            )
+    with hold_session(session_id, request, reset=True, start_node=resolved or None) as state:
+        started = state.visited_path[0] if state.visited_path else None
+    if started:
+        message = f"Posição definida em '{started}'."
+    else:
+        message = "Nenhuma posição definida. Informe o checkpoint ao reiniciar a posição."
     return {
         "status": "success",
-        "message": "Estado do PDR e sensores resetados.",
+        "message": message,
         "start_node": started,
     }
 
@@ -567,11 +578,13 @@ def get_current_location(
     session_id: str = Depends(require_session_id),
 ):
     with hold_session(session_id, request) as state:
+        current = state.matcher.current_node or None
         return {
-            "current_node": state.matcher.current_node,
+            "current_node": current,
             "accumulated_distance_m": state.matcher.accumulated_distance,
             "steps_count": getattr(state.matcher, "steps_count", 0),
             "visited_path": list(state.visited_path),
+            "detail": None if current else "Nenhuma posição definida. Informe o checkpoint ao reiniciar a posição.",
         }
 
 def _checkpoint_meta(raw):

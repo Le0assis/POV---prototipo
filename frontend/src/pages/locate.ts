@@ -90,7 +90,7 @@ async function init() {
         const placed = state.model.checkpoints
             .filter((cp) => cp.anchor)
             .map((cp) => ({ id: cp.name, label: cp.name }));
-        fillSelect($('#loc-start'), placed, 'Checkpoint');
+        fillSelect($('#loc-start'), placed, 'Escolha onde você está');
         fillEdges();
         renderFloorLayers(state.floor, state.model, { editable: false });
         state.floor.fitToContent(contentPixels(state.model));
@@ -224,9 +224,9 @@ function paint() {
     $('#loc-steps').textContent = String(state.steps);
     $('#loc-dist').textContent = formatUserMeters(state.walkedM, 2);
     if (!edge) {
-        $('#loc-node').textContent = '—';
+        $('#loc-node').textContent = 'Nenhuma posição definida';
         $('#loc-error').textContent = '—';
-        $('#loc-edge-label').textContent = 'Nenhuma aresta ativa.';
+        $('#loc-edge-label').textContent = 'Nenhuma posição definida. Escolha o checkpoint para definir onde você está.';
         return;
     }
     $('#loc-edge-label').textContent = edge.label;

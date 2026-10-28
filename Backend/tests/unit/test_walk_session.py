@@ -58,7 +58,7 @@ def test_inactivity_expires_the_session_and_a_touch_renews_it():
         assert state.visited_path[-1] == "marca-a"
     clock.now = 30
     with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
-        assert state.visited_path == ["Recepcao"]
+        assert state.visited_path == []
 
 
 def test_a_full_table_refuses_the_newcomer_and_keeps_the_others():
@@ -99,14 +99,14 @@ def test_one_address_stops_at_eight_and_does_not_evict_another():
     with store.hold("bbbbbbb2", client_ip="203.0.113.2"):
         pass
     with store.hold("aaaaaaa1", client_ip="203.0.113.1", reset=True) as state:
-        assert state.visited_path == ["Recepcao"]
+        assert state.visited_path == []
     with pytest.raises(SessionLimit):
         with store.hold("aaaaaaa1", client_ip="203.0.113.2", reset=True):
             pass
     with store.hold("bbbbbbb1", client_ip="203.0.113.2") as state:
         assert state.visited_path[-1] == "outro"
     with store.hold("aaaaaaa1", client_ip="203.0.113.1") as state:
-        assert state.visited_path == ["Recepcao"]
+        assert state.visited_path == []
     assert len(store) == 4
 
 
@@ -118,12 +118,12 @@ def test_another_ip_does_not_see_the_path_or_renew_the_owner():
         state.visited_path.append("marca-a")
     clock.now = 9
     with store.hold("aaaaaaaa", client_ip="203.0.113.2") as state:
-        assert state.visited_path == ["Recepcao"]
+        assert state.visited_path == []
         state.visited_path.append("intruso")
     assert len(store) == 2
     clock.now = 11
     with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
-        assert state.visited_path == ["Recepcao"]
+        assert state.visited_path == []
     with store.hold("aaaaaaaa", client_ip="203.0.113.2") as state:
         assert state.visited_path[-1] == "intruso"
 
@@ -133,7 +133,7 @@ def test_reset_from_another_ip_does_not_replace_the_owner():
     with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
         state.visited_path.append("fica")
     with store.hold("aaaaaaaa", client_ip="203.0.113.2", reset=True) as state:
-        assert state.visited_path == ["Recepcao"]
+        assert state.visited_path == []
     with store.hold("aaaaaaaa", client_ip="203.0.113.1") as state:
         assert state.visited_path[-1] == "fica"
     assert len(store) == 2
@@ -168,5 +168,5 @@ def test_two_sessions_keep_their_own_matcher_under_threads():
     assert matcher_a is not matcher_b
     assert distance_a == pytest.approx(10.0)
     assert distance_b == pytest.approx(10.0)
-    assert path_a == ["Recepcao", *["sessao-aaaa"] * 40]
-    assert path_b == ["Recepcao", *["sessao-bbbb"] * 40]
+    assert path_a == ["sessao-aaaa"] * 40
+    assert path_b == ["sessao-bbbb"] * 40

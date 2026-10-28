@@ -203,7 +203,9 @@ def test_another_ip_does_not_inherit_the_walk(monkeypatch):
     assert stolen.status_code == 200, stolen.text
     body = stolen.json()
     assert body["accumulated_distance_m"] == pytest.approx(0.0)
-    assert body["visited_path"] == [body["current_node"]]
+    assert body["current_node"] is None
+    assert body["visited_path"] == []
+    assert "Nenhuma posição definida" in body["detail"]
 
     again = _where(owner, session)
     assert again["current_node"] == NODE_A
@@ -246,6 +248,35 @@ def test_trusted_proxy_binds_the_session_to_the_forwarded_client(monkeypatch):
     assert owner.json()["current_node"] == NODE_A
     assert owner.json()["visited_path"] == [NODE_A]
     assert owner.json()["accumulated_distance_m"] == pytest.approx(0.4)
+
+
+def test_reset_without_a_checkpoint_leaves_the_origin_empty():
+    client = TestClient(app)
+    opened = client.get("/api/current_location", headers=_headers(SESSION_A))
+    assert opened.status_code == 200
+    assert opened.json()["current_node"] is None
+    assert opened.json()["visited_path"] == []
+
+    missing = client.post(
+        "/api/reset",
+        params={"start_node": "NaoExiste"},
+        headers=_headers(SESSION_A, editor=True),
+    )
+    assert missing.status_code == 404
+    assert "Checkpoint não encontrado" in missing.json()["detail"]
+
+    cleared = client.post("/api/reset", headers=_headers(SESSION_A, editor=True))
+    assert cleared.status_code == 200
+    assert cleared.json()["start_node"] is None
+    assert "Nenhuma posição definida" in cleared.json()["message"]
+
+    refused = client.post(
+        "/api/localize",
+        json={"step_length_m": 0.4, "yaw_rad": 0.0},
+        headers=_headers(SESSION_A),
+    )
+    assert refused.status_code == 400
+    assert "Nenhuma posição definida" in refused.json()["detail"]
 
 
 def test_missing_or_invalid_session_is_400_and_stores_nothing():
