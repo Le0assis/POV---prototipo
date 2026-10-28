@@ -7,8 +7,9 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
     const compact = document.createElement('button');
     compact.type = 'button';
     compact.className = 'route-compact';
-    compact.textContent = 'Leia um QR para saber onde você está. Nenhuma posição definida.';
-    compact.setAttribute('aria-label', 'Nenhuma posição definida. Leia um QR ou digite o nome do ponto.');
+    const emptyOrigin = 'Nenhuma posição definida. Leia um QR para saber onde você está ou digite o nome do ponto.';
+    compact.textContent = emptyOrigin;
+    compact.setAttribute('aria-label', emptyOrigin);
 
     const expanded = document.createElement('div');
     expanded.className = 'route-expanded';
@@ -144,7 +145,7 @@ export function mountRouteBar(root, { onOrigin, onDestination, onStart } = {} as
             'aria-label',
             hasOrigin
                 ? `Origem: ${current.origin.label} (QR). Toque para ler o QR ou digitar o nome do ponto.`
-                : 'Posição não definida. Toque para ler o QR ou digitar o nome do ponto.'
+                : 'Origem. Posição não definida. Toque para ler o QR ou digitar o nome do ponto.'
         );
         destination.setAttribute(
             'aria-label',
